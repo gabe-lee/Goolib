@@ -138,6 +138,71 @@ const ReturnMode = enum {
     }
 };
 
+pub const QuicksortSettings = struct {
+    /// `34` (32 + 2) = max input len of 2^32 items,
+    /// if you really need more than this you can increase it, each
+    /// additional 1 added doubles the max input len (`35` (33 + 2) = 2^33 max)
+    QUICKSORT_MAX_STACK: u8 = 34,
+    /// Signals to use a different partitioning scheme depending on whether you
+    /// expect the data to have many items with equal order,
+    /// or whether it is rare or impossible to occur
+    SAME_ORDER_EXPECTATIONS: ManySameOrderExpectation = .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY,
+    /// The max size of a partition (sub-slice) to use quicksort.
+    /// Under this length, partitions will intead use insertion sort
+    QUICKSORT_TO_INSERTION_THRESHOLD: comptime_int = 24,
+    /// If the quicksort partition depth exceeds `DEGENERATE_DETECTION_FACTOR * log2(input_len)`,
+    /// it likely has a degenerate state (approaching worst case scenario).
+    /// Switch to insertion sort (if small total input) or heapsort instead,
+    ///
+    /// If the total input len is <= `FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN` (default 128)
+    /// it falls back to insertion sort (lower overhead than heapsort, especially when quicksort has already
+    /// partially sorted the data to some degree)
+    ///
+    /// Otherwise, fallback to heapsort
+    FALLBACK_WHEN_DEGENERATE: bool = true,
+    /// When degenerate fallback is enable, this value controls how degenerate
+    /// the input needs to be before the fallback is triggered:
+    ///
+    /// ```zig
+    /// const MAX_PARTITION_DEPTH = DEGENERATE_DETECTION_FACTOR * log2(input_len);
+    /// ```
+    DEGENERATE_DETECTION_FACTOR: comptime_int = 2,
+    /// When the quicksort depth is more than twice the expected average depth (`DEGENERATE_DETECTION_FACTOR * log2(input_len)`),
+    /// if the total input len is less than this value it will
+    /// fallback to insertion sort on the entire input
+    /// (already partially sorted, lower overhead than heapsort for small lists)
+    ///
+    /// Otherwise fallback to heapsort.
+    FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN: comptime_int = 128,
+    /// When using partition mode `.DYNAMIC_BASED_ON_SAME_ORDER_DENSITY`, this is
+    /// a percent threshold equal to `num_items_same_order_as_pivot / length_of_partition`,
+    /// above which a counter of `partitions_ith_many_dupes` is incremented.
+    ///
+    /// When that counter exceeds a threshold, the partition mode permanently swaps
+    /// to the 3-way scheme
+    DYNAMIC_PARTITION_SWAP_TO_3_WAY_THRESHOLD: f32 = 0.33,
+    /// When using partition mode `.DYNAMIC_BASED_ON_SAME_ORDER_DENSITY`, this is
+    /// the number of times a partion with a high number of items with
+    /// an equal order to the pivot are allowed before the partition mode
+    /// permanently swaps to the 3-way scheme
+    DYNAMIC_PARTITION_SWAP_TO_3_WAY_MAX_COUNT: comptime_int = 3,
+};
+
+pub const ManySameOrderExpectation = enum(u8) {
+    /// Starts with normal 2-way partition mode, but if
+    /// many items with the same order are detected
+    /// it swaps to the 3-way partition mode
+    DYNAMIC_BASED_ON_SAME_ORDER_DENSITY,
+    /// Same as `.USE_DUTCH_FLAG_3_WAY_PARTITION`
+    MANY_ITEMS_WITH_SAME_ORDER_LIKELY,
+    /// Same as `.MANY_ITEMS_WITH_SAME_ORDER_LIKELY`
+    USE_DUTCH_FLAG_3_WAY_PARTITION,
+    /// Same as `.USE_HOARE_2_WAY_PARTITION`
+    MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE,
+    /// Same as `.MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE`
+    USE_HOARE_2_WAY_PARTITION,
+};
+
 pub const ListDef = struct {
     ELEM: type,
     IDX: type,
@@ -383,6 +448,10 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         fn assert_mutable(comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(IS_MUTABLE, src, "pointer is not mutable", .{});
+        }
+        fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, data_len: IDX, comptime src: ?std.builtin.SourceLocation) void {
+            const needed_stack_len: u8 = @intCast(std.math.log2_int(IDX, data_len) + 2);
+            assert_with_reason(SETTINGS.QUICKSORT_MAX_STACK >= needed_stack_len, src, "the provided `.QUICKSORT_MAX_STACK` setting ({d}) is too small, need stack len {d} for given the data len {d}", .{ SETTINGS.QUICKSORT_MAX_STACK, needed_stack_len, data_len });
         }
         fn assert_goolib_list(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
             assert_with_reason(@hasDecl(T, "GOOLIB_LIST_DEF"), src, "type is not a Goolib List, got type `{s}`", .{@typeName(T)});
@@ -1368,6 +1437,14 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self.assert_valid_idx(idx_b, @src());
             self.swap_true_idx(self.true_idx(idx_a), self.true_idx(idx_b));
         }
+        pub fn swap_already_have_b(self: Self, idx_a: IDX, idx_b: IDX, val_b: ELEM) void {
+            self.assert_valid_idx(idx_a, @src());
+            self.assert_valid_idx(idx_b, @src());
+            const tidx_a = self.true_idx(idx_a);
+            const tidx_b = self.true_idx(idx_b);
+            self.move_one_overwrite_true_idx(tidx_a, tidx_b);
+            self.set_true_idx(tidx_a, val_b);
+        }
         //****************
         // SHUFFLE
         //****************
@@ -1908,6 +1985,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub inline fn append_many(self: *Self, vals_: anytype, alloc: Allocator) void {
             return self.append_many_internal(vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
+
         //*************
         // PREPEND ONE
         //*************
@@ -2766,7 +2844,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn local_tree__last_child_idx_if_exists(self: Self, idx: IDX, max_num_children_per_element: IDX) ?IDX {
             return self.local_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, max_num_children_per_element - 1);
         }
-        pub fn median_index_and_elem_of_3_indexes(self: Self, idxs_: [3]IDX) IdxElemPair {
+        pub fn median_index_of_3_indexes_with_elem(self: Self, idxs_: [3]IDX) IdxElemPair {
             var idxs = idxs_;
             var tmp: IDX = undefined;
             if (idxs[1] < idxs[0]) {
@@ -2785,7 +2863,30 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return .{ idxs[1], self.get(1) };
         }
 
-        fn heap_sift_down_with_range_internal(
+        fn build_heap_within_range_internal(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_last_idx_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            const heap_len = heap_last_idx_exclusive - heap_first_idx;
+            if (heap_len < 2) return;
+            const position_of_first_elem_with_no_children = heap_len >> 1;
+            var curr_parent_idx = heap_first_idx + position_of_first_elem_with_no_children;
+            while (curr_parent_idx > heap_first_idx) {
+                curr_parent_idx -= 1;
+                self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, curr_parent_idx, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
+            }
+        }
+
+        fn heap_sift_down_within_range_internal(
             self: Self,
             heap_first_idx: IDX,
             heap_len: IDX,
@@ -2793,13 +2894,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
-            self.assert_valid_range_3(heap_first_idx, idx, heap_first_idx + heap_len, @src());
             var hole_idx: IDX = idx;
             var hole_n: IDX = idx - heap_first_idx;
             const target_val = self.get(idx);
@@ -2810,12 +2910,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 const right_child_n = highest_child_n + 1;
                 if (right_child_n < heap_len) {
                     const right_child_idx = highest_child_idx + 1;
-                    if (self.eval_compare_idx_idx(right_child_idx, highest_child_idx, COMPARE_IDX_IDX_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_idx, HIGHER_IN_HEAP_IDX)) {
+                    if (self.eval_compare_idx_idx(right_child_idx, highest_child_idx, COMPARE_IDX_IDX_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX)) {
                         highest_child_n = right_child_n;
                         highest_child_idx = right_child_idx;
                     }
                 }
-                if (!self.eval_compare_idx_val(highest_child_idx, target_val, COMPARE_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_val, HIGHER_IN_HEAP_VAL)) {
+                if (!self.eval_compare_idx_val(highest_child_idx, target_val, COMPARE_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL)) {
                     break;
                 }
                 self.move_one_overwrite(highest_child_idx, hole_idx);
@@ -2823,6 +2923,1052 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 hole_n = highest_child_n;
             }
             self.set(hole_idx, target_val);
+        }
+        pub inline fn heap_sift_down_within_range_avanced(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_len: IDX,
+            idx: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, idx, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
+        }
+        pub inline fn heap_sift_down_avanced(
+            self: Self,
+            idx: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.heap_sift_down_within_range_internal(0, self.get_len(), idx, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
+        }
+        pub inline fn heap_sift_down_within_range(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_len: IDX,
+            idx: IDX,
+            higher_in_heap_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            higher_in_heap_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, idx, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+        }
+        pub inline fn heap_sift_down(
+            self: Self,
+            idx: IDX,
+            higher_in_heap_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            higher_in_heap_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.heap_sift_down_within_range_internal(0, self.get_len(), idx, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+        }
+        // TODO more heap operations
+
+        pub inline fn build_heap_within_range_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.assert_valid_range(start, end_excluded, @src());
+            if (start == end_excluded) return;
+            self.build_heap_within_range_internal(start, end_excluded, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
+        }
+
+        pub inline fn build_heap_advanced(
+            self: Self,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            if (self.get_len() < 2) return;
+            self.build_heap_within_range_internal(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
+        }
+
+        pub inline fn build_heap_within_range(
+            self: Self,
+            start: IDX,
+            end_excluded: IDX,
+            higher_in_heap_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            higher_in_heap_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.assert_valid_range(start, end_excluded, @src());
+            if (start == end_excluded) return;
+            self.build_heap_within_range_internal(start, end_excluded, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+        }
+
+        pub inline fn build_heap(
+            self: Self,
+            higher_in_heap_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            higher_in_heap_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            if (self.get_len() < 2) return;
+            self.build_heap_within_range_internal(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+        }
+
+        fn is_range_a_valid_heap_internal(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_last_idx_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) bool {
+            const heap_len = heap_last_idx_exclusive - heap_first_idx;
+            if (heap_len < 2) return true;
+            var child_n: IDX = 1;
+            while (child_n < heap_len) : (child_n += 1) {
+                const parent_n = (child_n - 1) >> 1;
+                const child_idx = heap_first_idx + child_n;
+                const parent_idx = heap_first_idx + parent_n;
+                if (self.eval_compare_idx_idx(child_idx, parent_idx, COMPARE_IDX_IDX_FN_KIND, compare_ctx, COMPARE_CTX, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        pub fn is_range_a_valid_heap_advanced(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_last_idx_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) bool {
+            self.assert_valid_range(heap_first_idx, heap_last_idx_exclusive, @src());
+            return self.is_range_a_valid_heap_internal(heap_first_idx, heap_last_idx_exclusive, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX);
+        }
+        pub fn is_a_valid_heap_advanced(
+            self: Self,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) bool {
+            return self.is_range_a_valid_heap_internal(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX);
+        }
+        pub fn is_range_a_valid_heap(
+            self: Self,
+            heap_first_idx: IDX,
+            heap_last_idx_exclusive: IDX,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+        ) bool {
+            self.assert_valid_range(heap_first_idx, heap_last_idx_exclusive, @src());
+            return self.is_range_a_valid_heap_internal(heap_first_idx, heap_last_idx_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+        }
+        pub fn is_a_valid_heap(
+            self: Self,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+        ) bool {
+            return self.is_range_a_valid_heap_internal(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+        }
+
+        pub fn is_range_sorted_advanced(
+            self: Self,
+            start: IDX,
+            end_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) bool {
+            self.assert_valid_range(start, end_exclusive, @src());
+            const len = end_exclusive - start;
+            if (len < 2) return true;
+            var left_idx = start;
+            var right_idx = left_idx + 1;
+            while (true) {
+                if (self.eval_compare_idx_idx(
+                    left_idx,
+                    right_idx,
+                    GREATER_IDX_IDX_FN_KIND,
+                    compare_ctx,
+                    COMPARE_CTX,
+                    greater_than_idx_idx,
+                    GREATER_THAN_IDX_IDX,
+                )) return false;
+                left_idx += 1;
+                right_idx += 1;
+                if (right_idx >= end_exclusive) return true;
+            }
+        }
+
+        pub inline fn is_sorted_advanced(
+            self: Self,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) bool {
+            self.is_range_sorted_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, GREATER_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX);
+        }
+
+        pub inline fn is_sorted(
+            self: Self,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+        ) bool {
+            self.is_range_sorted_advanced(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+        }
+        
+        pub inline fn is_range_sorted(
+            self: Self,
+            start: IDX,
+            end_exclusive: IDX,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+        ) bool {
+            self.is_range_sorted_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+        }
+
+        /// Builds a max-heap out of the given data range using the provided 'greater-than' comparisons,
+        /// then iteratively removes the max value from the heap, and re-heapifies the remaining elements
+        ///
+        /// Stable:
+        ///   - NO
+        ///
+        /// Cache Locality:
+        ///   - Poor
+        ///
+        /// Initialization Overhead:
+        ///   - Medium
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Always = O(n log n)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub fn heapsort_range_advanced(
+            self: Self,
+            start: IDX,
+            end_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.assert_valid_range(start, end_exclusive, @src());
+            var heap_len = end_exclusive - start;
+            if (heap_len < 2) return;
+            self.build_heap_within_range_internal(start, end_exclusive, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
+            var heap_last_idx = end_exclusive - 1;
+            while (heap_len > 2) {
+                self.swap(start, heap_last_idx);
+                heap_last_idx -= 1;
+                heap_len -= 1;
+                self.heap_sift_down_within_range_internal(start, heap_len, start, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
+            }
+            self.swap(start, start + 1);
+        }
+
+        /// Builds a max-heap from the entire data slice using the provided 'greater-than' comparisons,
+        /// then iteratively removes the max value from the heap, and re-heapifies the remaining elements
+        ///
+        /// Stable:
+        ///   - NO
+        ///
+        /// Cache Locality:
+        ///   - Poor
+        ///
+        /// Initialization Overhead:
+        ///   - Medium
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Always = O(n log n)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub inline fn heapsort_advanced(
+            self: Self,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.heapsort_range_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
+        }
+        /// Builds a max-heap out of the given data range using the provided 'greater-than' comparisons,
+        /// then iteratively removes the max value from the heap, and re-heapifies the remaining elements
+        ///
+        /// Stable:
+        ///   - NO
+        ///
+        /// Cache Locality:
+        ///   - Poor
+        ///
+        /// Initialization Overhead:
+        ///   - Medium
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Always = O(n log n)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub fn heapsort_range(
+            self: Self,
+            start: IDX,
+            end_exclusive: IDX,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            greater_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.heapsort_range_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+        }
+
+        /// Builds a max-heap from the entire data slice using the provided 'greater-than' comparisons,
+        /// then iteratively removes the max value from the heap, and re-heapifies the remaining elements
+        ///
+        /// Stable:
+        ///   - NO
+        ///
+        /// Cache Locality:
+        ///   - Poor
+        ///
+        /// Initialization Overhead:
+        ///   - Medium
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Always = O(n log n)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub inline fn heapsort(
+            self: Self,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            greater_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.heapsort_advanced(void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+        }
+
+        /// Filters smaller ordered items down until they find an index where they would be
+        /// in the correct order. Simple, stable, and very fast for fully-sorted or nearly-sorted lists, and for small
+        /// lists.
+        ///
+        /// Stable:
+        ///   - YES
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - None
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n) (already sorted)
+        ///   - Average = O(n^2)
+        ///   - Worst   = O(n^2)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub fn insertion_sort_range_advanced(
+            self: Self,
+            start: IDX,
+            end_exclusive: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.assert_valid_range(start, end_exclusive, @src());
+            const len = end_exclusive - start;
+            if (len < 2) return;
+            var idx_to_sort: IDX = start + 1;
+            var idx_right: IDX = undefined;
+            var idx_left: IDX = undefined;
+            var val_to_sort: ELEM = undefined;
+            while (true) {
+                val_to_sort = self.get(idx_to_sort);
+                idx_right = idx_to_sort;
+                inner: while (true) {
+                    idx_left = idx_right - 1;
+                    if (self.eval_compare_idx_val(idx_left, val_to_sort, COMPARE_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, greater_than_idx_val, GREATER_THAN_IDX_VAL)) {
+                        self.move_one_overwrite(idx_left, idx_right);
+                        idx_right = idx_left;
+                    } else {
+                        break :inner;
+                    }
+                    if (idx_left == start) {
+                        break :inner;
+                    }
+                }
+                if (idx_right != idx_to_sort) {
+                    self.set(idx_right, val_to_sort);
+                }
+                idx_to_sort += 1;
+                if (idx_to_sort == end_exclusive) {
+                    return;
+                }
+            }
+        }
+
+        /// Filters smaller ordered items down until they find an index where they would be
+        /// in the correct order. Simple, stable, and very fast for fully-sorted or nearly-sorted lists, and for small
+        /// lists.
+        ///
+        /// Stable:
+        ///   - YES
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - None
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n) (already sorted)
+        ///   - Average = O(n^2)
+        ///   - Worst   = O(n^2)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub inline fn insertion_sort_advanced(
+            self: Self,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.insertion_sort_range_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
+        }
+
+        /// Filters smaller ordered items down until they find an index where they would be
+        /// in the correct order. Simple, stable, and very fast for fully-sorted or nearly-sorted lists, and for small
+        /// lists.
+        ///
+        /// Stable:
+        ///   - YES
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - None
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n) (already sorted)
+        ///   - Average = O(n^2)
+        ///   - Worst   = O(n^2)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub inline fn insertion_sort_range(self: Self, start: IDX, end_exclusive: IDX, greater_than_idx_val: *const fn (Self, IDX, ELEM) bool) void {
+            self.insertion_sort_range_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+        }
+
+        /// Filters smaller ordered items down until they find an index where they would be
+        /// in the correct order. Simple, stable, and very fast for fully-sorted or nearly-sorted lists, and for small
+        /// lists.
+        ///
+        /// Stable:
+        ///   - YES
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - None
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n) (already sorted)
+        ///   - Average = O(n^2)
+        ///   - Worst   = O(n^2)
+        ///
+        /// Space:
+        ///   - O(1)
+        pub inline fn insertion_sort(self: Self, greater_than_idx_val: *const fn (Self, IDX, ELEM) bool) void {
+            self.insertion_sort_range_advanced(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+        }
+
+        const PartitionResult = struct {
+            sub_partition_left_hi: IDX,
+            sub_partition_right_lo: IDX,
+        };
+
+        pub fn QuicksortPartition(comptime DEGENERATE_FALLBACK: bool) type {
+            return struct {
+                lo_idx: IDX,
+                hi_idx: IDX,
+                budget: if (DEGENERATE_FALLBACK) IDX else void = if (DEGENERATE_FALLBACK) undefined else void{},
+
+                pub fn new(lo: IDX, hi: IDX, budget: IDX) @This() {
+                    var this = @This(){
+                        .lo_idx = lo,
+                        .hi_idx = hi,
+                    };
+                    if (DEGENERATE_FALLBACK) {
+                        this.budget = budget;
+                    }
+                    return this;
+                }
+
+                pub inline fn empty(partition: @This()) bool {
+                    return partition.lo_idx > partition.hi_idx;
+                }
+
+                pub inline fn len(partition: @This()) IDX {
+                    return (partition.hi_idx + 1) - partition.lo_idx;
+                }
+            };
+        }
+
+        fn sort_partition_median_of_3(self: Self, first: IDX, last: IDX) IdxElemPair {
+            const len = (last + 1) - first;
+            const mid = first + (len >> 1);
+            const unsorted_idxs = [3]IDX{ first, mid, last };
+            return self.median_index_of_3_indexes_with_elem(unsorted_idxs);
+        }
+
+        fn sort_partition_hoare(
+            self: Self,
+            first: IDX,
+            last: IDX,
+            comptime COUNT_PIVOT_DUPES: bool,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
+            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) if (COUNT_PIVOT_DUPES) struct { PartitionResult, IDX } else PartitionResult {
+            const median_idx, const pivot_elem = self.sort_partition_median_of_3(first, last);
+            self.swap_already_have_b(first, median_idx, pivot_elem);
+            var left_idx = first;
+            var right_idx = last;
+            var pivot_dupes: if (COUNT_PIVOT_DUPES) IDX else void = if (COUNT_PIVOT_DUPES) 0 else {};
+            while (true) {
+                while (self.eval_compare_idx_val(left_idx, pivot_elem, LESSER_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, less_than_idx_val, LESS_THAN_IDX_VAL)) {
+                    left_idx += 1;
+                }
+                if (comptime COUNT_PIVOT_DUPES) {
+                    const is_dupe = self.eval_compare_idx_val(left_idx, pivot_elem, EQUAL_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, equal_idx_val, EQUAL_IDX_VAL);
+                    pivot_dupes += @as(IDX, @intCast(@intFromBool(is_dupe)));
+                }
+                while (self.eval_compare_idx_val(right_idx, pivot_elem, GREATER_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, greater_than_idx_val, GREATER_THAN_IDX_VAL)) {
+                    right_idx -= 1;
+                }
+                if (comptime COUNT_PIVOT_DUPES) {
+                    const is_dupe = self.eval_compare_idx_val(right_idx, pivot_elem, EQUAL_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, equal_idx_val, EQUAL_IDX_VAL);
+                    pivot_dupes += @as(IDX, @intCast(@intFromBool(is_dupe)));
+                }
+                if (left_idx >= right_idx) break;
+                self.swap(left_idx, right_idx);
+                left_idx += 1;
+                right_idx -= 1;
+            }
+            if (comptime COUNT_PIVOT_DUPES) {
+                return .{
+                    PartitionResult{
+                        .sub_partition_left_hi = right_idx,
+                        .sub_partition_right_lo = right_idx + 1,
+                    },
+                    pivot_dupes,
+                };
+            } else {
+                return PartitionResult{
+                    .sub_partition_left_hi = right_idx,
+                    .sub_partition_right_lo = right_idx + 1,
+                };
+            }
+        }
+
+        fn quicksort_partition_dutch_flag(
+            self: Self,
+            first: IDX,
+            last: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) PartitionResult {
+            const median_idx, const pivot_elem = self.sort_partition_median_of_3(first, last);
+            self.swap_already_have_b(first, median_idx, pivot_elem);
+            var smallest_idx_with_same_order_as_pivot = first;
+            var check_idx = first;
+            var largest_idx_with_same_order_as_pivot = last;
+            while (check_idx <= largest_idx_with_same_order_as_pivot) {
+                if (self.eval_compare_idx_val(check_idx, pivot_elem, LESSER_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, less_than_idx_val, LESS_THAN_IDX_VAL)) {
+                    self.swap(smallest_idx_with_same_order_as_pivot, check_idx);
+                    smallest_idx_with_same_order_as_pivot += 1;
+                    check_idx += 1;
+                } else if (self.eval_compare_idx_val(check_idx, pivot_elem, GREATER_IDX_VAL_FN_KIND, compare_ctx, COMPARE_CTX, greater_than_idx_val, GREATER_THAN_IDX_VAL)) {
+                    self.swap(largest_idx_with_same_order_as_pivot, check_idx);
+                    largest_idx_with_same_order_as_pivot -= 1;
+                } else {
+                    check_idx += 1;
+                }
+            }
+            return PartitionResult{
+                .sub_partition_left_hi = smallest_idx_with_same_order_as_pivot - @as(IDX, @intCast(@intFromBool(smallest_idx_with_same_order_as_pivot > first))),
+                .sub_partition_right_lo = largest_idx_with_same_order_as_pivot + 1,
+            };
+        }
+
+        /// Quicksort using a number of optimizations (similar to Introsort):
+        ///   - Use Insertion Sort when partitions become small
+        ///   - Median-of-three pivot (not random, always first, middle, last)
+        ///   - User can choose a partition scheme based on stated expectations about items with equal order
+        ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
+        ///     - Many items same order unlikely = 2-way Hoare scheme
+        ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
+        ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
+        ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
+        ///
+        /// Stable:
+        ///   - No
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - Low
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n log n)
+        ///   - Average = O(n log n)
+        ///   - Worst:
+        ///     - With fallback enabled = (heapsort init overhead) + O(n log n)
+        ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
+        ///
+        /// Space:
+        ///   - O(log n) (implemented as a stack-allocated array)
+        pub fn quicksort_range_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: IDX,
+            comptime SETTINGS: QuicksortSettings,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
+            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.assert_valid_range(start, end_excluded);
+            const len = end_excluded - start;
+            if (len < 2) return;
+            const last = end_excluded - 1;
+            assert_stack_can_support_sort_len(SETTINGS, len, @src());
+            const Partition = QuicksortPartition(SETTINGS.FALLBACK_WHEN_DEGENERATE);
+            const degenerate_limit: IDX = if (comptime SETTINGS.FALLBACK_WHEN_DEGENERATE) (SETTINGS.DEGENERATE_DETECTION_FACTOR * @as(IDX, @intCast(math.log2_int(IDX, len)))) else math.maxInt(IDX);
+            var stack: [SETTINGS.QUICKSORT_MAX_STACK]Partition = undefined;
+            stack[0] = Partition.new(start, last, degenerate_limit);
+            var stack_len: u8 = 1;
+            var force_3_way = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) false else void{};
+            var force_3_way_counter = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) @as(IDX, 0) else void{};
+            next_partition: while (stack_len > 0) {
+                stack_len -= 1;
+                const part = stack[stack_len];
+                if (SETTINGS.FALLBACK_WHEN_DEGENERATE and part.budget <= 0) {
+                    if (len <= SETTINGS.FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN) {
+                        return self.insertion_sort_range_advanced(
+                            start,
+                            end_excluded,
+                            compare_ctx,
+                            COMPARE_CTX,
+                            GREATER_IDX_VAL_FN_KIND,
+                            greater_than_idx_val,
+                            GREATER_THAN_IDX_VAL,
+                        );
+                    } else {
+                        return self.heapsort_range_advanced(
+                            start,
+                            end_excluded,
+                            compare_ctx,
+                            COMPARE_CTX,
+                            GREATER_IDX_IDX_FN_KIND,
+                            greater_than_idx_idx,
+                            GREATER_THAN_IDX_IDX,
+                            GREATER_IDX_VAL_FN_KIND,
+                            greater_than_idx_val,
+                            GREATER_THAN_IDX_VAL,
+                        );
+                    }
+                }
+                assert_with_reason(!part.empty(), @src(), "it should be impossible to have an empty partition here", .{});
+                if (part.len() <= SETTINGS.QUICKSORT_TO_INSERTION_THRESHOLD) {
+                    self.insertion_sort_range(
+                        part.lo_idx,
+                        part.hi_idx + 1,
+                        compare_ctx,
+                        COMPARE_CTX,
+                        GREATER_IDX_VAL_FN_KIND,
+                        greater_than_idx_val,
+                        GREATER_THAN_IDX_VAL,
+                    );
+                    continue :next_partition;
+                }
+                const partition_result = switch (comptime SETTINGS.SAME_ORDER_EXPECTATIONS) {
+                    .MANY_ITEMS_WITH_SAME_ORDER_LIKELY, .USE_DUTCH_FLAG_3_WAY_PARTITION => quicksort_partition_dutch_flag(
+                        self,
+                        part.lo_idx,
+                        part.hi_idx,
+                        compare_ctx,
+                        COMPARE_CTX,
+                        LESSER_IDX_VAL_FN_KIND,
+                        less_than_idx_val,
+                        LESS_THAN_IDX_VAL,
+                        GREATER_IDX_VAL_FN_KIND,
+                        greater_than_idx_val,
+                        GREATER_THAN_IDX_VAL,
+                    ),
+                    .MANY_ITEMS_WITH_SAME_ORDER_RARE_OR_IMPOSSIBLE, .USE_HOARE_2_WAY_PARTITION => sort_partition_hoare(
+                        self,
+                        part.lo_idx,
+                        part.hi_idx,
+                        false,
+                        compare_ctx,
+                        COMPARE_CTX,
+                        LESSER_IDX_VAL_FN_KIND,
+                        less_than_idx_val,
+                        LESS_THAN_IDX_VAL,
+                        GREATER_IDX_VAL_FN_KIND,
+                        greater_than_idx_val,
+                        GREATER_THAN_IDX_VAL,
+                        EQUAL_IDX_VAL_FN_KIND,
+                        equal_idx_val,
+                        EQUAL_IDX_VAL,
+                    ),
+                    .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY => blk: {
+                        if (force_3_way) {
+                            break :blk quicksort_partition_dutch_flag(
+                                self,
+                                part.lo_idx,
+                                part.hi_idx,
+                                compare_ctx,
+                                COMPARE_CTX,
+                                LESSER_IDX_VAL_FN_KIND,
+                                less_than_idx_val,
+                                LESS_THAN_IDX_VAL,
+                                GREATER_IDX_VAL_FN_KIND,
+                                greater_than_idx_val,
+                                GREATER_THAN_IDX_VAL,
+                            );
+                        } else {
+                            const partition, const dupes = sort_partition_hoare(
+                                self,
+                                part.lo_idx,
+                                part.hi_idx,
+                                true,
+                                compare_ctx,
+                                COMPARE_CTX,
+                                LESSER_IDX_VAL_FN_KIND,
+                                less_than_idx_val,
+                                LESS_THAN_IDX_VAL,
+                                GREATER_IDX_VAL_FN_KIND,
+                                greater_than_idx_val,
+                                GREATER_THAN_IDX_VAL,
+                                EQUAL_IDX_VAL_FN_KIND,
+                                equal_idx_val,
+                                EQUAL_IDX_VAL,
+                            );
+                            const parent_len_float: f32 = @floatFromInt(part.len());
+                            const dupes_float: f32 = @floatFromInt(dupes);
+                            const density = dupes_float / parent_len_float;
+                            if (density >= SETTINGS.DYNAMIC_PARTITION_SWAP_TO_3_WAY_THRESHOLD) {
+                                force_3_way_counter += 1;
+                                if (force_3_way_counter > SETTINGS.DYNAMIC_PARTITION_SWAP_TO_3_WAY_MAX_COUNT) {
+                                    force_3_way = true;
+                                }
+                            }
+                            break :blk partition;
+                        }
+                    },
+                };
+                const left_partition = Partition.new(part.lo_idx, partition_result.sub_partition_left_hi, if (SETTINGS.FALLBACK_WHEN_DEGENERATE) part.budget - 1 else 0);
+                const right_partition = Partition.new(partition_result.sub_partition_right_lo, part.hi_idx, if (SETTINGS.FALLBACK_WHEN_DEGENERATE) part.budget - 1 else 0);
+                const left_len = left_partition.len();
+                const right_len = right_partition.len();
+                const left_empty: u8 = @intCast(@intFromBool(left_len == 0));
+                const right_empty: u8 = @intCast(@intFromBool(right_len == 0));
+                const larger_partition, const larger_empty, const smaller_partition, const smaller_empty = if (left_len < right_len) .{
+                    right_partition,
+                    right_empty,
+                    left_partition,
+                    left_empty,
+                } else .{
+                    left_partition,
+                    left_empty,
+                    right_partition,
+                    right_empty,
+                };
+                // add partitions larger first, smaller second,
+                // and use the `larger_empty` and `smaller_empty` vars
+                // to cull empty partitions. This ensures a stack of
+                // size `log2(len) + 2` is always large enough
+                stack[stack_len] = larger_partition;
+                stack_len = stack_len + 1 - larger_empty;
+                stack[stack_len] = smaller_partition;
+                stack_len = stack_len + 1 - smaller_empty;
+            }
+        }
+        /// Quicksort using a number of optimizations (similar to Introsort):
+        ///   - Use Insertion Sort when partitions become small
+        ///   - Median-of-three pivot (not random, always first, middle, last)
+        ///   - User can choose a partition scheme based on stated expectations about items with equal order
+        ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
+        ///     - Many items same order unlikely = 2-way Hoare scheme
+        ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
+        ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
+        ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
+        ///
+        /// Stable:
+        ///   - No
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - Low
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n log n)
+        ///   - Average = O(n log n)
+        ///   - Worst:
+        ///     - With fallback enabled = (heapsort init overhead) + O(n log n)
+        ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
+        ///
+        /// Space:
+        ///   - O(log n) (implemented as a stack-allocated array)
+        pub fn quicksort_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: IDX,
+            comptime SETTINGS: QuicksortSettings,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
+            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
+            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
+            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) void {
+            self.quicksort_range_advanced(
+                start,
+                end_excluded,
+                SETTINGS,
+                compare_ctx,
+                COMPARE_CTX,
+                LESSER_IDX_VAL_FN_KIND,
+                less_than_idx_val,
+                LESS_THAN_IDX_VAL,
+                GREATER_IDX_IDX_FN_KIND,
+                greater_than_idx_idx,
+                GREATER_THAN_IDX_IDX,
+                GREATER_IDX_VAL_FN_KIND,
+                greater_than_idx_val,
+                GREATER_THAN_IDX_VAL,
+                EQUAL_IDX_VAL_FN_KIND,
+                equal_idx_val,
+                EQUAL_IDX_VAL,
+            );
+        }
+        /// Quicksort using a number of optimizations (similar to Introsort):
+        ///   - Use Insertion Sort when partitions become small
+        ///   - Median-of-three pivot (not random, always first, middle, last)
+        ///   - User can choose a partition scheme based on stated expectations about items with equal order
+        ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
+        ///     - Many items same order unlikely = 2-way Hoare scheme
+        ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
+        ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
+        ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
+        ///
+        /// Stable:
+        ///   - No
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - Low
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n log n)
+        ///   - Average = O(n log n)
+        ///   - Worst:
+        ///     - With fallback enabled = (heapsort init overhead) + O(n log n)
+        ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
+        ///
+        /// Space:
+        ///   - O(log n) (implemented as a stack-allocated array)
+        pub fn quicksort_range(
+            self: Self,
+            start: IDX,
+            end_excluded: IDX,
+            less_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            greater_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+            equal_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.quicksort_range_advanced(
+                start,
+                end_excluded,
+                .{},
+                void{},
+                void{},
+                .RUNTIME_FN_PTR,
+                less_than_idx_val,
+                void{},
+                .RUNTIME_FN_PTR,
+                greater_than_idx_idx,
+                void{},
+                .RUNTIME_FN_PTR,
+                greater_than_idx_val,
+                void{},
+                .RUNTIME_FN_PTR,
+                equal_idx_val,
+                void{},
+            );
+        }
+        /// Quicksort using a number of optimizations (similar to Introsort):
+        ///   - Use Insertion Sort when partitions become small
+        ///   - Median-of-three pivot (not random, always first, middle, last)
+        ///   - User can choose a partition scheme based on stated expectations about items with equal order
+        ///     - Unknown likelyhood of equal order items = Start with 2-way, but if many duplicates are detected change to 3-way
+        ///     - Many items same order unlikely = 2-way Hoare scheme
+        ///     - Many items same order likely = 3-way 'Dutch National Flag' scheme
+        ///   - No recursion, only a comptime sized stack of partition index ranges and a while loop
+        ///   - (Optional) Fallback to Heapsort/Insertion sort if partition degeneracy detected (more than N x the average partition depth)
+        ///
+        /// Stable:
+        ///   - No
+        ///
+        /// Cache Locality:
+        ///   - Great
+        ///
+        /// Initialization Overhead:
+        ///   - Low
+        ///
+        /// Per-Step Overhead:
+        ///   - Low
+        ///
+        /// Time:
+        ///   - Best    = O(n log n)
+        ///   - Average = O(n log n)
+        ///   - Worst:
+        ///     - With fallback enabled = (heapsort init overhead) + O(n log n)
+        ///     - No fallback enabled   = O(n^2) (fully/nearly sorted or adversarial input)
+        ///
+        /// Space:
+        ///   - O(log n) (implemented as a stack-allocated array)
+        pub fn quicksort(
+            self: Self,
+            less_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+            greater_than_idx_idx: *const fn (Self, IDX, IDX, void, void) bool,
+            greater_than_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+            equal_idx_val: *const fn (Self, IDX, ELEM, void, void) bool,
+        ) void {
+            self.quicksort_range_advanced(
+                0,
+                self.get_len(),
+                .{},
+                void{},
+                void{},
+                .RUNTIME_FN_PTR,
+                less_than_idx_val,
+                void{},
+                .RUNTIME_FN_PTR,
+                greater_than_idx_idx,
+                void{},
+                .RUNTIME_FN_PTR,
+                greater_than_idx_val,
+                void{},
+                .RUNTIME_FN_PTR,
+                equal_idx_val,
+                void{},
+            );
         }
     };
 }
