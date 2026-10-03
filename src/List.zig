@@ -43,6 +43,8 @@ const Random = std.Random;
 const Io = std.Io;
 const Growth = Common.GrowthModel;
 const FuncParamType = Common.FuncParamType;
+const ErrorBehavior = Common.ErrorBehavior;
+const AllocErr = Utils.Alloc.AllocErr;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
@@ -1011,6 +1013,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub inline fn incr_len_unchecked(self: *Self, count: IDX) void {
             self.data_len += count;
         }
+        pub inline fn incr_len_to_cap(self: *Self) void {
+            self.data_len = self.get_cap();
+        }
         pub inline fn set_len_clamped(self: *Self, new_len: IDX) void {
             self.data_len = @min(new_len, self.get_cap());
         }
@@ -1668,7 +1673,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //**************
         // ALLOC/REALLOC
         //**************
-        fn realloc_internal(self: *Self, new_exact_cap: IDX, alloc: Allocator) void {
+        fn realloc_internal(self: *Self, new_exact_cap: IDX, alloc: Allocator, comptime ERRORS: ErrorBehavior) ERRORS.PayloadVoid(Utils.Alloc.AllocErr) {
             assert_owned_allocated(@src());
             self.data_len = @min(self.data_len, new_exact_cap);
             switch (comptime FIELD_LAYOUT) {
@@ -1680,7 +1685,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                             return;
                         }
                     }
-                    const new_mem = alloc.alloc(ELEM, new_exact_cap) catch |e| assert_unreachable_err(@src(), e);
+                    const new_mem = alloc.alloc(ELEM, new_exact_cap) catch |e| return ERRORS.handle(@src(), e);
                     if (self.data_len > 0) {
                         @memcpy(new_mem[0..self.data_len], self.root_ptr[0..self.data_len]);
                     }
@@ -1695,7 +1700,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                     const new_byte_cap = end_stride() * new_exact_cap;
                     // remap would require doing a @memmove on each field region to correctly reposition them,
                     // so might as well just alloc and go for the potentially faster @memcpy
-                    const new_mem = alloc.alignedAlloc(u8, .fromByteUnits(@alignOf(ELEM)), new_byte_cap) catch |e| assert_unreachable_err(@src(), e);
+                    const new_mem = alloc.alignedAlloc(u8, .fromByteUnits(@alignOf(ELEM)), new_byte_cap) catch |e| return ERRORS.handle(@src(), e);
                     if (self.data_len > 0) {
                         inline for (ORDERED_FIELD_OFFSETS[0..NUM_FIELDS], ORDERED_FIELD_TYPES[0..]) |offset, t| {
                             const field_start_offset_old = offset * self.root_cap;
@@ -1716,7 +1721,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn grow_capacity_if_needed(self: *Self, need_capacity: IDX, growth: Growth, alloc: Allocator) void {
             if (self.root_cap < need_capacity) {
                 const adjusted_need_capacity = growth.calc(need_capacity);
-                self.realloc_internal(adjusted_need_capacity, alloc);
+                self.realloc_internal(adjusted_need_capacity, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
         pub fn grow_capacity_if_needed_for_n_more_elems(self: *Self, count: IDX, growth: Growth, alloc: Allocator) void {
@@ -1725,19 +1730,45 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         pub fn shrink_capacity_to_at_most(self: *Self, new_max_cap: IDX, alloc: Allocator) void {
             if (self.root_cap > new_max_cap) {
-                self.realloc_internal(new_max_cap, alloc);
+                self.realloc_internal(new_max_cap, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
         pub fn shrink_capacity_reserve_at_most_n_free_space(self: *Self, at_most_n_free_space: IDX, alloc: Allocator) void {
             const curr_free_space = self.root_cap - self.data_len;
             if (curr_free_space > at_most_n_free_space) {
                 const new_cap = self.data_len + at_most_n_free_space;
-                self.realloc_internal(new_cap, alloc);
+                self.realloc_internal(new_cap, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
         pub fn resize_capacity_exact(self: *Self, exact_cap: IDX, alloc: Allocator) void {
             if (self.root_cap == exact_cap) return;
-            self.realloc_internal(exact_cap, alloc);
+            self.realloc_internal(exact_cap, alloc, .ERRORS_ARE_UNREACHABLE);
+        }
+        pub fn grow_capacity_if_needed_might_error(self: *Self, need_capacity: IDX, growth: Growth, alloc: Allocator) AllocErr!void {
+            if (self.root_cap < need_capacity) {
+                const adjusted_need_capacity = growth.calc(need_capacity);
+                return self.realloc_internal(adjusted_need_capacity, alloc, .RETURN_ERRORS);
+            }
+        }
+        pub fn grow_capacity_if_needed_for_n_more_elems_might_error(self: *Self, count: IDX, growth: Growth, alloc: Allocator) AllocErr!void {
+            const need_cap = self.data_len + count;
+            return self.grow_capacity_if_needed_might_error(need_cap, growth, alloc);
+        }
+        pub fn shrink_capacity_to_at_most_might_error(self: *Self, new_max_cap: IDX, alloc: Allocator) AllocErr!void {
+            if (self.root_cap > new_max_cap) {
+                return self.realloc_internal(new_max_cap, alloc, .RETURN_ERRORS);
+            }
+        }
+        pub fn shrink_capacity_reserve_at_most_n_free_space_might_error(self: *Self, at_most_n_free_space: IDX, alloc: Allocator) AllocErr!void {
+            const curr_free_space = self.root_cap - self.data_len;
+            if (curr_free_space > at_most_n_free_space) {
+                const new_cap = self.data_len + at_most_n_free_space;
+                return self.realloc_internal(new_cap, alloc, .RETURN_ERRORS);
+            }
+        }
+        pub fn resize_capacity_exact_might_error(self: *Self, exact_cap: IDX, alloc: Allocator) AllocErr!void {
+            if (self.root_cap == exact_cap) return;
+            return self.realloc_internal(exact_cap, alloc, .RETURN_ERRORS);
         }
         fn free_internal(self: *Self, alloc: Allocator) void {
             switch (comptime FIELD_LAYOUT) {
@@ -4923,11 +4954,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             );
         }
 
-        // pub const ReaderWriter = struct {
-        //     list: *Self,
-        //     read_pos: IDX,
-        //     write_pos: IDX,
-        // };
         pub fn std_reader(self: Self, buffer: []u8) StdReader {
             return StdReader{
                 .iface = std.Io.Reader{
@@ -4992,7 +5018,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                         .SERIAL_INDEXES => {
                             const available_bytes = remaining_elems * @sizeOf(ELEM);
                             const to_write_bytes = limit.minInt(available_bytes);
-                            const elem_slice = self.list.zig_slice_const(self.read_pos, self.read_pos + @as(IDX, @intCast(std.math.divCeil(usize, to_write_bytes, @sizeOf(ELEM)) catch unreachable)));
+                            const elem_slice = self.list.zig_slice_const(self.read_pos, self.read_pos + @as(IDX, @truncate(std.math.divCeil(usize, to_write_bytes, @sizeOf(ELEM)) catch unreachable)));
                             const byte_slice = std.mem.sliceAsBytes(elem_slice);
                             const num_written_bytes = try w.write(byte_slice[0..to_write_bytes]);
                             total_written_bytes += num_written_bytes;
@@ -5030,6 +5056,222 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                         },
                     },
                 }
+                return total_written_bytes;
+            }
+        };
+
+        pub fn std_writer(self: *Self, buffer: []u8) StdWriter {
+            return StdWriter{
+                .iface = std.Io.Writer{
+                    .vtable = &StdWriter.VTABLE,
+                    .buffer = buffer,
+                    .end = 0,
+                },
+                .list = self,
+                .write_pos = 0,
+            };
+        }
+        pub fn std_writer_with_alloc(self: *Self, buffer: []u8, alloc: Allocator, growth: Growth) StdWriter {
+            return StdWriter{
+                .iface = std.Io.Writer{
+                    .vtable = &StdWriter.VTABLE,
+                    .buffer = buffer,
+                    .end = 0,
+                },
+                .list = self,
+                .write_pos = 0,
+                .alloc = alloc,
+                .growth = growth,
+            };
+        }
+
+        pub const StdWriter = struct {
+            const SIZE_NOT_1_BYTE = @sizeOf(ELEM) != 1;
+
+            iface: std.Io.Writer,
+            list: *Self,
+            write_pos: IDX,
+            alloc: ?Allocator = null,
+            growth: Growth = .GROW_BY_25_PERCENT,
+            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else void{},
+            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) 0 else void{},
+
+            pub fn interface(writer: *StdWriter) *std.Io.Writer {
+                return &writer.iface;
+            }
+
+            pub fn has_uncommitted_partial_bytes(self: *const StdWriter) bool {
+                if (comptime SIZE_NOT_1_BYTE) {
+                    return self.partial_byte_pos > 0;
+                }
+                return false;
+            }
+
+            const VTABLE = std.Io.Writer.VTable{
+                .drain = drain_impl,
+            };
+
+            fn drain_impl(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+                const self: *StdWriter = @fieldParentPtr("iface", w);
+                var wrote_any_bytes = false;
+
+                // 1. Drain any pending bytes from the writer's internal buffer first.
+                if (w.end > 0) {
+                    const buffered = w.buffer[0..w.end];
+                    const num_buf_written = self.write_bytes(buffered);
+                    if (num_buf_written < buffered.len) {
+                        const unwritten = buffered.len - num_buf_written;
+                        @memmove(w.buffer[0..unwritten], w.buffer[num_buf_written..w.end]);
+                        w.end = unwritten;
+                        // If the list is completely full and no progress was made, return an error.
+                        if (num_buf_written == 0) return error.WriteFailed;
+                        // Partial drain: buffer had progress, but no `data` bytes were consumed yet.
+                        return 0;
+                    }
+                    w.end = 0;
+                    wrote_any_bytes = true;
+                }
+
+                // 2. Consume vectored data slices.
+                if (data.len == 0) return 0;
+
+                var total_data_consumed: usize = 0;
+
+                // Process all normal slices preceding the splatted pattern.
+                for (data[0 .. data.len - 1]) |slice_| {
+                    if (slice_.len == 0) continue;
+                    const num_written = self.write_bytes(slice_);
+                    total_data_consumed += num_written;
+                    if (num_written < slice_.len) {
+                        if (total_data_consumed == 0 and !wrote_any_bytes) return error.WriteFailed;
+                        return total_data_consumed;
+                    }
+                }
+
+                // Process the final slice repeated `splat` times.
+                const pattern = data[data.len - 1];
+                if (pattern.len > 0) {
+                    var s: usize = 0;
+                    while (s < splat) : (s += 1) {
+                        const num_written = self.write_bytes(pattern);
+                        total_data_consumed += num_written;
+                        if (num_written < pattern.len) {
+                            if (total_data_consumed == 0 and !wrote_any_bytes) return error.WriteFailed;
+                            return total_data_consumed;
+                        }
+                    }
+                }
+
+                return total_data_consumed;
+            }
+
+            fn get_as_much_space_for_elems_up_to_n(self: *StdWriter, count: IDX) usize {
+                const required_len = self.write_pos + count;
+                const current_len = self.list.get_len();
+                if (required_len > current_len) {
+                    if (self.alloc) |alloc| {
+                        const extra_needed = required_len - current_len;
+                        const grow_result = self.list.grow_capacity_if_needed_for_n_more_elems_might_error(extra_needed, self.growth, alloc);
+                        if (grow_result) |_| {
+                            self.list.incr_len_unchecked(extra_needed);
+                        } else |_| {
+                            const spare_cap = self.list.get_cap() - current_len;
+                            const can_add = @min(extra_needed, spare_cap);
+                            self.list.incr_len_unchecked(can_add);
+                        }
+                    }
+                }
+                if (self.write_pos >= self.list.get_len()) return 0;
+                const available = @min(self.list.get_len() - self.write_pos, count);
+                return @intCast(available);
+            }
+
+            fn write_bytes(self: *StdWriter, source: []const u8) usize {
+                if (source.len == 0) return 0;
+                var total_written_bytes: usize = 0;
+                var remaining_source = source;
+
+                if (comptime SIZE_NOT_1_BYTE) {
+                    if (self.partial_byte_pos > 0) {
+                        const needed_to_complete_whole_elem = @sizeOf(ELEM) - self.partial_byte_pos;
+                        const bytes_to_write_to_partial = @min(needed_to_complete_whole_elem, remaining_source.len);
+                        const partial_bytes: *[@sizeOf(ELEM)]u8 = @ptrCast(&self.partial_elem);
+                        @memcpy(partial_bytes[self.partial_byte_pos..][0..bytes_to_write_to_partial], remaining_source[0..bytes_to_write_to_partial]);
+                        self.partial_byte_pos += @intCast(bytes_to_write_to_partial);
+                        total_written_bytes += bytes_to_write_to_partial;
+                        remaining_source = remaining_source[bytes_to_write_to_partial..];
+
+                        if (self.partial_byte_pos < @sizeOf(ELEM)) {
+                            return total_written_bytes;
+                        }
+
+                        assert_with_reason(self.write_pos < self.list.get_len(), @src(), "slot must have existed from prior partial write for partial elem commit. If this is not the case, you made a partial write then reduced the list length before the partial elem could be completed", .{});
+
+                        self.list.set(self.write_pos, self.partial_elem);
+                        self.write_pos += 1;
+                        self.partial_byte_pos = 0;
+                    }
+                }
+
+                if (comptime SIZE_NOT_1_BYTE) {
+                    assert_with_reason_debug_only(self.partial_byte_pos == 0, @src(), "all partial bytes must be committed at this point", .{});
+                }
+                if (remaining_source.len == 0) return total_written_bytes;
+
+                switch (comptime FIELD_LAYOUT) {
+                    .WHOLE_STRUCTS => switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const needed_elems = std.math.divCeil(usize, remaining_source.len, @sizeOf(ELEM)) catch unreachable;
+                            const available_elems_space = self.get_as_much_space_for_elems_up_to_n(@as(IDX, @intCast(@min(std.math.maxInt(IDX), needed_elems))));
+                            const available_bytes = available_elems_space * @sizeOf(ELEM);
+                            const to_write_bytes = @min(available_bytes, remaining_source.len);
+                            const whole_elems = to_write_bytes / @sizeOf(ELEM);
+                            const remainder_bytes = to_write_bytes % @sizeOf(ELEM);
+
+                            if (whole_elems > 0) {
+                                const elem_slice = self.list.zig_slice(self.write_pos, self.write_pos + @as(IDX, @intCast(whole_elems)));
+                                const byte_slice = std.mem.sliceAsBytes(elem_slice);
+                                @memcpy(byte_slice, remaining_source[0 .. whole_elems * @sizeOf(ELEM)]);
+                                self.write_pos += @intCast(whole_elems);
+                            }
+
+                            if (comptime SIZE_NOT_1_BYTE) {
+                                if (remainder_bytes > 0) {
+                                    const partial_bytes: *[@sizeOf(ELEM)]u8 = @ptrCast(&self.partial_elem);
+                                    @memcpy(partial_bytes[0..remainder_bytes], remaining_source[whole_elems * @sizeOf(ELEM) .. to_write_bytes]);
+                                    self.partial_byte_pos = @intCast(remainder_bytes);
+                                }
+                            }
+                            total_written_bytes += to_write_bytes;
+                        },
+                    },
+                    .SPLIT_FIELDS => switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const partial_bytes: *[@sizeOf(ELEM)]u8 = @ptrCast(&self.partial_elem);
+                            const needed_elems = std.math.divCeil(usize, remaining_source.len, @sizeOf(ELEM)) catch unreachable;
+                            var available_elems_space = self.get_as_much_space_for_elems_up_to_n(@as(IDX, @intCast(@min(std.math.maxInt(IDX), needed_elems))));
+                            while (available_elems_space > 0 and remaining_source.len >= @sizeOf(ELEM)) {
+                                @memcpy(partial_bytes, remaining_source[0..@sizeOf(ELEM)]);
+                                self.list.set(self.write_pos, self.partial_elem);
+                                self.write_pos += 1;
+                                remaining_source = remaining_source[@sizeOf(ELEM)..];
+                                total_written_bytes += @sizeOf(ELEM);
+                                available_elems_space -= 1;
+                            }
+
+                            if (comptime SIZE_NOT_1_BYTE) {
+                                if (available_elems_space > 0 and remaining_source.len > 0) {
+                                    const remainder_bytes = remaining_source.len;
+                                    assert_with_reason_debug_only(remainder_bytes < @sizeOf(ELEM), @src(), "remainder must be less than elem size", .{});
+                                    @memcpy(partial_bytes[0..remainder_bytes], remaining_source);
+                                    self.partial_byte_pos = @intCast(remainder_bytes);
+                                    total_written_bytes += remainder_bytes;
+                                }
+                            }
+                        },
+                    },
+                }
+
                 return total_written_bytes;
             }
         };
