@@ -2179,3 +2179,43 @@ pub fn field_type(comptime ELEM: type, comptime field: []const u8) type {
     const INFO = extract_struct_union_or_dummy_field_info(ELEM);
     return INFO.type_for_field(field);
 }
+
+pub fn CombinedErrors(comptime possible_errors: []const ?type) ?type {
+    var has_error: bool = false;
+    var combined_error: type = void;
+    inline for (possible_errors) |opt_err| {
+        if (opt_err) |e| {
+            if (!has_error) {
+                has_error = true;
+                combined_error = e;
+            } else {
+                combined_error = combined_error || e;
+            }
+        }
+    }
+    if (comptime has_error) {
+        return combined_error;
+    } else {
+        return null;
+    }
+}
+
+pub fn CombinedErrorsPayload(comptime payload: type, comptime possible_errors: []const ?type) type {
+    var has_error: bool = false;
+    var combined_error: type = void;
+    inline for (possible_errors) |opt_err| {
+        if (opt_err) |e| {
+            if (!has_error) {
+                has_error = true;
+                combined_error = e;
+            } else {
+                combined_error = combined_error || e;
+            }
+        }
+    }
+    if (comptime has_error) {
+        return combined_error!payload;
+    } else {
+        return payload;
+    }
+}

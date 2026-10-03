@@ -45,6 +45,7 @@ const Growth = Common.GrowthModel;
 const FuncParamType = Common.FuncParamType;
 
 const assert_with_reason = Assert.assert_with_reason;
+const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const assert_unreachable_err_always_panic = Assert.assert_unreachable_err_always_panic;
@@ -97,6 +98,11 @@ pub const Ownership = enum {
     REFERENCED_IMMUTABLE,
 };
 
+pub const FilterMode = enum {
+    NO_FILTERING,
+    USE_FILTERING_FUNC,
+};
+
 pub const SortOrder = enum(u8) {
     NORMAL,
     REVERSE,
@@ -135,6 +141,24 @@ const ReturnMode = enum {
             .RETURN_IDX => idx,
             .RETURN_VOID => void{},
         };
+    }
+};
+
+pub const IterStateKind = enum(u8) {
+    CONTINUE_IMPLICIT_NEXT_IDX = 0,
+    CONTINUE_SPECIFIC_NEXT_IDX = 1,
+    CONTINUE_WITH_SAME_IDX = 2,
+    CONTINUE_WITH_PREV_IDX = 3,
+    STOP_IMPLICIT_NEXT_IDX = 4,
+    STOP_SPECIFIC_NEXT_IDX = 5,
+    STOP_WITH_SAME_IDX = 6,
+    STOP_WITH_PREV_IDX = 7,
+
+    pub fn is_continue(self: IterStateKind) bool {
+        return @intFromEnum(self) <= @intFromEnum(IterStateKind.CONTINUE_WITH_PREV_IDX);
+    }
+    pub fn is_stop(self: IterStateKind) bool {
+        return @intFromEnum(self) >= @intFromEnum(IterStateKind.STOP_IMPLICIT_NEXT_IDX);
     }
 };
 
@@ -617,20 +641,72 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             };
         }
 
-        inline fn FilterFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
-            return switch (comptime KIND) {
+        pub const IterState = union(IterStateKind) {
+            CONTINUE_IMPLICIT_NEXT_IDX: void,
+            CONTINUE_SPECIFIC_NEXT_IDX: IDX,
+            CONTINUE_WITH_SAME_IDX: void,
+            CONTINUE_WITH_PREV_IDX: void,
+            STOP_IMPLICIT_NEXT_IDX: void,
+            STOP_SPECIFIC_NEXT_IDX: IDX,
+            STOP_WITH_SAME_IDX: void,
+            STOP_WITH_PREV_IDX: void,
+
+            pub fn continue_to_next_idx() IterState {
+                return IterState{ .CONTINUE_IMPLICIT_NEXT_IDX = void{} };
+            }
+            pub fn continue_to_specific_idx(id: IDX) IterState {
+                return IterState{ .CONTINUE_SPECIFIC_NEXT_IDX = id };
+            }
+            pub fn continue_with_same_idx() IterState {
+                return IterState{ .CONTINUE_WITH_SAME_IDX = void{} };
+            }
+            pub fn continue_with_prev_idx() IterState {
+                return IterState{ .CONTINUE_WITH_PREV_IDX = void{} };
+            }
+            pub fn stop_with_implicit_next_idx() IterState {
+                return IterState{ .STOP_IMPLICIT_NEXT_IDX = void{} };
+            }
+            pub fn stop_with_specific_next_idx(id: IDX) IterState {
+                return IterState{ .STOP_SPECIFIC_NEXT_IDX = id };
+            }
+            pub fn stop_with_same_idx() IterState {
+                return IterState{ .STOP_WITH_SAME_IDX = void{} };
+            }
+            pub fn stop_with_prev_idx() IterState {
+                return IterState{ .STOP_WITH_PREV_IDX = void{} };
+            }
+        };
+
+        inline fn FilterFnRT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+            return if (comptime ERROR) |E| switch (comptime KIND) {
+                .RUNTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, CT_CTX) E!bool,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+            } else switch (comptime KIND) {
                 .RUNTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, CT_CTX) bool,
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
             };
         }
-        inline fn FilterFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
-            return switch (comptime KIND) {
+        inline fn FilterFnCT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+            return if (comptime ERROR) |E| switch (comptime KIND) {
+                .RUNTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY => fn (Self, IDX, RT_CTX, comptime CT_CTX) E!bool,
+                .COMPTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, comptime CT_CTX) E!bool,
+            } else switch (comptime KIND) {
                 .RUNTIME_FN_PTR => void,
                 .COMPTIME_FN_BODY => fn (Self, IDX, RT_CTX, comptime CT_CTX) bool,
                 .COMPTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, comptime CT_CTX) bool,
             };
         }
-        inline fn eval_filter(self: Self, idx: IDX, comptime KIND: FuncParamType, filter_ctx: anytype, comptime FILTER_CTX: anytype, filter: FilterFnRt(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)), comptime FILTER: FilterFnCt(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX))) bool {
+        inline fn eval_filter(
+            self: Self,
+            idx: IDX,
+            comptime ERROR: ?type,
+            comptime KIND: FuncParamType,
+            filter_ctx: anytype,
+            comptime FILTER_CTX: anytype,
+            filter: FilterFnRT(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), ERROR),
+            comptime FILTER: FilterFnCT(KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), ERROR),
+        ) if (ERROR) |E| E!bool else bool {
             switch (comptime KIND) {
                 .RUNTIME_FN_PTR => {
                     return filter(self, idx, filter_ctx, FILTER_CTX);
@@ -640,20 +716,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 },
             }
         }
-        inline fn CompareIdxIdxFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+        inline fn CompareIdxIdxFnRT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
             return switch (comptime KIND) {
                 .RUNTIME_FN_PTR => *const fn (Self, IDX, IDX, RT_CTX, CT_CTX) bool,
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
             };
         }
-        inline fn CompareIdxIdxFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+        inline fn CompareIdxIdxFnCT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
             return switch (comptime KIND) {
                 .RUNTIME_FN_PTR => void,
                 .COMPTIME_FN_BODY => fn (Self, IDX, IDX, RT_CTX, comptime CT_CTX) bool,
                 .COMPTIME_FN_PTR => *const fn (Self, IDX, IDX, RT_CTX, comptime CT_CTX) bool,
             };
         }
-        inline fn eval_compare_idx_idx(self: Self, idx_a: IDX, idx_b: IDX, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxIdxFnRt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxIdxFnCt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
+        inline fn eval_compare_idx_idx(self: Self, idx_a: IDX, idx_b: IDX, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxIdxFnRT(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxIdxFnCT(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
             switch (comptime KIND) {
                 .RUNTIME_FN_PTR => {
                     return compare(self, idx_a, idx_b, compare_ctx, COMPARE_CTX);
@@ -663,26 +739,96 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 },
             }
         }
-        inline fn CompareIdxValFnRt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+        inline fn CompareIdxValFnRT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
             return switch (comptime KIND) {
                 .RUNTIME_FN_PTR => *const fn (Self, IDX, ELEM, RT_CTX, CT_CTX) bool,
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
             };
         }
-        inline fn CompareIdxValFnCt(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+        inline fn CompareIdxValFnCT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
             return switch (comptime KIND) {
                 .RUNTIME_FN_PTR => void,
                 .COMPTIME_FN_BODY => fn (Self, IDX, ELEM, RT_CTX, comptime CT_CTX) bool,
                 .COMPTIME_FN_PTR => *const fn (Self, IDX, ELEM, RT_CTX, comptime CT_CTX) bool,
             };
         }
-        inline fn eval_compare_idx_val(self: Self, idx_a: IDX, val_b: ELEM, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxValFnRt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxValFnCt(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
+        inline fn eval_compare_idx_val(self: Self, idx_a: IDX, val_b: ELEM, comptime KIND: FuncParamType, compare_ctx: anytype, comptime COMPARE_CTX: anytype, compare: CompareIdxValFnRT(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)), comptime COMPARE: CompareIdxValFnCT(KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX))) bool {
             switch (comptime KIND) {
                 .RUNTIME_FN_PTR => {
                     return compare(self, idx_a, val_b, compare_ctx, COMPARE_CTX);
                 },
                 .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
                     return COMPARE(self, idx_a, val_b, compare_ctx, COMPARE_CTX);
+                },
+            }
+        }
+        inline fn ForEachActionRT(comptime MODE: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+            if (comptime ERROR) |E| {
+                switch (comptime MODE) {
+                    .RUNTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, CT_CTX) E!void,
+                    .COMPTIME_FN_PTR, .COMPTIME_FN_BODY => void,
+                }
+            } else {
+                switch (comptime MODE) {
+                    .RUNTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, CT_CTX) void,
+                    .COMPTIME_FN_PTR, .COMPTIME_FN_BODY => void,
+                }
+            }
+        }
+        inline fn ForEachActionCT(comptime MODE: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
+            if (comptime ERROR) |E| {
+                switch (comptime MODE) {
+                    .RUNTIME_FN_PTR => void,
+                    .COMPTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, comptime CT_CTX) E!void,
+                    .COMPTIME_FN_BODY => fn (Self, IDX, RT_CTX, comptime CT_CTX) E!void,
+                }
+            } else {
+                switch (comptime MODE) {
+                    .RUNTIME_FN_PTR => void,
+                    .COMPTIME_FN_PTR => *const fn (Self, IDX, RT_CTX, comptime CT_CTX) void,
+                    .COMPTIME_FN_BODY => fn (Self, IDX, RT_CTX, comptime CT_CTX) void,
+                }
+            }
+        }
+        inline fn eval_for_each(
+            self: Self,
+            idx: IDX,
+            comptime ERROR: ?type,
+            comptime KIND: FuncParamType,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            action: ForEachActionRT(KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ERROR),
+            comptime ACTION: ForEachActionCT(KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ERROR),
+        ) if (ERROR) |E| E!void else void {
+            switch (comptime KIND) {
+                .RUNTIME_FN_PTR => {
+                    return action(self, idx, action_ctx, ACTION_CTX);
+                },
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
+                    return ACTION(self, idx, action_ctx, ACTION_CTX);
+                },
+            }
+        }
+        inline fn NextIdxFnRT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => *const fn (Self, IDX, ?IDX, RT_CTX, CT_CTX) ?IDX,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+            };
+        }
+        inline fn NextIdxFnCT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return switch (comptime KIND) {
+                .RUNTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY => fn (Self, IDX, ?IDX, RT_CTX, comptime CT_CTX) ?IDX,
+                .COMPTIME_FN_PTR => *const fn (Self, IDX, ?IDX, RT_CTX, comptime CT_CTX) ?IDX,
+            };
+        }
+        inline fn eval_next_idx(self: Self, idx: IDX, end_idx_excluded: ?IDX, comptime KIND: FuncParamType, next_ctx: anytype, comptime NEXT_CTX: anytype, next: NextIdxFnRT(KIND, @TypeOf(next_ctx), @TypeOf(NEXT_CTX)), comptime NEXT: NextIdxFnCT(KIND, @TypeOf(next_ctx), @TypeOf(NEXT_CTX))) ?IDX {
+            switch (comptime KIND) {
+                .RUNTIME_FN_PTR => {
+                    return next(self, idx, end_idx_excluded, next_ctx, NEXT_CTX);
+                },
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {
+                    return NEXT(self, idx, end_idx_excluded, next_ctx, NEXT_CTX);
                 },
             }
         }
@@ -2448,8 +2594,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             const dest = coerce_anytype_to_list_ptr_with_same_elem_type(dest_);
             if (start_idx == end_idx_exclusive) return 0;
@@ -2578,8 +2724,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2591,8 +2737,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2605,8 +2751,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2619,8 +2765,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2635,8 +2781,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2651,8 +2797,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
@@ -2662,8 +2808,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2672,8 +2818,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2683,8 +2829,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2694,8 +2840,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2707,8 +2853,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2720,8 +2866,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
             comptime FILTER_FUNC_KIND: FuncParamType,
-            filter: FilterFnRt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
-            comptime FILTER: FilterFnCt(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX)),
+            filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
+            comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             return self.delete_filtered_internal(0, self.get_len(), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
@@ -2870,11 +3016,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             const heap_len = heap_last_idx_exclusive - heap_first_idx;
             if (heap_len < 2) return;
@@ -2894,11 +3040,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             var hole_idx: IDX = idx;
             var hole_n: IDX = idx - heap_first_idx;
@@ -2932,11 +3078,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, idx, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
         }
@@ -2946,11 +3092,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.heap_sift_down_within_range_internal(0, self.get_len(), idx, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
         }
@@ -2981,11 +3127,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.assert_valid_range(start, end_excluded, @src());
             if (start == end_excluded) return;
@@ -2997,11 +3143,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            higher_in_heap_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             if (self.get_len() < 2) return;
             self.build_heap_within_range_internal(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, higher_in_heap_idx_val, HIGHER_IN_HEAP_IDX_VAL);
@@ -3035,8 +3181,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) bool {
             const heap_len = heap_last_idx_exclusive - heap_first_idx;
             if (heap_len < 2) return true;
@@ -3058,8 +3204,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) bool {
             self.assert_valid_range(heap_first_idx, heap_last_idx_exclusive, @src());
             return self.is_range_a_valid_heap_internal(heap_first_idx, heap_last_idx_exclusive, compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX);
@@ -3069,8 +3215,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            higher_in_heap_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            higher_in_heap_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime HIGHER_IN_HEAP_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) bool {
             return self.is_range_a_valid_heap_internal(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, higher_in_heap_idx_idx, HIGHER_IN_HEAP_IDX_IDX);
         }
@@ -3097,8 +3243,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) bool {
             self.assert_valid_range(start, end_exclusive, @src());
             const len = end_exclusive - start;
@@ -3126,8 +3272,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) bool {
             self.is_range_sorted_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, GREATER_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX);
         }
@@ -3138,7 +3284,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         ) bool {
             self.is_range_sorted_advanced(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
         }
-        
+
         pub inline fn is_range_sorted(
             self: Self,
             start: IDX,
@@ -3175,11 +3321,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.assert_valid_range(start, end_exclusive, @src());
             var heap_len = end_exclusive - start;
@@ -3220,11 +3366,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(COMPARE_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.heapsort_range_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_IDX_FN_KIND, greater_than_idx_idx, GREATER_THAN_IDX_IDX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
         }
@@ -3316,8 +3462,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.assert_valid_range(start, end_exclusive, @src());
             const len = end_exclusive - start;
@@ -3379,8 +3525,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(COMPARE_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.insertion_sort_range_advanced(0, self.get_len(), compare_ctx, COMPARE_CTX, COMPARE_IDX_VAL_FN_KIND, greater_than_idx_val, GREATER_THAN_IDX_VAL);
         }
@@ -3486,14 +3632,14 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
-            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            less_than_idx_val: CompareIdxValFnRT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
-            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            equal_idx_val: CompareIdxValFnRT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) if (COUNT_PIVOT_DUPES) struct { PartitionResult, IDX } else PartitionResult {
             const median_idx, const pivot_elem = self.sort_partition_median_of_3(first, last);
             self.swap_already_have_b(first, median_idx, pivot_elem);
@@ -3543,11 +3689,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
-            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            less_than_idx_val: CompareIdxValFnRT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) PartitionResult {
             const median_idx, const pivot_elem = self.sort_partition_median_of_3(first, last);
             self.swap_already_have_b(first, median_idx, pivot_elem);
@@ -3611,17 +3757,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
-            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            less_than_idx_val: CompareIdxValFnRT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
-            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            equal_idx_val: CompareIdxValFnRT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.assert_valid_range(start, end_excluded);
             const len = end_excluded - start;
@@ -3820,17 +3966,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESSER_IDX_VAL_FN_KIND: FuncParamType,
-            less_than_idx_val: CompareIdxValFnRt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCt(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            less_than_idx_val: CompareIdxValFnRT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESSER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_IDX_FN_KIND: FuncParamType,
-            greater_than_idx_idx: CompareIdxIdxFnRt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCt(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_idx: CompareIdxIdxFnRT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_IDX: CompareIdxIdxFnCT(GREATER_IDX_IDX_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_VAL_FN_KIND: FuncParamType,
-            greater_than_idx_val: CompareIdxValFnRt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCt(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            greater_than_idx_val: CompareIdxValFnRT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_THAN_IDX_VAL: CompareIdxValFnCT(GREATER_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime EQUAL_IDX_VAL_FN_KIND: FuncParamType,
-            equal_idx_val: CompareIdxValFnRt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime EQUAL_IDX_VAL: CompareIdxValFnCt(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            equal_idx_val: CompareIdxValFnRT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCT(EQUAL_IDX_VAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) void {
             self.quicksort_range_advanced(
                 start,
@@ -3970,5 +4116,922 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 void{},
             );
         }
+
+        fn ForEachReturn(comptime FILTER_MODE: FilterMode, comptime FILTER_ERROR: if (FILTER_MODE == .USE_FILTERING_FUNC) ?type else void, comptime ACTION_ERROR: ?type) type {
+            const OPT_FE: ?type = if (FILTER_MODE == .USE_FILTERING_FUNC) FILTER_ERROR else null;
+            const ERR: ?type = if (ACTION_ERROR) |AE|
+                if (OPT_FE) |FE|
+                    (if (AE == anyerror or FE == anyerror) anyerror else AE || FE)
+                else
+                    AE
+            else
+                OPT_FE;
+
+            return if (ERR) |E| E!IDX else IDX;
+        }
+
+        inline fn CT_IdxFn(comptime RT_CTX: type, comptime CT_CTX: type) type {
+            return fn (Self, IDX, ?IDX, RT_CTX, comptime CT_CTX) ?IDX;
+        }
+        pub inline fn simple_next_idx(comptime RT_CTX: type, comptime CT_CTX: type) CT_IdxFn(RT_CTX, CT_CTX) {
+            const PROTO = struct {
+                fn _next(self: Self, idx: IDX, end_excluded: ?IDX, _: RT_CTX, comptime _: CT_CTX) ?IDX {
+                    const possible_idx = idx + 1;
+                    if (possible_idx >= self.get_len()) return null;
+                    if (end_excluded) |end| {
+                        if (possible_idx >= end) return null;
+                    }
+                    return possible_idx;
+                }
+            };
+            return PROTO._next;
+        }
+        pub inline fn simple_prev_idx(comptime RT_CTX: type, comptime CT_CTX: type) CT_IdxFn(RT_CTX, CT_CTX) {
+            const PROTO = struct {
+                fn _prev(_: Self, idx: IDX, end_excluded: ?IDX, _: RT_CTX, comptime _: CT_CTX) ?IDX {
+                    if (idx == 0) return null;
+                    const possible_idx = idx - 1;
+                    if (end_excluded) |end| {
+                        if (possible_idx <= end) return null;
+                    }
+                    return possible_idx;
+                }
+            };
+            return PROTO._prev;
+        }
+
+        pub fn for_each_complete_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime NEXT_FN_KIND: FuncParamType,
+            next: NextIdxFnRT(NEXT_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+            comptime NEXT: NextIdxFnCT(NEXT_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime FILTER_MODE: FilterMode,
+            comptime FILTER_ERROR: if (FILTER_MODE == .USE_FILTERING_FUNC) ?type else void,
+            comptime FILTER_FN_KIND: if (FILTER_MODE == .USE_FILTERING_FUNC) FuncParamType else void,
+            filter: if (FILTER_MODE == .USE_FILTERING_FUNC) FilterFnRT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR) else void,
+            comptime FILTER: if (FILTER_MODE == .USE_FILTERING_FUNC) FilterFnCT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR) else void,
+        ) ForEachReturn(FILTER_MODE, FILTER_ERROR, ACTION_ERROR) {
+            if (self.get_len() == 0 or max_count == 0) return 0;
+            if (end_excluded) |end| {
+                const idx_min = @min(start, end);
+                const idx_max = @max(start, end);
+                self.assert_valid_range(idx_min, idx_max, @src());
+                if (start == end) return 0;
+            } else {
+                self.assert_valid_idx(start, @src());
+            }
+            const USE_FILTER = comptime FILTER_MODE == .USE_FILTERING_FUNC;
+            var possible_idx: ?IDX = start;
+            var count: IDX = 0;
+            while (possible_idx) |idx| {
+                const use_this_val = if (comptime USE_FILTER)
+                    (if (comptime FILTER_ERROR != null)
+                        try self.eval_filter(idx, FILTER_ERROR, FILTER_FN_KIND, action_ctx, ACTION_CTX, filter, FILTER)
+                    else
+                        self.eval_filter(idx, FILTER_ERROR, FILTER_FN_KIND, action_ctx, ACTION_CTX, filter, FILTER))
+                else
+                    true;
+                if (use_this_val) {
+                    count += 1;
+                    if (comptime ACTION_ERROR != null) {
+                        try self.eval_for_each(idx, ACTION_ERROR, ACTION_FN_KIND, action_ctx, ACTION_CTX, action, ACTION);
+                    } else {
+                        self.eval_for_each(idx, ACTION_ERROR, ACTION_FN_KIND, action_ctx, ACTION_CTX, action, ACTION);
+                    }
+                    if (count == max_count) break;
+                }
+                possible_idx = self.eval_next_idx(idx, end_excluded, NEXT_FN_KIND, action_ctx, ACTION_CTX, next, NEXT);
+            }
+            return count;
+        }
+
+        pub inline fn for_each_in_range_filtered_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime FILTER_ERROR: ?type,
+            comptime FILTER_FN_KIND: FuncParamType,
+            filter: FilterFnRT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+            comptime FILTER: FilterFnCT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+        ) ForEachReturn(.USE_FILTERING_FUNC, FILTER_ERROR, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .USE_FILTERING_FUNC,
+                FILTER_ERROR,
+                FILTER_FN_KIND,
+                filter,
+                FILTER,
+            );
+        }
+        pub inline fn for_each_in_range_filtered(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+            filter: *const fn (Self, IDX, void, void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+        pub inline fn for_each_in_range_filtered_with_context(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+            filter: *const fn (Self, IDX, @TypeOf(context), void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+
+        pub inline fn for_each_filtered_advanced(
+            self: Self,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime FILTER_ERROR: ?type,
+            comptime FILTER_FN_KIND: FuncParamType,
+            filter: FilterFnRT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+            comptime FILTER: FilterFnCT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+        ) ForEachReturn(.USE_FILTERING_FUNC, FILTER_ERROR, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .USE_FILTERING_FUNC,
+                FILTER_ERROR,
+                FILTER_FN_KIND,
+                filter,
+                FILTER,
+            );
+        }
+
+        pub inline fn for_each_filtered(
+            self: Self,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+            filter: *const fn (Self, IDX, void, void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+        pub inline fn for_each_filtered_with_context(
+            self: Self,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+            filter: *const fn (Self, IDX, @TypeOf(context), void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+
+        pub inline fn for_each_in_range_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_in_range(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_in_range_with_context(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        pub inline fn for_each_advanced(
+            self: Self,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        pub inline fn for_each(
+            self: Self,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_with_context(
+            self: Self,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                0,
+                null,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_next_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_in_range_filtered_reverse_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime FILTER_ERROR: ?type,
+            comptime FILTER_FN_KIND: FuncParamType,
+            filter: FilterFnRT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+            comptime FILTER: FilterFnCT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+        ) ForEachReturn(.USE_FILTERING_FUNC, FILTER_ERROR, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .USE_FILTERING_FUNC,
+                FILTER_ERROR,
+                FILTER_FN_KIND,
+                filter,
+                FILTER,
+            );
+        }
+        pub inline fn for_each_in_range_filtered_reverse(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+            filter: *const fn (Self, IDX, void, void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+
+        pub inline fn for_each_in_range_filtered_reverse_with_context(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+            filter: *const fn (Self, IDX, @TypeOf(context), void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+
+        pub inline fn for_each_filtered_reverse_advanced(
+            self: Self,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime FILTER_ERROR: ?type,
+            comptime FILTER_FN_KIND: FuncParamType,
+            filter: FilterFnRT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+            comptime FILTER: FilterFnCT(FILTER_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), FILTER_ERROR),
+        ) ForEachReturn(.USE_FILTERING_FUNC, FILTER_ERROR, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .USE_FILTERING_FUNC,
+                FILTER_ERROR,
+                FILTER_FN_KIND,
+                filter,
+                FILTER,
+            );
+        }
+
+        pub inline fn for_each_filtered_reverse(
+            self: Self,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+            filter: *const fn (Self, IDX, void, void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+        pub inline fn for_each_filtered_reverse_with_context(
+            self: Self,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+            filter: *const fn (Self, IDX, @TypeOf(context), void) bool,
+        ) ForEachReturn(.USE_FILTERING_FUNC, null, null) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .USE_FILTERING_FUNC,
+                null,
+                .RUNTIME_FN_PTR,
+                filter,
+                void{},
+            );
+        }
+
+        pub inline fn for_each_in_range_reverse_advanced(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_in_range_reverse(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        pub inline fn for_each_in_range_reverse_with_context(
+            self: Self,
+            start: IDX,
+            end_excluded: ?IDX,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                start,
+                end_excluded,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(context)),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        pub inline fn for_each_reverse_advanced(
+            self: Self,
+            max_count: IDX,
+            action_ctx: anytype,
+            comptime ACTION_CTX: anytype,
+            comptime ACTION_ERROR: ?type,
+            comptime ACTION_FN_KIND: FuncParamType,
+            action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+            comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
+        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                action_ctx,
+                ACTION_CTX,
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
+                ACTION_ERROR,
+                ACTION_FN_KIND,
+                action,
+                ACTION,
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        pub inline fn for_each_reverse(
+            self: Self,
+            max_count: IDX,
+            action: *const fn (Self, IDX, void, void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                void{},
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(void, void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+        pub inline fn for_each_reverse_with_context(
+            self: Self,
+            max_count: IDX,
+            context: anytype,
+            action: *const fn (Self, IDX, @TypeOf(context), void) void,
+        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+            return self.for_each_complete_advanced(
+                self.get_len() -| 1,
+                null,
+                max_count,
+                context,
+                void{},
+                .COMPTIME_FN_BODY,
+                void{},
+                simple_prev_idx(@TypeOf(context), void),
+                null,
+                .RUNTIME_FN_PTR,
+                action,
+                void{},
+                .NO_FILTERING,
+                void{},
+                void{},
+                void{},
+                void{},
+            );
+        }
+
+        // pub const ReaderWriter = struct {
+        //     list: *Self,
+        //     read_pos: IDX,
+        //     write_pos: IDX,
+        // };
+        pub fn std_reader(self: Self, buffer: []u8) StdReader {
+            return StdReader{
+                .iface = std.Io.Reader{
+                    .vtable = &StdReader.VTABLE,
+                    .buffer = buffer,
+                    .seek = 0,
+                    .end = 0,
+                },
+                .list = self,
+                .read_pos = 0,
+            };
+        }
+        pub const StdReader = struct {
+            const SIZE_NOT_1_BYTE = @sizeOf(ELEM) != 1;
+
+            iface: std.Io.Reader,
+            list: Self,
+            read_pos: IDX,
+            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else void{},
+            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) @sizeOf(ELEM) else void{},
+
+            pub fn interface(reader: *StdReader) *std.Io.Reader {
+                return &reader.iface;
+            }
+
+            const VTABLE = std.Io.Reader.VTable{
+                .stream = stream_impl,
+            };
+
+            fn stream_impl(r: *std.Io.Reader, w: *std.Io.Writer, limit_: std.Io.Limit) std.Io.Reader.StreamError!usize {
+                const self: *StdReader = @fieldParentPtr("iface", r);
+                if (!limit_.nonzero()) return 0;
+
+                var limit = limit_;
+                var total_written_bytes: usize = 0;
+
+                if (comptime SIZE_NOT_1_BYTE) {
+                    if (self.partial_byte_pos < @sizeOf(ELEM)) {
+                        const partial_bytes: *[@sizeOf(ELEM)]u8 = @ptrCast(&self.partial_elem);
+                        const partial_remaining = partial_bytes[self.partial_byte_pos..@sizeOf(ELEM)];
+                        const partial_to_write = limit.minInt(partial_remaining.len);
+
+                        const num_partial_written_bytes = try w.write(partial_remaining[0..partial_to_write]);
+                        self.partial_byte_pos += @intCast(num_partial_written_bytes);
+                        total_written_bytes += num_partial_written_bytes;
+                        limit = limit.subtract(num_partial_written_bytes).?;
+                        if (self.partial_byte_pos < @sizeOf(ELEM) or !limit.nonzero()) {
+                            return total_written_bytes;
+                        }
+                    }
+                }
+                if (comptime SIZE_NOT_1_BYTE) {
+                    assert_with_reason_debug_only(self.partial_byte_pos == @sizeOf(ELEM), @src(), "all partial bytes must be consumed at this point", .{});
+                }
+                const remaining_elems: usize = @intCast(self.list.get_len() - self.read_pos);
+                if (remaining_elems == 0) {
+                    if (total_written_bytes == 0) return error.EndOfStream;
+                    return total_written_bytes;
+                }
+                switch (comptime FIELD_LAYOUT) {
+                    .WHOLE_STRUCTS => switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const available_bytes = remaining_elems * @sizeOf(ELEM);
+                            const to_write_bytes = limit.minInt(available_bytes);
+                            const elem_slice = self.list.zig_slice_const(self.read_pos, self.read_pos + @as(IDX, @intCast(std.math.divCeil(usize, to_write_bytes, @sizeOf(ELEM)) catch unreachable)));
+                            const byte_slice = std.mem.sliceAsBytes(elem_slice);
+                            const num_written_bytes = try w.write(byte_slice[0..to_write_bytes]);
+                            total_written_bytes += num_written_bytes;
+                            const whole_elems = num_written_bytes / @sizeOf(ELEM);
+                            const remainder_bytes = num_written_bytes % @sizeOf(ELEM);
+                            self.read_pos += @intCast(whole_elems);
+                            if (comptime SIZE_NOT_1_BYTE) {
+                                if (remainder_bytes > 0) {
+                                    self.partial_elem = self.list.get(self.read_pos);
+                                    self.read_pos += 1;
+                                    self.partial_byte_pos = @intCast(remainder_bytes);
+                                }
+                            }
+                        },
+                    },
+                    .SPLIT_FIELDS => switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const byte_slice: *[@sizeOf(ELEM)]u8 = @ptrCast(&self.partial_elem);
+                            while (self.read_pos < self.list.get_len() and limit.nonzero()) {
+                                self.partial_elem = self.list.get(self.read_pos);
+                                const to_write_bytes = limit.minInt(@sizeOf(ELEM));
+                                const num_written_bytes = try w.write(byte_slice[0..to_write_bytes]);
+                                total_written_bytes += num_written_bytes;
+                                if (num_written_bytes > 0) {
+                                    self.read_pos += 1;
+                                    if (comptime SIZE_NOT_1_BYTE) {
+                                        self.partial_byte_pos = @intCast(num_written_bytes);
+                                    }
+                                }
+                                if (num_written_bytes < to_write_bytes) {
+                                    break;
+                                }
+                                limit = limit.subtract(num_written_bytes).?;
+                            }
+                        },
+                    },
+                }
+                return total_written_bytes;
+            }
+        };
     };
 }

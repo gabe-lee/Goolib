@@ -3119,12 +3119,10 @@ pub const DataManipulationCore = struct {
                         CONTINUE_SPECIFIC_NEXT_ID: ID,
                         CONTINUE_WITH_SAME_ID: void,
                         CONTINUE_WITH_PREV_ID: void,
-                        CONTINUE_WITH_ID_AFTER_PREV: void,
                         STOP_IMPLICIT_NEXT_ID: void,
                         STOP_SPECIFIC_NEXT_ID: ID,
                         STOP_WITH_SAME_ID: void,
                         STOP_WITH_PREV_ID: void,
-                        STOP_WITH_ID_AFTER_PREV: void,
 
                         pub fn continue_next_id() IterState {
                             return IterState{ .CONTINUE_IMPLICIT_NEXT_ID = void{} };
@@ -3138,9 +3136,6 @@ pub const DataManipulationCore = struct {
                         pub fn continue_with_prev_id() IterState {
                             return IterState{ .CONTINUE_WITH_PREV_ID = void{} };
                         }
-                        pub fn continue_with_id_after_prev_id() IterState {
-                            return IterState{ .CONTINUE_WITH_ID_AFTER_PREV = void{} };
-                        }
                         pub fn stop_with_implicit_next() IterState {
                             return IterState{ .STOP_IMPLICIT_NEXT_ID = void{} };
                         }
@@ -3152,9 +3147,6 @@ pub const DataManipulationCore = struct {
                         }
                         pub fn stop_with_prev_id() IterState {
                             return IterState{ .STOP_WITH_PREV_ID = void{} };
-                        }
-                        pub fn stop_with_id_after_prev_id() IterState {
-                            return IterState{ .STOP_WITH_ID_AFTER_PREV = void{} };
                         }
                     };
 
