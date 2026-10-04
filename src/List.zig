@@ -115,6 +115,22 @@ pub const HeapKind = enum(u8) {
     MAX_HEAP,
 };
 
+pub const TrackMaxStackMode = enum {
+    MAX_STACK_LEN_NOT_IMPORTANT,
+    TRACK_MAX_STACK_LEN,
+};
+
+pub const Order = enum {
+    CHILDREN_FIRST,
+    PARENTS_FIRST,
+    ANY_ORDER_MIGHT_HAVE_IDX_GAPS,
+    ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX,
+};
+
+pub const TraverserError = error{
+    index_out_of_bounds,
+};
+
 const ReturnMode = enum {
     RETURN_PTR_OR_SLICE,
     RETURN_PTR_OR_SLICE_IDX,
@@ -379,8 +395,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             }
         };
         pub const IdxElemPair = struct { IDX, ELEM };
+        pub const NULL_IDX = math.maxInt(IDX);
+        pub const MAX_LEN = math.maxInt(IDX);
 
-        // Root memory region
         /// The root memory pointer of the memory region
         root_ptr: MemPtr = undefined,
         /// The root capacity of the memory region
@@ -390,7 +407,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         /// in a Ring Buffer configuration, to denote the current starting position
         /// where index `0` sits
         root_offset: if (HAS_ROOT_OFFSET) IDX else void = if (HAS_ROOT_OFFSET) 0 else void{},
-        // Usable data slice
         /// The length of the data, either its entirety or as a slice
         data_len: IDX = 0,
         /// If the list is a slice, this is the offset from index
@@ -5115,7 +5131,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 const self: *StdWriter = @fieldParentPtr("iface", w);
                 var wrote_any_bytes = false;
 
-                // 1. Drain any pending bytes from the writer's internal buffer first.
                 if (w.end > 0) {
                     const buffered = w.buffer[0..w.end];
                     const num_buf_written = self.write_bytes(buffered);
@@ -5123,21 +5138,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                         const unwritten = buffered.len - num_buf_written;
                         @memmove(w.buffer[0..unwritten], w.buffer[num_buf_written..w.end]);
                         w.end = unwritten;
-                        // If the list is completely full and no progress was made, return an error.
                         if (num_buf_written == 0) return error.WriteFailed;
-                        // Partial drain: buffer had progress, but no `data` bytes were consumed yet.
                         return 0;
                     }
                     w.end = 0;
                     wrote_any_bytes = true;
                 }
 
-                // 2. Consume vectored data slices.
                 if (data.len == 0) return 0;
 
                 var total_data_consumed: usize = 0;
 
-                // Process all normal slices preceding the splatted pattern.
                 for (data[0 .. data.len - 1]) |slice_| {
                     if (slice_.len == 0) continue;
                     const num_written = self.write_bytes(slice_);
@@ -5148,7 +5159,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                     }
                 }
 
-                // Process the final slice repeated `splat` times.
                 const pattern = data[data.len - 1];
                 if (pattern.len > 0) {
                     var s: usize = 0;
@@ -5275,5 +5285,166 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 return total_written_bytes;
             }
         };
+
+        pub fn ForwardLinkedTraverser(comptime FIRST_CHILD_FIELDS: []const Field, comptime OPT_NEXT_SIBLING_FIELD: ?Field, comptime MAX_STACK_MODE: TrackMaxStackMode) type {
+            return struct {
+                const SelfTraverser = @This();
+
+                list: Self,
+                stack: Stack = .{},
+                stack_alloc: Allocator = dummy_alloc,
+                stack_growth: Growth = .GROW_EXACT_NEEDED,
+                max_stack_len: if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) IDX else void = if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) 0 else void{},
+
+                const NUM_CHILD_PATHS = FIRST_CHILD_FIELDS.len;
+                pub const StackFrame = struct {
+                    this: IDX,
+                    next_child_for_each_path: [NUM_CHILD_PATHS]IDX,
+                    curr_path: IDX,
+                };
+                pub const HAS_NEXT_SIBLING_FIELD = NEXT_SIBLING_FIELD != null;
+                pub const NEXT_SIBLING_FIELD = if (OPT_NEXT_SIBLING_FIELD) |F| F else void{};
+                pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+                pub const AllowedPaths = union(enum) {
+                    ALL: void,
+                    WHITELIST: [NUM_CHILD_PATHS]bool,
+
+                    pub fn all_child_paths() AllowedPaths {
+                        return AllowedPaths{ .ALL = void{} };
+                    }
+                    pub fn only_child_paths(comptime paths: []const Field) AllowedPaths {
+                        return AllowedPaths{ .WHITELIST = comptime make: {
+                            var out: [NUM_CHILD_PATHS]bool = @splat(false);
+                            next_allowed: for (paths) |allowed_path| {
+                                for (FIRST_CHILD_FIELDS, 0..) |path, p| {
+                                    if (path == allowed_path) {
+                                        out[p] = true;
+                                        continue :next_allowed;
+                                    }
+                                }
+                                assert_unreachable(@src(), "field `{s}` is not one of the registered child paths for the traverser", .{@tagName(allowed_path)});
+                            }
+                            break :make out;
+                        } };
+                    }
+                    pub fn exclude_child_paths(comptime paths: []const []const u8) AllowedPaths {
+                        return AllowedPaths{
+                            .WHITELIST = comptime make: {
+                                var out: [NUM_CHILD_PATHS]bool = @splat(true);
+                                next_excluded: for (paths) |excluded_path| {
+                                    for (FIRST_CHILD_FIELDS, 0..) |path, p| {
+                                        if (path == excluded_path) {
+                                            out[p] = false;
+                                            continue :next_excluded;
+                                        }
+                                    }
+                                    assert_unreachable(@src(), "field `{s}` is not one of the registered child paths for the traverser", .{@tagName(excluded_path)});
+                                }
+                                break :make out;
+                            },
+                        };
+                    }
+                    inline fn path_is_allowed(comptime self: AllowedPaths, comptime path_idx: IDX) bool {
+                        switch (comptime self) {
+                            .ALL => {
+                                return true;
+                            },
+                            .WHITELIST => |ALLOWED| {
+                                return ALLOWED[path_idx];
+                            },
+                        }
+                    }
+                };
+                inline fn get_next_child(self: SelfTraverser, depth: IDX) IDX {
+                    return self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path];
+                }
+                inline fn push_stack_frame(self: *SelfTraverser, root: IDX, comptime allowed_paths: AllowedPaths) IDX {
+                    const new_frame = StackFrame{
+                        .this = root,
+                        .next_child_for_each_path = make: {
+                            var out: [NUM_CHILD_PATHS]IDX = undefined;
+                            inline for (FIRST_CHILD_FIELDS, 0..) |FIRST_CHILD_FIELD, i| {
+                                if (comptime allowed_paths.path_is_allowed(@intCast(i))) {
+                                    out[i] = self.list.get_field(FIRST_CHILD_FIELD);
+                                } else {
+                                    out[i] = NULL_IDX;
+                                }
+                            }
+                            break :make out;
+                        },
+                        .curr_path = 0,
+                    };
+                    const new_depth = self.stack.append_one_with_growth_get_idx(new_frame, self.stack_growth, self.stack_alloc);
+                    if (comptime MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) {
+                        self.max_stack_len = @max(self.max_stack_len, new_depth);
+                    }
+                    return new_depth;
+                }
+                inline fn increment_next_child(self: *SelfTraverser, depth: IDX, curr_child_idx: IDX) void {
+                    var next = if (comptime HAS_NEXT_SIBLING_FIELD) self.list.get_field(NEXT_SIBLING_FIELD, curr_child_idx) else NULL_IDX;
+                    self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path] = next;
+                    while (next == NULL_IDX and self.stack.root_ptr[depth].curr_path < (NUM_CHILD_PATHS - 1)) {
+                        self.stack.root_ptr[depth].curr_path += 1;
+                        next = self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path];
+                    }
+                }
+                inline fn pop_stack_frame(self: *SelfTraverser, depth: IDX) struct { IDX, bool } {
+                    self.new_stack.data_len = depth;
+                    const more_to_process = depth > 0;
+                    const new_depth = @max(1, depth) - 1;
+                    return .{ new_depth, more_to_process };
+                }
+                inline fn do_action_on_all_nodes_unordered_no_gaps(self: *SelfTraverser, root: u32, action_context: anytype, comptime ACTION_CONTEXT: anytype, comptime ACTION_ERROR: ?type, comptime ACTION_FN_KIND: FuncParamType, action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_context), @TypeOf(ACTION_CONTEXT), ACTION_ERROR), comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_context), @TypeOf(ACTION_CONTEXT), ACTION_ERROR)) if (ACTION_ERROR) |AE| AE!void else void {
+                    return self.list.for_each_in_range_advanced(root, null, MAX_LEN, action_context, ACTION_CONTEXT, ACTION_ERROR, ACTION_FN_KIND, action, ACTION);
+                }
+                pub fn do_action_on_all_nodes(self: *SelfTraverser, comptime ORDER: Order, comptime allowed_paths: AllowedPaths, root: IDX, action_context: anytype, comptime ACTION_CONTEXT: anytype, comptime ACTION_ERROR: ?type, comptime ACTION_FN_KIND: FuncParamType, action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_context), @TypeOf(ACTION_CONTEXT), ACTION_ERROR), comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_context), @TypeOf(ACTION_CONTEXT), ACTION_ERROR)) if (ACTION_ERROR) |AE| (if (ORDER == .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX) AE else (AE || AllocErr || TraverserError))!void else (AllocErr || TraverserError)!void {
+                    if (comptime ORDER == .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX) {
+                        return self.do_action_on_all_nodes_unordered_no_gaps(root, action_context, ACTION_CONTEXT, ACTION_ERROR, ACTION_FN_KIND, action, ACTION);
+                    }
+                    self.stack.data_len = 0;
+                    if (root == NULL_IDX) return;
+                    if (root >= self.list.get_len()) {
+                        return TraverserError.index_out_of_bounds;
+                    }
+                    if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
+                        if (comptime ACTION_ERROR != null) {
+                            try self.list.eval_for_each(root, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                        } else {
+                            self.list.eval_for_each(root, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                        }
+                    }
+                    var depth = self.push_stack_frame(root, allowed_paths);
+                    var more_to_process: bool = true;
+                    loop: while (more_to_process) {
+                        const curr_child_idx = self.get_next_child(depth);
+                        if (curr_child_idx != NULL_IDX) {
+                            if (curr_child_idx >= self.list.get_len()) {
+                                return AllocErr.index_out_of_bounds;
+                            }
+                            self.stack.grow_capacity_if_needed_for_n_more_elems(1, self.stack_growth, self.stack_alloc);
+                            self.increment_next_child(depth, curr_child_idx);
+                            if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
+                                if (comptime ACTION_ERROR != null) {
+                                    try self.list.eval_for_each(curr_child_idx, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                                } else {
+                                    self.list.eval_for_each(curr_child_idx, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                                }
+                            }
+                            depth = push_stack_frame(curr_child_idx, allowed_paths);
+                            continue :loop;
+                        }
+                        if (comptime ORDER == .CHILDREN_FIRST) {
+                            if (comptime ACTION_ERROR != null) {
+                                try self.list.eval_for_each(self.stack.root_ptr[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                            } else {
+                                self.list.eval_for_each(self.stack.root_ptr[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                            }
+                        }
+                        depth, more_to_process = self.pop_stack_frame(depth);
+                    }
+                    return;
+                }
+            };
+        }
     };
 }
