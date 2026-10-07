@@ -294,6 +294,22 @@ pub const AllowedResource = struct {
     register: u32 = 0,
     allowed: bool = false,
 };
+pub const AllowedResourceGpuCpu = struct {
+    gpu_register: u32 = 0,
+    cpu_register: u32 = 0,
+    allowed: bool = false,
+
+    pub fn registers(self: AllowedResourceGpuCpu) RegisterGpuCpu {
+        return RegisterGpuCpu{
+            .gpu = self.gpu_register,
+            .cpu = self.cpu_register,
+        };
+    }
+};
+pub const RegisterGpuCpu = struct {
+    gpu: u32 = 0,
+    cpu: u32 = 0,
+};
 
 pub fn ShaderAllowedUniform(comptime UNIFORM_NAMES_ENUM: type) type {
     return struct {
@@ -415,120 +431,81 @@ pub const StorageBufferMode = enum(u8) {
     COMPUTE_READ_WRITE,
 };
 
-pub const RegisterMode = enum(u8) {
-    MANUAL,
-    AUTO,
-};
+// pub const StorageRegisterWithSourceAndKind = struct {
+//     source: u32,
+//     kind: StorageRegisterKind,
+// };
 
-pub const Register = union(RegisterMode) {
-    MANUAL: u32,
-    AUTO: void,
+// pub const RegisterWithSource = struct {
+//     register: u32,
+//     source: u32,
+// };
 
-    pub fn register_num(num: u32) Register {
-        return Register{ .MANUAL = num };
-    }
-    pub fn auto_register() Register {
-        return Register{ .AUTO = void{} };
-    }
-};
+// pub fn UniformRegister(comptime UNIFORM_NAMES_ENUM: type) type {
+//     return struct {
+//         const Self = @This();
 
-pub const StorageRegisterWithSourceAndKind = struct {
-    register: Register,
-    source: u32,
-    kind: StorageRegisterKind,
+//         uniform: UNIFORM_NAMES_ENUM,
+//         register: u32,
 
-    pub fn greater_than(a: StorageRegisterWithSourceAndKind, b: StorageRegisterWithSourceAndKind) bool {
-        return a.combine() > b.combine();
-    }
-    pub fn greater_than_only_kind(a: StorageRegisterWithSourceAndKind, b: StorageRegisterWithSourceAndKind) bool {
-        return @intFromEnum(a.kind) > @intFromEnum(b.kind);
-    }
-    pub fn greater_than_only_register(a: StorageRegisterWithSourceAndKind, b: StorageRegisterWithSourceAndKind) bool {
-        return a.register.MANUAL > b.register.MANUAL;
-    }
-    pub fn equals(a: StorageRegisterWithSourceAndKind, b: StorageRegisterWithSourceAndKind) bool {
-        return a.combine() == b.combine();
-    }
+//         pub fn link_uniform(comptime uniform: UNIFORM_NAMES_ENUM, comptime register: u32) Self {
+//             return Self{
+//                 .uniform = uniform,
+//                 .register = register,
+//             };
+//         }
+//     };
+// }
 
-    pub fn combine(self: StorageRegisterWithSourceAndKind) u32 {
-        const secondary: u32 = switch (self.register) {
-            .AUTO => 0,
-            .MANUAL => |r| r + 1,
-        };
-        return secondary | @intFromEnum(self.kind);
-    }
-};
+// pub fn StorageBufferRegister(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
+//     return struct {
+//         const Self = @This();
 
-pub const RegisterWithSource = struct {
-    register: Register,
-    source: u32,
-};
+//         buffer: STORAGE_BUFFER_NAMES_ENUM,
+//         register: u32 = .auto_register(),
 
-pub fn UniformRegister(comptime UNIFORM_NAMES_ENUM: type) type {
-    return struct {
-        const Self = @This();
+//         pub fn link_storage_buffer(comptime buffer: STORAGE_BUFFER_NAMES_ENUM, comptime register: u32) Self {
+//             return Self{
+//                 .buffer = buffer,
+//                 .register = register,
+//             };
+//         }
+//     };
+// }
 
-        uniform: UNIFORM_NAMES_ENUM,
-        register: Register = .AUTO,
+// pub fn ReadOnlyStorageTextureRegister(comptime TEXTURE_NAMES_ENUM: type) type {
+//     return struct {
+//         const Self = @This();
 
-        pub fn link_uniform(comptime uniform: UNIFORM_NAMES_ENUM, comptime register: Register) Self {
-            return Self{
-                .uniform = uniform,
-                .register = register,
-            };
-        }
-    };
-}
+//         texture: TEXTURE_NAMES_ENUM,
+//         register: u32 = .auto_register(),
 
-pub fn StorageBufferRegister(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
-    return struct {
-        const Self = @This();
+//         pub fn link_read_only_storage_texture(comptime texture: TEXTURE_NAMES_ENUM, comptime register: u32) Self {
+//             return Self{
+//                 .texture = texture,
+//                 .register = register,
+//             };
+//         }
+//     };
+// }
 
-        buffer: STORAGE_BUFFER_NAMES_ENUM,
-        register: Register = .AUTO,
+// pub fn ReadOnlySampledTextureRegister(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
+//     return struct {
+//         const Self = @This();
 
-        pub fn link_storage_buffer(comptime buffer: STORAGE_BUFFER_NAMES_ENUM, comptime register: Register) Self {
-            return Self{
-                .buffer = buffer,
-                .register = register,
-            };
-        }
-    };
-}
+//         texture: TEXTURE_NAMES_ENUM,
+//         sampler: SAMPLER_NAMES_ENUM,
+//         register: u32 = .auto_register(),
 
-pub fn ReadOnlyStorageTextureRegister(comptime TEXTURE_NAMES_ENUM: type) type {
-    return struct {
-        const Self = @This();
-
-        texture: TEXTURE_NAMES_ENUM,
-        register: Register = .AUTO,
-
-        pub fn link_read_only_storage_texture(comptime texture: TEXTURE_NAMES_ENUM, comptime register: Register) Self {
-            return Self{
-                .texture = texture,
-                .register = register,
-            };
-        }
-    };
-}
-
-pub fn ReadOnlySampledTextureRegister(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
-    return struct {
-        const Self = @This();
-
-        texture: TEXTURE_NAMES_ENUM,
-        sampler: SAMPLER_NAMES_ENUM,
-        register: Register = .AUTO,
-
-        pub fn link_read_only_sampled_texture(comptime texture: TEXTURE_NAMES_ENUM, comptime sampler: SAMPLER_NAMES_ENUM, comptime register: Register) Self {
-            return Self{
-                .texture = texture,
-                .sampler = sampler,
-                .register = register,
-            };
-        }
-    };
-}
+//         pub fn link_read_only_sampled_texture(comptime texture: TEXTURE_NAMES_ENUM, comptime sampler: SAMPLER_NAMES_ENUM, comptime register: u32) Self {
+//             return Self{
+//                 .texture = texture,
+//                 .sampler = sampler,
+//                 .register = register,
+//             };
+//         }
+//     };
+// }
 
 // pub fn VertexBufferRegister(comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type) type {
 //     return struct {
@@ -536,9 +513,9 @@ pub fn ReadOnlySampledTextureRegister(comptime TEXTURE_NAMES_ENUM: type, comptim
 
 //         buffer: GPU_VERTEX_BUFFER_NAMES_ENUM,
 //         /// the `buffer_slot` value for the render pipeline
-//         register: Register = .AUTO,
+//         register: u32 = .AUTO,
 
-//         pub fn link_vertex_buffer(comptime buffer: GPU_VERTEX_BUFFER_NAMES_ENUM, comptime register: Register) Self {
+//         pub fn link_vertex_buffer(comptime buffer: GPU_VERTEX_BUFFER_NAMES_ENUM, comptime register: u32) Self {
 //             return Self{
 //                 .buffer = buffer,
 //                 .register = register,
@@ -556,17 +533,21 @@ pub const RenderLinkageRegisterKind = enum(u8) {
 };
 
 pub const StorageRegisterKind = enum(u32) {
-    SAMPLED_PAIR = 0b01 << 30,
-    STORAGE_TEXTURE = 0b10 << 30,
-    STORAGE_BUFFER = 0b11 << 30,
+    SAMPLED_PAIR,
+    STORAGE_TEXTURE,
+    STORAGE_BUFFER,
 };
 
-pub fn ShaderRegister(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
+pub fn CombinedTextureSamplerTag(comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
+    return Types.Combined2EnumInt(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
+}
+
+pub fn ShaderResource(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER_NAMES_ENUM: type, comptime TEXTURE_NAMES_ENUM: type, comptime SAMPLER_NAMES_ENUM: type) type {
     return union(RenderLinkageRegisterKind) {
-        SAMPLED_TEXTURE: ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
-        STORAGE_TEXTURE: ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM),
-        STORAGE_BUFFER: StorageBufferRegister(STORAGE_BUFFER_NAMES_ENUM),
-        UNIFORM_BUFFER: UniformRegister(UNIFORM_NAMES_ENUM),
+        SAMPLED_TEXTURE: CombinedTextureSamplerTag(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
+        STORAGE_TEXTURE: TEXTURE_NAMES_ENUM,
+        STORAGE_BUFFER: STORAGE_BUFFER_NAMES_ENUM,
+        UNIFORM_BUFFER: UNIFORM_NAMES_ENUM,
     };
 }
 
@@ -606,7 +587,7 @@ pub fn VertexShaderDefinition(
         /// it will call that method when writing the stub to
         /// fill in the fields.
         output_type: SHADER_STRUCT_NAMES_ENUM,
-        resources_to_link: []const ShaderRegister(UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
+        resources_to_link: []const ShaderResource(UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
     };
 }
 
@@ -646,7 +627,7 @@ pub fn FragmentShaderDefinition(
         /// it will call that method when writing the stub to
         /// fill in the fields.
         output_type: SHADER_STRUCT_NAMES_ENUM,
-        resources_to_link: []const ShaderRegister(UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
+        resources_to_link: []const ShaderResource(UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
     };
 }
 
@@ -698,7 +679,7 @@ pub fn RenderPipelineVertexFieldMap(comptime VERTEX_BUFFER_NAMES: type) type {
         /// The slot these vertex buffers will be bound to. All field mappings within the same render pipeline
         /// must have exactly one `vertex_buffer` match exactly one `vertex_buffer_bind_slot`,
         /// and all `vertex_buffer_bind_slot`s must start from 0 and increase with no gaps
-        vertex_buffer_bind_slot: Register,
+        vertex_buffer_bind_slot: u32,
         /// Whether this field is supplied per-vertex or per-instance.
         ///
         /// This MUST match the `vertex_field_input_rate` on all other field maps
@@ -1079,8 +1060,6 @@ pub fn GraphicsController(
     ///     .fields_info = struct {
     ///         pub const <FIELD NAME> = VertexBufferFieldInfo{<INFO>};
     ///     },
-    ///     .slot = <SLOT NUMBER>,
-    ///     .input_rate = <INPUT RATE>,
     /// };
     /// ```
     /// ### Example
@@ -1103,8 +1082,6 @@ pub fn GraphicsController(
     ///                 .gpu_format = .F32_x3,
     ///             };
     ///         },
-    ///         .slot = 0,
-    ///         .input_rate = .VERTEX,
     ///     };
     ///     pub const VertColorAndRotation = VertexBufferDescription{
     ///         .element_type = [8]u8, // opaque array of 8 bytes
@@ -1124,8 +1101,6 @@ pub fn GraphicsController(
     ///                 .gpu_format = .F32_x1,
     ///             };
     ///         },
-    ///         .slot = 1,
-    ///         .input_rate = .INSTANCE,
     ///     };
     /// };
     /// ```
@@ -1302,10 +1277,10 @@ pub fn GraphicsController(
     comptime VALIDATION: ValidationSettings,
 ) type {
     // CONVENIENCE CONSTS
-    const _UniformRegister = UniformRegister(GPU_UNIFORM_NAMES_ENUM);
-    const _StorageBufferRegister = StorageBufferRegister(GPU_STORAGE_BUFFER_NAMES_ENUM);
-    const _ReadOnlyStorageTextureRegister = ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM);
-    const _ReadOnlySampledTextureRegister = ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
+    // const _UniformRegister = UniformRegister(GPU_UNIFORM_NAMES_ENUM);
+    // const _StorageBufferRegister = StorageBufferRegister(GPU_STORAGE_BUFFER_NAMES_ENUM);
+    // const _ReadOnlyStorageTextureRegister = ReadOnlyStorageTextureRegister(TEXTURE_NAMES_ENUM);
+    // const _ReadOnlySampledTextureRegister = ReadOnlySampledTextureRegister(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _VertexShaderDefinition = VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM);
     const _FragmentShaderDefinition = FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM);
     const _RenderPipelineDefinition = RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM);
@@ -1317,7 +1292,6 @@ pub fn GraphicsController(
     const _ShaderAllowedUniform = ShaderAllowedUniform(GPU_UNIFORM_NAMES_ENUM);
     const _ShaderAllowedSamplePair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _ShaderAllowedStorageBuffer = ShaderAllowedStorageBuffer(GPU_STORAGE_BUFFER_NAMES_ENUM);
-    const _ShaderAllowedStorageTexture = ShaderAllowedStorageTexture(TEXTURE_NAMES_ENUM);
     const vertex_linkages: []const _VertexShaderDefinition = VERTEX_SHADER_DEFINITIONS[0..];
     const fragment_linkages: []const _FragmentShaderDefinition = FRAGMENT_SHADER_DEFINITIONS[0..];
     // VALIDATE SIMPLE ENUMS
@@ -1335,15 +1309,18 @@ pub fn GraphicsController(
     // VALIDATE INDEX BUFFERS
     ct_assert_with_reason(Types.type_is_enum(INDEX_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDEX_BUFFER_NAMES), @src(), "type `INDEX_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDEX_BUFFER_NAMES)});
     const _NUM_INDEX_BUFFERS = Types.enum_defined_field_count(INDEX_BUFFER_NAMES);
-    comptime var ordered_index_buffer_defs: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
+    comptime var ordered_index_buffer_types: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
+    comptime var ordered_index_buffer_sizes: [_NUM_INDEX_BUFFERS]u32 = undefined;
     comptime var index_buffers_defined: [_NUM_INDEX_BUFFERS]bool = @splat(false);
     inline for (INDEX_BUFFER_DEFINITIONS) |index_def| {
         const index_idx = @intFromEnum(index_def.buffer);
         ct_assert_with_reason(index_buffers_defined[index_idx] == false, @src(), "index buffer `{s}` was defined more than once", .{@tagName(index_def.buffer)});
         index_buffers_defined[index_idx] = true;
-        ordered_index_buffer_defs[index_idx] = index_def.index_size;
+        ordered_index_buffer_types[index_idx] = index_def.index_size;
+        ordered_index_buffer_sizes[index_idx] = index_def.index_size.size();
     }
-    const ordered_index_buffer_defs_const = ordered_index_buffer_defs;
+    const ordered_index_buffer_types_const = ordered_index_buffer_types;
+    const ordered_index_buffer_sizes_const = ordered_index_buffer_sizes;
     // VALIDATE SAMPLERS
     ct_assert_with_reason(Types.type_is_enum(SAMPLER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(SAMPLER_NAMES_ENUM), @src(), "type `SAMPLER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(SAMPLER_NAMES_ENUM)});
     const _NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
@@ -1440,44 +1417,18 @@ pub fn GraphicsController(
         uniforms_allowed_in_vertex_shaders_len: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
         uniforms_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_UNIFORM_STRUCTS]AllowedResource = @splat(@splat(AllowedResource{})),
         uniforms_allowed_in_fragment_shaders_len: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
-        storage_buffers_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
+        storage_buffers_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResourceGpuCpu = @splat(@splat(AllowedResourceGpuCpu{})),
         storage_buffers_allowed_in_vertex_shaders_len: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
-        storage_buffers_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResource = @splat(@splat(AllowedResource{})),
+        storage_buffers_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_STORAGE_BUFFERS]AllowedResourceGpuCpu = @splat(@splat(AllowedResourceGpuCpu{})),
         storage_buffers_allowed_in_fragment_shaders_len: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
-        storage_textures_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][_NUM_TEXTURES]AllowedResource = @splat(@splat(AllowedResource{})),
+        storage_textures_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][_NUM_TEXTURES]AllowedResourceGpuCpu = @splat(@splat(AllowedResourceGpuCpu{})),
         storage_textures_allowed_in_vertex_shaders_len: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
-        storage_textures_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_TEXTURES]AllowedResource = @splat(@splat(AllowedResource{})),
+        storage_textures_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_TEXTURES]AllowedResourceGpuCpu = @splat(@splat(AllowedResourceGpuCpu{})),
         storage_textures_allowed_in_fragment_shaders_len: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
-        sample_pairs_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][config.SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS]_ShaderAllowedSamplePair = @splat(@splat(_ShaderAllowedSamplePair{})),
+        sample_pairs_allowed_in_vertex_shaders: [_NUM_VERTEX_SHADERS][_NUM_TEXTURES][_NUM_SAMPLERS]AllowedResourceGpuCpu = @splat(@splat(@splat(AllowedResourceGpuCpu{}))),
         sample_pairs_allowed_in_vertex_shaders_len: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
-        sample_pairs_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][config.SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS]_ShaderAllowedSamplePair = @splat(@splat(_ShaderAllowedSamplePair{})),
+        sample_pairs_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_TEXTURES][_NUM_SAMPLERS]AllowedResourceGpuCpu = @splat(@splat(@splat(AllowedResourceGpuCpu{}))),
         sample_pairs_allowed_in_fragment_shaders_len: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
-        uniform_registers_used_this_shader: [_NUM_UNIFORM_STRUCTS]RegisterWithSource = undefined,
-        uniform_registers_used_this_shader_len: u32 = 0,
-        uniform_registers_used_this_shader_max: u32 = 0,
-        uniform_registers_used_this_shader_auto_count: u32 = 0,
-        uniform_registers_used_this_shader_manual_count: u32 = 0,
-        next_uniform_register_to_check: u32 = 0,
-        //BUG on the application side, storage samplers, textures, and buffers have their own slot range, but on the GPU side their slots are in serial
-        storage_registers_used_this_shader: [config.SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS]StorageRegisterWithSourceAndKind = undefined,
-        storage_registers_used_this_shader_len: u32 = 0,
-        storage_registers_used_this_shader_max: u32 = 0,
-        storage_registers_used_this_shader_auto_count: u32 = 0,
-        storage_registers_used_this_shader_manual_count: u32 = 0,
-        next_storage_register_to_check: u32 = 0,
-
-        fn reset_for_next_linkage(self: *SELF_VARS) void {
-            self.uniform_registers_used_this_shader_len = 0;
-            self.uniform_registers_used_this_shader_max = 0;
-            self.uniform_registers_used_this_shader_auto_count = 0;
-            self.uniform_registers_used_this_shader_manual_count = 0;
-            self.next_uniform_register_to_check = 0;
-            self.storage_registers_used_this_shader_len = 0;
-            self.storage_registers_used_this_shader_max = 0;
-            self.storage_registers_used_this_shader_auto_count = 0;
-            self.storage_registers_used_this_shader_manual_count = 0;
-            self.next_storage_register_to_check = 0;
-        }
     };
     comptime var vars = VARS{};
     // COMPTIME SUB-ROUTINES ONLY NEEDED FOR THIS BLOCK
@@ -1487,144 +1438,44 @@ pub fn GraphicsController(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
-            comptime link: _UniformRegister,
-            comptime ridx: u32,
+            comptime uniform_name: GPU_UNIFORM_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
-            const uni_idx = @intFromEnum(link.uniform);
-            switch (stage) {
+            const uni_idx = @intFromEnum(uniform_name);
+            switch (comptime stage) {
                 .VERTEX => {
-                    ct_assert_with_reason(v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(link.uniform), shader_name });
+                    ct_assert_with_reason(v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(uniform_name), shader_name });
                     v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed = true;
+                    v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_vertex_shaders_len[shader_idx];
+                    v.uniforms_allowed_in_vertex_shaders_len[shader_idx] += 1;
                 },
                 .FRAGMENT => {
-                    ct_assert_with_reason(v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(link.uniform), shader_name });
+                    ct_assert_with_reason(v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(uniform_name), shader_name });
                     v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed = true;
+                    v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_fragment_shaders_len[shader_idx];
+                    v.uniforms_allowed_in_fragment_shaders_len[shader_idx] += 1;
                 },
             }
-            switch (link.register) {
-                .MANUAL => |reg_num| {
-                    for (v.uniform_registers_used_this_shader[0..v.uniform_registers_used_this_shader_len]) |used_register| {
-                        switch (used_register.register) {
-                            .MANUAL => |used_num| {
-                                ct_assert_with_reason(used_num != reg_num, @src(), "in {s} shader `{s}` uniform `{s}` tried to bind to an already bound register {d}", .{ @tagName(stage), shader_name, @tagName(link.uniform), reg_num });
-                            },
-                            else => {},
-                        }
-                    }
-                    v.uniform_registers_used_this_shader_manual_count += 1;
-                    update_max(reg_num, &v.uniform_registers_used_this_shader_max);
-                    if (reg_num == v.next_uniform_register_to_check) {
-                        v.next_uniform_register_to_check += 1;
-                    }
-                },
-                .AUTO => {
-                    v.uniform_registers_used_this_shader_auto_count += 1;
-                },
-            }
-            const reg_source = RegisterWithSource{ .register = link.register, .source = @intCast(ridx) };
-            v.uniform_registers_used_this_shader[v.uniform_registers_used_this_shader_len] = reg_source;
-            v.uniform_registers_used_this_shader_len += 1;
-        }
-        fn process_storage_register(
-            comptime v: *VARS,
-            comptime shader_idx: u32,
-            comptime shader_name: []const u8,
-            comptime reg: StorageRegisterWithSourceAndKind,
-            comptime tag_name: []const u8,
-            comptime tag_idx: ?u32,
-            comptime stage: ShaderStage,
-            comptime tex: ?TEXTURE_NAMES_ENUM,
-            comptime samp: ?SAMPLER_NAMES_ENUM,
-        ) void {
-            //BUG on the application side, storage samplers, textures, and buffers have their own slot range, but on the GPU side their slots are in serial
-            switch (reg.register) {
-                .MANUAL => |reg_num| {
-                    for (v.storage_registers_used_this_shader[0..v.storage_registers_used_this_shader_len]) |used_register| {
-                        switch (used_register.register) {
-                            .MANUAL => |used_num| {
-                                ct_assert_with_reason(used_num != reg_num, @src(), "in {s} shader `{s}` {s} `{s}` tried to bind to an already bound register {d}", .{ @tagName(stage), shader_name, @tagName(reg.kind), tag_name, reg_num });
-                            },
-                            else => {},
-                        }
-                    }
-                    v.storage_registers_used_this_shader_manual_count += 1;
-                    update_max(reg_num, &v.storage_registers_used_this_shader_max);
-                    if (reg_num == v.next_storage_register_to_check) {
-                        v.next_storage_register_to_check += 1;
-                    }
-                    switch (reg.kind) {
-                        .STORAGE_BUFFER => switch (stage) {
-                            .VERTEX => v.storage_buffers_allowed_in_vertex_shaders[shader_idx][tag_idx.?].register = reg_num,
-                            .FRAGMENT => v.storage_buffers_allowed_in_fragment_shaders[shader_idx][tag_idx.?].register = reg_num,
-                        },
-                        .STORAGE_TEXTURE => switch (stage) {
-                            .VERTEX => v.storage_textures_allowed_in_vertex_shaders[shader_idx][tag_idx.?].register = reg_num,
-                            .FRAGMENT => v.storage_textures_allowed_in_fragment_shaders[shader_idx][tag_idx.?].register = reg_num,
-                        },
-                        .SAMPLED_PAIR => switch (stage) {
-                            .VERTEX => {
-                                const id = Types.combine_2_enums(samp.?, tex.?);
-                                const did_find_id = Utils.mem_search_implicit(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, @intCast(v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx]), id);
-                                if (did_find_id) |found_idx| {
-                                    ct_assert_with_reason(v.sample_pairs_allowed_in_vertex_shaders[shader_idx][found_idx].allowed == false, @src(), "in vertex shader `{s}`, sample pair `{s}` + `{s}` was bound more than once", .{ shader_name, @tagName(samp.?), @tagName(tex.?) });
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][found_idx].allowed = true;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][found_idx].register = reg_num;
-                                } else {
-                                    const new_idx = v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx];
-                                    v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx] += 1;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][new_idx].allowed = true;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][new_idx].register = reg_num;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][new_idx].combined_id = id;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][new_idx].sampler = samp.?;
-                                    v.sample_pairs_allowed_in_vertex_shaders[shader_idx][new_idx].texture = tex.?;
-                                }
-                            },
-                            .FRAGMENT => {
-                                const id = Types.combine_2_enums(samp.?, tex.?);
-                                const did_find_id = Utils.mem_search_implicit(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, @intCast(v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx]), id);
-                                if (did_find_id) |found_idx| {
-                                    ct_assert_with_reason(v.sample_pairs_allowed_in_fragment_shaders[shader_idx][found_idx].allowed == false, @src(), "in fragment shader `{s}`, sample pair `{s}` + `{s}` was bound more than once", .{ shader_name, @tagName(samp.?), @tagName(tex.?) });
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][found_idx].allowed = true;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][found_idx].register = reg_num;
-                                } else {
-                                    const new_idx = v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx];
-                                    v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx] += 1;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][new_idx].allowed = true;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][new_idx].register = reg_num;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][new_idx].combined_id = id;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][new_idx].sampler = samp.?;
-                                    v.sample_pairs_allowed_in_fragment_shaders[shader_idx][new_idx].texture = tex.?;
-                                }
-                            },
-                        },
-                    }
-                },
-                .AUTO => {
-                    v.storage_registers_used_this_shader_auto_count += 1;
-                },
-            }
-            v.storage_registers_used_this_shader[v.storage_registers_used_this_shader_len] = reg;
-            v.storage_registers_used_this_shader_len += 1;
         }
         fn process_storage_buffer_linkage(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
-            comptime link: _StorageBufferRegister,
+            comptime buffer_name: GPU_STORAGE_BUFFER_NAMES_ENUM,
             comptime ridx: u32,
             comptime stage: ShaderStage,
         ) void {
-            const buf_idx = @intFromEnum(link.buffer);
+            const buf_idx = @intFromEnum(buffer_name.buffer);
             if (stage == .VERTEX) {
-                ct_assert_with_reason(v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(link.buffer), shader_name });
+                ct_assert_with_reason(v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(buffer_name.buffer), shader_name });
                 v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed = true;
+                v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].register = true;
             } else {
-                ct_assert_with_reason(v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(link.buffer), shader_name });
+                ct_assert_with_reason(v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(buffer_name.buffer), shader_name });
                 v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed = true;
             }
-            const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .STORAGE_BUFFER };
-            SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.buffer), @intCast(@intFromEnum(link.buffer)), stage, null, null);
+            const reg_source = StorageRegisterWithSourceAndKind{ .gpu_register = buffer_name.register, .source = @intCast(ridx), .kind = .STORAGE_BUFFER };
+            SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(buffer_name.buffer), @intCast(@intFromEnum(buffer_name.buffer)), stage, null, null);
         }
         fn process_storage_texture_linkage(
             comptime v: *VARS,
@@ -1642,7 +1493,7 @@ pub fn GraphicsController(
                 ct_assert_with_reason(v.storage_textures_allowed_in_fragment_shaders[shader_idx][tex_idx].allowed == false, @src(), "storage texture `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(link.texture), shader_name });
                 v.storage_textures_allowed_in_fragment_shaders[shader_idx][tex_idx].allowed = true;
             }
-            const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .STORAGE_TEXTURE };
+            const reg_source = StorageRegisterWithSourceAndKind{ .gpu_register = link.register, .source = @intCast(ridx), .kind = .STORAGE_TEXTURE };
             SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.texture), @intCast(@intFromEnum(link.texture)), stage, null, null);
         }
         fn process_sample_pair_linkage(
@@ -1653,7 +1504,7 @@ pub fn GraphicsController(
             comptime ridx: u32,
             comptime stage: ShaderStage,
         ) void {
-            const reg_source = StorageRegisterWithSourceAndKind{ .register = link.register, .source = @intCast(ridx), .kind = .SAMPLED_PAIR };
+            const reg_source = StorageRegisterWithSourceAndKind{ .gpu_register = link.register, .source = @intCast(ridx), .kind = .SAMPLED_PAIR };
             SELF_SUB_ROUTINE.process_storage_register(v, shader_idx, shader_name, reg_source, @tagName(link.sampler) ++ "__" ++ @tagName(link.texture), null, stage, link.texture, link.sampler);
         }
         fn provision_auto_uniform_slots(
@@ -1719,7 +1570,7 @@ pub fn GraphicsController(
                 },
             }
         }
-        fn provision_auto_storage_slots(
+        fn provision_auto_storage_gpu_slots(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime vert_linkages: []const VertexShaderDefinition(
@@ -1741,21 +1592,19 @@ pub fn GraphicsController(
             comptime register: *StorageRegisterWithSourceAndKind,
             comptime stage: ShaderStage,
         ) void {
-            //BUG on the application side, storage samplers, textures, and buffers have their own slot range, but on the GPU side their slots are in serial
-            //FIXME give each one their own slots range on application side, but calculate their GPU slots as well
-            var current_slot_to_check: u32 = v.next_storage_register_to_check;
-            try_next_num: while (true) : (current_slot_to_check += 1) {
-                for (v.storage_registers_used_this_shader[0..v.storage_registers_used_this_shader_len]) |existing_register| {
-                    switch (existing_register.register) {
+            var current_gpu_slot_to_check: u32 = v.next_gpu_side_storage_register_to_check;
+            try_next_num: while (true) : (current_gpu_slot_to_check += 1) {
+                for (v.gpu_storage_registers_used_this_shader[0..v.gpu_storage_registers_used_this_shader_len]) |existing_register| {
+                    switch (existing_register.gpu_register) {
                         .MANUAL => |used_slot| {
-                            if (used_slot == current_slot_to_check) continue :try_next_num;
+                            if (used_slot == current_gpu_slot_to_check) continue :try_next_num;
                         },
                         else => {},
                     }
                 }
                 break :try_next_num;
             }
-            register.register = .register_num(current_slot_to_check);
+            register.gpu_register = .register_num(current_gpu_slot_to_check);
             switch (stage) {
                 .VERTEX => {
                     const source_linkage = find: {
@@ -1767,23 +1616,23 @@ pub fn GraphicsController(
                         unreachable;
                     };
                     switch (source_linkage) {
-                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
-                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.texture)].register = current_gpu_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_gpu_slot_to_check,
                         .SAMPLED_TEXTURE => |link| {
                             const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
                                 .combined_id = Types.combine_2_enums(link.sampler, link.texture),
                             };
                             const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
                             if (found_source) |source_idx| {
-                                v.sample_pairs_allowed_in_vertex_shaders[shader_idx][source_idx].register = current_slot_to_check;
+                                v.sample_pairs_allowed_in_vertex_shaders[shader_idx][source_idx].register = current_gpu_slot_to_check;
                             } else {
                                 unreachable;
                             }
                         },
                         else => unreachable,
                     }
-                    update_max(current_slot_to_check, &v.storage_registers_used_this_shader_max);
-                    v.next_storage_register_to_check = current_slot_to_check + 1;
+                    update_max(current_gpu_slot_to_check, &v.gpu_storage_registers_used_this_shader_max);
+                    v.next_gpu_side_storage_register_to_check = current_gpu_slot_to_check + 1;
                 },
                 .FRAGMENT => {
                     const source_linkage = find: {
@@ -1795,23 +1644,120 @@ pub fn GraphicsController(
                         unreachable;
                     };
                     switch (source_linkage) {
-                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.texture)].register = current_slot_to_check,
-                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_slot_to_check,
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.texture)].register = current_gpu_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_gpu_slot_to_check,
                         .SAMPLED_TEXTURE => |link| {
                             const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
                                 .combined_id = Types.combine_2_enums(link.sampler, link.texture),
                             };
                             const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
                             if (found_source) |source_idx| {
-                                v.sample_pairs_allowed_in_fragment_shaders[shader_idx][source_idx].register = current_slot_to_check;
+                                v.sample_pairs_allowed_in_fragment_shaders[shader_idx][source_idx].register = current_gpu_slot_to_check;
                             } else {
                                 unreachable;
                             }
                         },
                         else => unreachable,
                     }
-                    update_max(current_slot_to_check, &v.storage_registers_used_this_shader_max);
-                    v.next_storage_register_to_check = current_slot_to_check + 1;
+                    update_max(current_gpu_slot_to_check, &v.gpu_storage_registers_used_this_shader_max);
+                    v.next_gpu_side_storage_register_to_check = current_gpu_slot_to_check + 1;
+                },
+            }
+        }
+        fn provision_auto_storage_cpu_slots(
+            comptime v: *VARS,
+            comptime shader_idx: u32,
+            comptime vert_linkages: []const VertexShaderDefinition(
+                VERTEX_SHADER_NAMES_ENUM,
+                GPU_SHADER_STRUCT_NAMES_ENUM,
+                GPU_UNIFORM_NAMES_ENUM,
+                GPU_STORAGE_BUFFER_NAMES_ENUM,
+                TEXTURE_NAMES_ENUM,
+                SAMPLER_NAMES_ENUM,
+            ),
+            comptime frag_linkages: []const FragmentShaderDefinition(
+                FRAGMENT_SHADER_NAMES_ENUM,
+                GPU_SHADER_STRUCT_NAMES_ENUM,
+                GPU_UNIFORM_NAMES_ENUM,
+                GPU_STORAGE_BUFFER_NAMES_ENUM,
+                TEXTURE_NAMES_ENUM,
+                SAMPLER_NAMES_ENUM,
+            ),
+            comptime kind: StorageRegisterKind,
+            comptime register: *RegisterWithSource,
+            comptime stage: ShaderStage,
+        ) void {
+            //BUG on the application side, storage samplers, textures, and buffers have their own slot range, but on the GPU side their slots are in serial
+            //FIXME give each one their own slots range on application side, but calculate their GPU slots as well
+            var current_gpu_slot_to_check: u32 = v.next_gpu_side_storage_register_to_check;
+            try_next_num: while (true) : (current_gpu_slot_to_check += 1) {
+                for (v.gpu_storage_registers_used_this_shader[0..v.gpu_storage_registers_used_this_shader_len]) |existing_register| {
+                    switch (existing_register.gpu_register) {
+                        .MANUAL => |used_slot| {
+                            if (used_slot == current_gpu_slot_to_check) continue :try_next_num;
+                        },
+                        else => {},
+                    }
+                }
+                break :try_next_num;
+            }
+            register.gpu_register = .register_num(current_gpu_slot_to_check);
+            switch (stage) {
+                .VERTEX => {
+                    const source_linkage = find: {
+                        for (vert_linkages) |linkage| {
+                            if (@intFromEnum(linkage.vertex_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source];
+                            }
+                        }
+                        unreachable;
+                    };
+                    switch (source_linkage) {
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.texture)].register = current_gpu_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_vertex_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_gpu_slot_to_check,
+                        .SAMPLED_TEXTURE => |link| {
+                            const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                                .combined_id = Types.combine_2_enums(link.sampler, link.texture),
+                            };
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_vertex_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_vertex_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            if (found_source) |source_idx| {
+                                v.sample_pairs_allowed_in_vertex_shaders[shader_idx][source_idx].register = current_gpu_slot_to_check;
+                            } else {
+                                unreachable;
+                            }
+                        },
+                        else => unreachable,
+                    }
+                    update_max(current_gpu_slot_to_check, &v.gpu_storage_registers_used_this_shader_max);
+                    v.next_gpu_side_storage_register_to_check = current_gpu_slot_to_check + 1;
+                },
+                .FRAGMENT => {
+                    const source_linkage = find: {
+                        for (frag_linkages) |linkage| {
+                            if (@intFromEnum(linkage.fragment_shader) == shader_idx) {
+                                break :find linkage.resources_to_link[register.source];
+                            }
+                        }
+                        unreachable;
+                    };
+                    switch (source_linkage) {
+                        .STORAGE_TEXTURE => |link| v.storage_textures_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.texture)].register = current_gpu_slot_to_check,
+                        .STORAGE_BUFFER => |link| v.storage_buffers_allowed_in_fragment_shaders[shader_idx][@intFromEnum(link.buffer)].register = current_gpu_slot_to_check,
+                        .SAMPLED_TEXTURE => |link| {
+                            const proto_pair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM){
+                                .combined_id = Types.combine_2_enums(link.sampler, link.texture),
+                            };
+                            const found_source = Utils.mem_search_with_func(@ptrCast(&v.sample_pairs_allowed_in_fragment_shaders[shader_idx]), 0, v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx], proto_pair, ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM).equals_id);
+                            if (found_source) |source_idx| {
+                                v.sample_pairs_allowed_in_fragment_shaders[shader_idx][source_idx].register = current_gpu_slot_to_check;
+                            } else {
+                                unreachable;
+                            }
+                        },
+                        else => unreachable,
+                    }
+                    update_max(current_gpu_slot_to_check, &v.gpu_storage_registers_used_this_shader_max);
+                    v.next_gpu_side_storage_register_to_check = current_gpu_slot_to_check + 1;
                 },
             }
         }
@@ -1845,9 +1791,9 @@ pub fn GraphicsController(
         }
         // CHECK IF IT IS DEFINITELY IMPOSSIBLE TO COMPILE (MAX REGISTER FOR A GROUP IS >= TOTAL NUM REGISTERS FOR THAT GROUP => AN EMPTY REGISTER IS INEVITABLE)
         ct_assert_with_reason(vars.uniform_registers_used_this_shader_len == 0 or (vars.uniform_registers_used_this_shader_len > vars.uniform_registers_used_this_shader_max), @src(), "uniform registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.uniform_registers_used_this_shader_len, vars.uniform_registers_used_this_shader_max });
-        ct_assert_with_reason(vars.storage_registers_used_this_shader_len == 0 or (vars.storage_registers_used_this_shader_len > vars.storage_registers_used_this_shader_max), @src(), "storage registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.storage_registers_used_this_shader_len, vars.storage_registers_used_this_shader_max });
+        ct_assert_with_reason(vars.gpu_storage_registers_used_this_shader_len == 0 or (vars.gpu_storage_registers_used_this_shader_len > vars.gpu_storage_registers_used_this_shader_max), @src(), "storage registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.gpu_storage_registers_used_this_shader_len, vars.gpu_storage_registers_used_this_shader_max });
         // SORT STORAGE REGISTERS SO UNUSED SLOTS ARE GIVEN OUT IN THE ORDER: SAMPLE_TEXTURES => STORAGE_TEXTURES => STORAGE_BUFFERS
-        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.greater_than);
+        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.gpu_greater_than);
         // NEXT, GO THROUGH AND RESOLVE ALL 'AUTO' BINDINGS TO FILL UNUSED SLOTS, THEN CHECK IF PROVISIONING RESULTED IN TOTAL == (MAX + 1),
         // WITH STORAGE SLOTS IN CORRECT ORDER (SAMPLED_TEXTURES => STORAGE_TEXTURES => STORAGE_BUFFERS)
         for (vars.uniform_registers_used_this_shader[0..vars.uniform_registers_used_this_shader_len]) |uni_register| {
@@ -1855,13 +1801,13 @@ pub fn GraphicsController(
             SUB_ROUTINE.provision_auto_uniform_slots(&vars, @intCast(vert_idx), vertex_linkages, fragment_linkages, uni_register, .VERTEX);
         }
         ct_assert_with_reason(vars.uniform_registers_used_this_shader_len == 0 or (vars.uniform_registers_used_this_shader_len == vars.uniform_registers_used_this_shader_max + 1), @src(), "uniform registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.uniform_registers_used_this_shader_len, vars.uniform_registers_used_this_shader_max });
-        for (vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len]) |*storage_register| {
-            if (storage_register.register == .MANUAL) continue;
-            SUB_ROUTINE.provision_auto_storage_slots(&vars, @intCast(vert_idx), vertex_linkages, fragment_linkages, storage_register, .VERTEX);
+        for (vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len]) |*storage_register| {
+            if (storage_register.gpu_register == .MANUAL) continue;
+            SUB_ROUTINE.provision_auto_storage_gpu_slots(&vars, @intCast(vert_idx), vertex_linkages, fragment_linkages, storage_register, .VERTEX);
         }
-        ct_assert_with_reason(vars.storage_registers_used_this_shader_len == 0 or vars.storage_registers_used_this_shader_len == vars.storage_registers_used_this_shader_max + 1, @src(), "storage registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.storage_registers_used_this_shader_len, vars.storage_registers_used_this_shader_max });
-        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.greater_than_only_register);
-        ct_assert_with_reason(Utils.mem_is_sorted_with_func(@ptrCast(&vars.storage_registers_used_this_shader), 0, vars.storage_registers_used_this_shader_len, StorageRegisterWithSourceAndKind.greater_than_only_kind), @src(), "not all storage registers in vertex shader `{s}` are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.vertex_shader), vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len] });
+        ct_assert_with_reason(vars.gpu_storage_registers_used_this_shader_len == 0 or vars.gpu_storage_registers_used_this_shader_len == vars.gpu_storage_registers_used_this_shader_max + 1, @src(), "storage registers for vertex shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.vertex_shader), vars.gpu_storage_registers_used_this_shader_len, vars.gpu_storage_registers_used_this_shader_max });
+        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.gpu_greater_than_only_register);
+        ct_assert_with_reason(Utils.mem_is_sorted_with_func(@ptrCast(&vars.gpu_storage_registers_used_this_shader), 0, vars.gpu_storage_registers_used_this_shader_len, StorageRegisterWithSourceAndKind.gpu_greater_than_only_kind), @src(), "not all storage registers in vertex shader `{s}` are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.vertex_shader), vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len] });
     }
     const ordered_vertex_shader_definitions_const = ordered_vertex_shader_definitions;
     // COMPTIME VALIDATION / ORGANIZATION OF FRAGMENT SHADER BINDINGS
@@ -1893,9 +1839,9 @@ pub fn GraphicsController(
         }
         // CHECK IF IT IS DEFINITELY IMPOSSIBLE TO COMPILE (MAX REGISTER FOR A GROUP IS >= TOTAL NUM REGISTERS FOR THAT GROUP = AN EMPTY REGISTER IS INEVITABLE)
         ct_assert_with_reason(vars.uniform_registers_used_this_shader_len == 0 or vars.uniform_registers_used_this_shader_len > vars.uniform_registers_used_this_shader_max, @src(), "uniform registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.uniform_registers_used_this_shader_len, vars.uniform_registers_used_this_shader_max });
-        ct_assert_with_reason(vars.storage_registers_used_this_shader_len == 0 or vars.storage_registers_used_this_shader_len > vars.storage_registers_used_this_shader_max, @src(), "storage registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.storage_registers_used_this_shader_len, vars.storage_registers_used_this_shader_max });
+        ct_assert_with_reason(vars.gpu_storage_registers_used_this_shader_len == 0 or vars.gpu_storage_registers_used_this_shader_len > vars.gpu_storage_registers_used_this_shader_max, @src(), "storage registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there will be an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.gpu_storage_registers_used_this_shader_len, vars.gpu_storage_registers_used_this_shader_max });
         // SORT STORAGE REGISTERS SO UNUSED SLOTS ARE GIVEN OUT IN THE ORDER: SAMPLE_TEXTURES => STORAGE_TEXTURES => STORAGE_BUFFERS
-        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.greater_than);
+        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.gpu_greater_than);
         // NEXT, GO THROUGH AND RESOLVE ALL 'AUTO' BINDINGS TO FILL UNUSED SLOTS, THEN CHECK IF PROVISIONING RESULTED IN TOTAL == (MAX + 1),
         // WITH STORAGE SLOTS IN CORRECT ORDER (SAMPLED_TEXTURES => STORAGE_TEXTURES => STORAGE_BUFFERS)
         for (vars.uniform_registers_used_this_shader[0..vars.uniform_registers_used_this_shader_len]) |uni_register| {
@@ -1903,13 +1849,13 @@ pub fn GraphicsController(
             SUB_ROUTINE.provision_auto_uniform_slots(&vars, @intCast(frag_idx), vertex_linkages, fragment_linkages, uni_register, .FRAGMENT);
         }
         ct_assert_with_reason(vars.uniform_registers_used_this_shader_len == 0 or vars.uniform_registers_used_this_shader_len == vars.uniform_registers_used_this_shader_max + 1, @src(), "uniform registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.uniform_registers_used_this_shader_len, vars.uniform_registers_used_this_shader_max });
-        for (vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len]) |*storage_register| {
-            if (storage_register.register == .MANUAL) continue;
-            SUB_ROUTINE.provision_auto_storage_slots(&vars, @intCast(frag_idx), vertex_linkages, fragment_linkages, storage_register, .FRAGMENT);
+        for (vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len]) |*storage_register| {
+            if (storage_register.gpu_register == .MANUAL) continue;
+            SUB_ROUTINE.provision_auto_storage_gpu_slots(&vars, @intCast(frag_idx), vertex_linkages, fragment_linkages, storage_register, .FRAGMENT);
         }
-        ct_assert_with_reason(vars.storage_registers_used_this_shader_len == 0 or vars.storage_registers_used_this_shader_len == vars.storage_registers_used_this_shader_max + 1, @src(), "storage registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.storage_registers_used_this_shader_len, vars.storage_registers_used_this_shader_max });
-        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.greater_than_only_register);
-        ct_assert_with_reason(Utils.mem_is_sorted_with_func(@ptrCast(&vars.storage_registers_used_this_shader), 0, vars.storage_registers_used_this_shader_len, StorageRegisterWithSourceAndKind.greater_than_only_kind), @src(), "not all storage registers in vertex shader `{s}` are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.fragment_shader), vars.storage_registers_used_this_shader[0..vars.storage_registers_used_this_shader_len] });
+        ct_assert_with_reason(vars.gpu_storage_registers_used_this_shader_len == 0 or vars.gpu_storage_registers_used_this_shader_len == vars.gpu_storage_registers_used_this_shader_max + 1, @src(), "storage registers for fragment shader `{s}` total to {d}, but the largest register is {d}: there is an empty register somewhere which is disallowed (all registers must start at 0 and continue to the max register num with no gaps)", .{ @tagName(linkage.fragment_shader), vars.gpu_storage_registers_used_this_shader_len, vars.gpu_storage_registers_used_this_shader_max });
+        Sort.insertion_sort_with_func(StorageRegisterWithSourceAndKind, vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len], StorageRegisterWithSourceAndKind.gpu_greater_than_only_register);
+        ct_assert_with_reason(Utils.mem_is_sorted_with_func(@ptrCast(&vars.gpu_storage_registers_used_this_shader), 0, vars.gpu_storage_registers_used_this_shader_len, StorageRegisterWithSourceAndKind.gpu_greater_than_only_kind), @src(), "not all storage registers in vertex shader `{s}` are in correct order (all sampled textures must come first, then all storage textures, then all storage buffers with increasing registers), got: {any}", .{ @tagName(linkage.fragment_shader), vars.gpu_storage_registers_used_this_shader[0..vars.gpu_storage_registers_used_this_shader_len] });
     }
     const ordered_fragment_shader_definitions_const = ordered_fragment_shader_definitions;
     // COMPILE A CONDENSED LIST OF ALLOWED UNIFORMS
@@ -2071,15 +2017,15 @@ pub fn GraphicsController(
     }
     storage_texture_starts_vert[_NUM_VERTEX_SHADERS] = total_num_allowed_storage_textures_vert;
     storage_texture_starts_frag[_NUM_FRAGMENT_SHADERS] = total_num_allowed_storage_textures_frag;
-    comptime var all_allowed_storage_textures_flat_vert: [total_num_allowed_storage_textures_vert]_ShaderAllowedStorageTexture = undefined;
-    comptime var all_allowed_storage_textures_flat_frag: [total_num_allowed_storage_textures_frag]_ShaderAllowedStorageTexture = undefined;
+    comptime var all_allowed_storage_textures_flat_vert: [total_num_allowed_storage_textures_vert]TEXTURE_NAMES_ENUM = undefined;
+    comptime var all_allowed_storage_textures_flat_frag: [total_num_allowed_storage_textures_frag]TEXTURE_NAMES_ENUM = undefined;
     vi = 0;
     fi = 0;
     inline for (0.._NUM_VERTEX_SHADERS) |v| {
         const start = vi;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_vertex_shaders[v][t].allowed) {
-                const allowed = _ShaderAllowedStorageTexture{
+                const allowed = TEXTURE_NAMES_ENUM{
                     .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
                     .register = vars.storage_textures_allowed_in_vertex_shaders[v][t].register,
                 };
@@ -2087,13 +2033,13 @@ pub fn GraphicsController(
                 vi += 1;
             }
         }
-        Sort.insertion_sort_with_func(_ShaderAllowedStorageTexture, all_allowed_storage_textures_flat_vert[start..vi], _ShaderAllowedStorageTexture.register_greater);
+        Sort.insertion_sort_with_func(TEXTURE_NAMES_ENUM, all_allowed_storage_textures_flat_vert[start..vi], TEXTURE_NAMES_ENUM.register_greater);
     }
     inline for (0.._NUM_FRAGMENT_SHADERS) |f| {
         const start = fi;
         inline for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_fragment_shaders[f][t].allowed) {
-                const allowed = _ShaderAllowedStorageTexture{
+                const allowed = TEXTURE_NAMES_ENUM{
                     .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
                     .register = vars.storage_textures_allowed_in_fragment_shaders[f][t].register,
                 };
@@ -2101,7 +2047,7 @@ pub fn GraphicsController(
                 fi += 1;
             }
         }
-        Sort.insertion_sort_with_func(_ShaderAllowedStorageTexture, all_allowed_storage_textures_flat_frag[start..fi], _ShaderAllowedStorageTexture.register_greater);
+        Sort.insertion_sort_with_func(TEXTURE_NAMES_ENUM, all_allowed_storage_textures_flat_frag[start..fi], TEXTURE_NAMES_ENUM.register_greater);
     }
     const longest_storage_texture_set_frag_const = longest_storage_texture_set_frag;
     const longest_storage_texture_set_vert_const = longest_storage_texture_set_vert;
@@ -2217,7 +2163,7 @@ pub fn GraphicsController(
         comptime var rates_used: [_NUM_VERT_BUFFERS]SDL3.GPU_VertexInputRate = undefined;
         comptime var slots_used_len: u32 = 0;
         comptime var vertex_buffers_for_this_pipeline: [_NUM_VERT_BUFFERS]bool = @splat(false);
-        comptime var vertex_buffer_slots_for_this_pipeline: [_NUM_VERT_BUFFERS]Register = @splat(Register.auto_register());
+        comptime var vertex_buffer_slots_for_this_pipeline: [_NUM_VERT_BUFFERS]u32 = @splat(u32.auto_register());
         comptime var vertex_buffer_rates_for_this_pipeline: [_NUM_VERT_BUFFERS]SDL3.GPU_VertexInputRate = @splat(.VERTEX);
         comptime var max_slot_used: u32 = 0;
         const pipe_name: RENDER_PIPELINE_NAMES_ENUM = @enumFromInt(@as(Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), @intCast(pipe_idx)));
@@ -2241,7 +2187,7 @@ pub fn GraphicsController(
                 .AUTO => {},
                 .MANUAL => |new_slot| switch (vertex_buffer_slots_for_this_pipeline[vert_buf_idx]) {
                     .AUTO => {
-                        vertex_buffer_slots_for_this_pipeline[vert_buf_idx] = Register.register_num(new_slot);
+                        vertex_buffer_slots_for_this_pipeline[vert_buf_idx] = u32.register_num(new_slot);
                         if (Utils.mem_search_implicit(@ptrCast(&slots_used), 0, @intCast(slots_used_len), new_slot)) |found_used_slot_idx| {
                             ct_assert_with_reason(vert_buf_idx == buffers_used[found_used_slot_idx], @src(), "in render pipeline `{s}`, vertex buffer `{s}` was bound to slot {d}, but that slot was already bound to another vertex buffer (`{s}`)", .{ @tagName(pipe_name), @tagName(field_map.vertex_buffer), new_slot, @tagName(@as(GPU_VERTEX_BUFFER_NAMES_ENUM, @enumFromInt(buffers_used[found_used_slot_idx]))) });
                         } else {
@@ -2288,7 +2234,7 @@ pub fn GraphicsController(
                     }
                     max_slot_used = @max(max_slot_used, next_slot_to_check_for_use);
                     slots_used[slots_used_len] = next_slot_to_check_for_use;
-                    vertex_buffer_slots_for_this_pipeline[vb] = Register.register_num(next_slot_to_check_for_use);
+                    vertex_buffer_slots_for_this_pipeline[vb] = u32.register_num(next_slot_to_check_for_use);
                     rates_used[slots_used_len] = vertex_buffer_rates_for_this_pipeline[vb];
                     buffers_used[slots_used_len] = vb;
                     slots_used_len += 1;
@@ -4135,6 +4081,7 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.download_list.append_one(details, self.controller.list_alloc);
+                self.cmd.download_occured = true;
                 return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
             }
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
@@ -4177,6 +4124,7 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.download_list.append_one(details, self.controller.list_alloc);
+                self.cmd.download_occured = true;
                 return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
             }
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
@@ -4219,6 +4167,7 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.download_list.append_one(details, self.controller.list_alloc);
+                self.cmd.download_occured = true;
                 return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
             }
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
@@ -4258,6 +4207,7 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.download_list.append_one(details, self.controller.list_alloc);
+                self.cmd.download_occured = true;
                 return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
             }
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
@@ -4308,11 +4258,13 @@ pub fn GraphicsController(
                     .transfer_buf_len = transfer_len,
                 };
                 _ = self.controller.download_list.append_one(details, self.controller.list_alloc);
+                self.cmd.download_occured = true;
                 return std.mem.bytesAsSlice(dest_element_type, dest_bytes[0..transfer_len]);
             }
 
             pub fn end_download_pass_and_submit_command_buffer(self: *DownloadPass) PossibleError(PendingFinalDownloadHandle) {
                 _INTERNAL.assert_valid(self.*, @src());
+                CommandBuffer._INTERNAL.assert_no_download_occured_for_no_fence(self.cmd, @src());
                 self.controller.assert_final_download_NOT_pending(@src());
                 self.controller.download_pass_active = false;
                 _INTERNAL.handle_queued_actions(self.*);
@@ -4403,11 +4355,17 @@ pub fn GraphicsController(
             controller: *Controller,
             command: *SDL3.GPU_CommandBuffer,
             valid: bool = false,
+            download_occured: bool = false,
+            swapchain_cache: [INTERNAL.NUM_WINDOWS]*GPU_SwapchainTexture = undefined,
+            swapchain_is_cached: [INTERNAL.NUM_WINDOWS]bool = @splat(false),
 
             pub const _INTERNAL = struct {
                 pub inline fn assert_valid(self: CommandBuffer, comptime src: ?std.builtin.SourceLocation) void {
                     self.controller.assert_command_buffer_active(src);
                     assert_with_reason(self.valid, src, "this CommandBuffer was either created incorrectly or was already ended", .{});
+                }
+                pub inline fn assert_no_download_occured_for_no_fence(self: CommandBuffer, comptime src: ?std.builtin.SourceLocation) void {
+                    assert_with_reason(!self.download_occured, src, "You must return a named or transient fence when a download pass occurs. If you really want to skip fencing, set `command_buffer.download_occured = false;` before submitting", .{});
                 }
                 pub inline fn assert_valid_no_sub(self: CommandBuffer, comptime src: ?std.builtin.SourceLocation) void {
                     self.controller.assert_command_buffer_active(src);
@@ -4453,27 +4411,55 @@ pub fn GraphicsController(
 
             pub fn get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(*GPU_Texture) {
                 _INTERNAL.assert_valid(self, @src());
-                const win = self.controller.get_claimed_window(window_name);
-                const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
-                return swap.texture;
+                const win_idx = @intFromEnum(window_name);
+                if (self.swapchain_is_cached[win_idx]) {
+                    return self.swapchain_cache[win_idx].texture;
+                } else {
+                    const win = self.controller.get_claimed_window(window_name);
+                    const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                    self.swapchain_cache[win_idx] = swap;
+                    self.swapchain_is_cached[win_idx] = true;
+                    return swap.texture;
+                }
             }
             pub fn get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(GPU_SwapchainTexture) {
                 _INTERNAL.assert_valid(self, @src());
-                const win = self.controller.get_claimed_window(window_name);
-                const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
-                return swap;
+                const win_idx = @intFromEnum(window_name);
+                if (self.swapchain_is_cached[win_idx]) {
+                    return self.swapchain_cache[win_idx];
+                } else {
+                    const win = self.controller.get_claimed_window(window_name);
+                    const swap = self.command.aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                    self.swapchain_cache[win_idx] = swap;
+                    self.swapchain_is_cached[win_idx] = true;
+                    return swap.texture;
+                }
             }
             pub fn wait_and_get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(*GPU_Texture) {
                 _INTERNAL.assert_valid(self, @src());
-                const win = self.controller.get_claimed_window(window_name);
-                const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
-                return swap.texture;
+                const win_idx = @intFromEnum(window_name);
+                if (self.swapchain_is_cached[win_idx]) {
+                    return self.swapchain_cache[win_idx].texture;
+                } else {
+                    const win = self.controller.get_claimed_window(window_name);
+                    const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                    self.swapchain_cache[win_idx] = swap;
+                    self.swapchain_is_cached[win_idx] = true;
+                    return swap.texture;
+                }
             }
             pub fn wait_and_get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) PossibleError(GPU_SwapchainTexture) {
                 _INTERNAL.assert_valid(self, @src());
-                const win = self.controller.get_claimed_window(window_name);
-                const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
-                return swap;
+                const win_idx = @intFromEnum(window_name);
+                if (self.swapchain_is_cached[win_idx]) {
+                    return self.swapchain_cache[win_idx];
+                } else {
+                    const win = self.controller.get_claimed_window(window_name);
+                    const swap = self.command.wait_and_aquire_swapchain_texture(win) catch |err| return ERROR_MODE.handle(@src(), err);
+                    self.swapchain_cache[win_idx] = swap;
+                    self.swapchain_is_cached[win_idx] = true;
+                    return swap.texture;
+                }
             }
 
             pub fn begin_gpu_copy_pass(self: CommandBuffer) PossibleError(CopyPassGPUOnly) {
@@ -4517,6 +4503,7 @@ pub fn GraphicsController(
             }
             pub fn submit_commands(self: *CommandBuffer) PossibleError(void) {
                 _INTERNAL.assert_valid_no_sub(self, @src());
+                _INTERNAL.assert_no_download_occured_for_no_fence(self, @src());
                 self.command.submit_commands() catch |err| return ERROR_MODE.handle(@src(), err);
                 for (self.controller.delete_buffers_list.zig_slice_entire()) |to_delete| {
                     self.controller.gpu.release_buffer(to_delete.buf);
@@ -5250,11 +5237,11 @@ pub fn GraphicsController(
                 const idx = @intFromEnum(vert_shader);
                 return STORAGE_TEXTURES_STARTS_VERT[idx + 1] - STORAGE_TEXTURES_STARTS_VERT[idx];
             }
-            pub inline fn allowed_storage_textures_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedStorageTexture {
+            pub inline fn allowed_storage_textures_for_frag_shaders(frag_shader: FragmentShaderName) []const TEXTURE_NAMES_ENUM {
                 const idx = @intFromEnum(frag_shader);
                 return ALLOWED_STORAGE_TEXTURES_FLAT_FRAG[STORAGE_TEXTURES_STARTS_FRAG[idx]..STORAGE_TEXTURES_STARTS_FRAG[idx + 1]];
             }
-            pub inline fn allowed_storage_textures_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedStorageTexture {
+            pub inline fn allowed_storage_textures_for_vert_shaders(vert_shader: VertexShaderName) []const TEXTURE_NAMES_ENUM {
                 const idx = @intFromEnum(vert_shader);
                 return ALLOWED_STORAGE_TEXTURES_FLAT_VERT[STORAGE_TEXTURES_STARTS_VERT[idx]..STORAGE_TEXTURES_STARTS_VERT[idx + 1]];
             }
@@ -5354,7 +5341,8 @@ pub fn GraphicsController(
                 return null;
             }
 
-            const INDEX_BUFFER_IDX_TYPES = ordered_index_buffer_defs_const;
+            const INDEX_BUFFER_IDX_TYPES = ordered_index_buffer_types_const;
+            const INDEX_BUFFER_IDX_SIZES = ordered_index_buffer_sizes_const;
         };
 
         pub const WindowName = WINDOW_NAMES_ENUM;
