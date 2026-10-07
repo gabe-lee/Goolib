@@ -59,7 +59,7 @@ pub fn core_for_any_data_structure_with_contiguous_memory_not_allocated(comptime
         .ELEM = ELEM,
         .ID = INDEX,
         .COUNT_INT = INDEX,
-        .USERDATA = void,
+        .AUX_DATA = void,
     };
 }
 
@@ -69,7 +69,7 @@ pub fn core_for_any_data_structure_with_contiguous_memory_allocated(comptime DAT
         .ELEM = ELEM,
         .ID = INDEX,
         .COUNT_INT = INDEX,
-        .USERDATA = struct {
+        .AUX_DATA = struct {
             alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
             alloc_settings: Utils.Alloc.SmartAllocSettings(ELEM) = .{},
             alloc_comptime_settings: Utils.Alloc.SmartAllocComptimeSettings(ELEM) = .{},
@@ -83,7 +83,7 @@ pub fn core_for_slice_not_allocated(comptime ELEM: type) DataManipulationCore {
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
-        .USERDATA = void,
+        .AUX_DATA = void,
     };
 }
 
@@ -93,7 +93,7 @@ pub fn core_for_slice_allocated(comptime ELEM: type) DataManipulationCore {
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
-        .USERDATA = struct {
+        .AUX_DATA = struct {
             alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
             alloc_settings: Utils.Alloc.SmartAllocSettings(ELEM) = .{},
             alloc_comptime_settings: Utils.Alloc.SmartAllocComptimeSettings(ELEM) = .{},
@@ -108,7 +108,7 @@ pub fn core_for_const_slice(comptime ELEM: type) DataManipulationCore {
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
-        .USERDATA = void,
+        .AUX_DATA = void,
     };
 }
 
@@ -118,7 +118,7 @@ pub fn core_for_arraylist_allocated(comptime ELEM: type) DataManipulationCore {
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
-        .USERDATA = struct {
+        .AUX_DATA = struct {
             alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
             alloc_settings: Utils.Alloc.SmartAllocSettings(ELEM) = .{},
             alloc_comptime_settings: Utils.Alloc.SmartAllocComptimeSettings(ELEM) = .{},
@@ -132,36 +132,36 @@ pub fn core_for_arraylist_not_allocated(comptime ELEM: type) DataManipulationCor
         .ELEM = ELEM,
         .ID = usize,
         .COUNT_INT = usize,
-        .USERDATA = void,
+        .AUX_DATA = void,
     };
 }
 
 pub fn default_functions_for_slice_not_allocated(comptime ELEM: type) core_for_slice_not_allocated(ELEM).Builder().CustomFunctions_ {
     const CORE = core_for_slice_not_allocated(ELEM);
     const PROTO = struct {
-        fn get_base_ptr(data: CORE.DATA, _: CORE.USERDATA) [*]ELEM {
+        fn get_base_ptr(data: CORE.DATA, _: CORE.AUX_DATA) [*]ELEM {
             return data.ptr;
         }
-        fn set_base_ptr(data_: CORE.DATA, ptr: [*]ELEM, _: CORE.USERDATA) CORE.DATA {
+        fn set_base_ptr(data_: CORE.DATA, ptr: [*]ELEM, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.ptr = ptr;
             return data;
         }
-        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.USERDATA) []ELEM {
+        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.AUX_DATA) []ELEM {
             return data.ptr[first .. last + 1];
         }
-        fn get_len(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_len(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_len(data_: CORE.DATA, new_len: usize, _: CORE.USERDATA) CORE.DATA {
+        fn set_len(data_: CORE.DATA, new_len: usize, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.len = new_len;
             return data;
         }
-        fn get_cap(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_cap(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_cap(data_: CORE.DATA, new_len: usize, _: CORE.USERDATA) CORE.DATA {
+        fn set_cap(data_: CORE.DATA, new_len: usize, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.len = new_len;
             return data;
@@ -182,29 +182,29 @@ pub fn default_functions_for_slice_not_allocated(comptime ELEM: type) core_for_s
 pub fn default_functions_for_arraylist_not_allocated(comptime ELEM: type) core_for_arraylist_not_allocated(ELEM).Builder().CustomFunctions_ {
     const CORE = core_for_arraylist_not_allocated(ELEM);
     const PROTO = struct {
-        fn get_base_ptr(data: CORE.DATA, _: CORE.USERDATA) [*]ELEM {
+        fn get_base_ptr(data: CORE.DATA, _: CORE.AUX_DATA) [*]ELEM {
             return data.items.ptr;
         }
-        fn set_base_ptr(data_: CORE.DATA, ptr: [*]ELEM, _: CORE.USERDATA) CORE.DATA {
+        fn set_base_ptr(data_: CORE.DATA, ptr: [*]ELEM, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.items.ptr = ptr;
             return data;
         }
-        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.USERDATA) []ELEM {
+        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.AUX_DATA) []ELEM {
             return data.items.ptr[first .. last + 1];
         }
-        fn get_len(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_len(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.items.len;
         }
-        fn set_len(data_: CORE.DATA, new_len: usize, _: CORE.USERDATA) CORE.DATA {
+        fn set_len(data_: CORE.DATA, new_len: usize, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.items.len = new_len;
             return data;
         }
-        fn get_cap(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_cap(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.capacity;
         }
-        fn set_cap(data_: CORE.DATA, new_cap: usize, _: CORE.USERDATA) CORE.DATA {
+        fn set_cap(data_: CORE.DATA, new_cap: usize, _: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             data.capacity = new_cap;
             return data;
@@ -225,16 +225,16 @@ pub fn default_functions_for_arraylist_not_allocated(comptime ELEM: type) core_f
 pub fn default_functions_for_slice_allocated(comptime ELEM: type) core_for_slice_allocated(ELEM).Builder().CustomFunctions_ {
     const CORE = core_for_slice_allocated(ELEM);
     const PROTO = struct {
-        fn get_base_ptr(data: CORE.DATA, _: CORE.USERDATA) [*]ELEM {
+        fn get_base_ptr(data: CORE.DATA, _: CORE.AUX_DATA) [*]ELEM {
             return data.ptr;
         }
-        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.USERDATA) []ELEM {
+        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.AUX_DATA) []ELEM {
             return data.ptr[first .. last + 1];
         }
-        fn get_len(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_len(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_len(data_: CORE.DATA, new_len: usize, user: CORE.USERDATA) CORE.DATA {
+        fn set_len(data_: CORE.DATA, new_len: usize, user: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             const alloc = user.alloc;
             const alloc_settings = user.alloc_settings;
@@ -242,10 +242,10 @@ pub fn default_functions_for_slice_allocated(comptime ELEM: type) core_for_slice
             data = Utils.Alloc.smart_alloc(alloc, data.ptr, data.len, data.len, new_len, alloc_settings, alloc_comp_settings);
             return data;
         }
-        fn get_cap(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_cap(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_cap(data_: CORE.DATA, new_cap: usize, user: CORE.USERDATA) CORE.DATA {
+        fn set_cap(data_: CORE.DATA, new_cap: usize, user: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             const alloc = user.alloc;
             const alloc_settings = user.alloc_settings;
@@ -268,16 +268,16 @@ pub fn default_functions_for_slice_allocated(comptime ELEM: type) core_for_slice
 pub fn default_functions_for_arraylist_allocated(comptime ELEM: type) core_for_arraylist_allocated(ELEM).Builder().CustomFunctions_ {
     const CORE = core_for_arraylist_allocated(ELEM);
     const PROTO = struct {
-        fn get_base_ptr(data: CORE.DATA, _: CORE.USERDATA) [*]ELEM {
+        fn get_base_ptr(data: CORE.DATA, _: CORE.AUX_DATA) [*]ELEM {
             return data.ptr;
         }
-        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.USERDATA) []ELEM {
+        fn get_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.AUX_DATA) []ELEM {
             return data.ptr[first .. last + 1];
         }
-        fn get_len(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_len(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_len(data_: CORE.DATA, new_len: usize, user: CORE.USERDATA) CORE.DATA {
+        fn set_len(data_: CORE.DATA, new_len: usize, user: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             if (new_len > data.capacity) {
                 data = set_cap(data, new_len, user);
@@ -285,10 +285,10 @@ pub fn default_functions_for_arraylist_allocated(comptime ELEM: type) core_for_a
             data.items.len = new_len;
             return data;
         }
-        fn get_cap(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_cap(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn set_cap(data_: CORE.DATA, new_cap: usize, user: CORE.USERDATA) CORE.DATA {
+        fn set_cap(data_: CORE.DATA, new_cap: usize, user: CORE.AUX_DATA) CORE.DATA {
             var data = data_;
             const alloc = user.alloc;
             const alloc_settings = user.alloc_settings;
@@ -314,16 +314,16 @@ pub fn default_functions_for_arraylist_allocated(comptime ELEM: type) core_for_a
 pub fn default_functions_for_const_slice(comptime ELEM: type) core_for_const_slice(ELEM).Builder().CustomFunctions_ {
     const CORE = core_for_const_slice(ELEM);
     const PROTO = struct {
-        fn get_base_const_ptr(data: CORE.DATA, _: CORE.USERDATA) [*]const ELEM {
+        fn get_base_const_ptr(data: CORE.DATA, _: CORE.AUX_DATA) [*]const ELEM {
             return data.ptr;
         }
-        fn get_const_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.USERDATA) []const ELEM {
+        fn get_const_slice(data: CORE.DATA, first: usize, last: usize, _: CORE.AUX_DATA) []const ELEM {
             return data.ptr[first .. last + 1];
         }
-        fn get_len(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_len(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
-        fn get_cap(data: CORE.DATA, _: CORE.USERDATA) usize {
+        fn get_cap(data: CORE.DATA, _: CORE.AUX_DATA) usize {
             return data.len;
         }
     };
@@ -373,20 +373,20 @@ pub fn default_functions_for_contiguous_mem_allocated(
             opq = opq + offset;
             return @ptrCast(@alignCast(opq));
         }
-        fn get_base_ptr(data: DATA, _: CORE.USERDATA) [*]ELEM {
+        fn get_base_ptr(data: DATA, _: CORE.AUX_DATA) [*]ELEM {
             const ptr_offset: usize = comptime field_offset(PTR_FIELD_ACCESS, [*]ELEM);
             const ptr = cast_offset_to_field_immutable(&data, ptr_offset, [*]ELEM);
             return ptr.*;
         }
-        fn get_slice(data: DATA, first: INDEX, last: INDEX, user: CORE.USERDATA) []ELEM {
+        fn get_slice(data: DATA, first: INDEX, last: INDEX, user: CORE.AUX_DATA) []ELEM {
             return get_base_ptr(data, user)[first .. last + 1];
         }
-        fn get_len(data: DATA, _: CORE.USERDATA) INDEX {
+        fn get_len(data: DATA, _: CORE.AUX_DATA) INDEX {
             const len_offset: usize = comptime field_offset(LEN_FIELD_ACCESS, INDEX);
             const len = cast_offset_to_field_immutable(&data, len_offset, INDEX);
             return len.*;
         }
-        fn set_len(data_: DATA, new_len: INDEX, user: CORE.USERDATA) DATA {
+        fn set_len(data_: DATA, new_len: INDEX, user: CORE.AUX_DATA) DATA {
             var data = data_;
             if (comptime HAS_CAP) {
                 if (new_len > get_cap(data, user)) {
@@ -398,7 +398,7 @@ pub fn default_functions_for_contiguous_mem_allocated(
             len.* = new_len;
             return data;
         }
-        fn get_cap(data: DATA, user: CORE.USERDATA) usize {
+        fn get_cap(data: DATA, user: CORE.AUX_DATA) usize {
             if (comptime HAS_CAP) {
                 const cap_offset: usize = comptime field_offset(CAP_FIELD_ACCESS, INDEX);
                 const cap = cast_offset_to_field_immutable(&data, cap_offset, INDEX);
@@ -407,7 +407,7 @@ pub fn default_functions_for_contiguous_mem_allocated(
                 return get_len(data, user);
             }
         }
-        fn set_cap(data_: DATA, new_cap: INDEX, user: CORE.USERDATA) DATA {
+        fn set_cap(data_: DATA, new_cap: INDEX, user: CORE.AUX_DATA) DATA {
             if (comptime HAS_CAP) {
                 var data = data_;
                 const alloc = user.alloc;
@@ -474,20 +474,20 @@ pub fn default_functions_for_contiguous_mem_not_allocated(
             opq = opq + offset;
             return @ptrCast(@alignCast(opq));
         }
-        fn get_base_const_ptr(data: DATA, _: CORE.USERDATA) [*]const ELEM {
+        fn get_base_const_ptr(data: DATA, _: CORE.AUX_DATA) [*]const ELEM {
             const ptr_offset: usize = comptime field_offset(PTR_FIELD_ACCESS, [*]const ELEM);
             const ptr = cast_offset_to_field_immutable(&data, ptr_offset, [*]const ELEM);
             return ptr.*;
         }
-        fn get_const_slice(data: DATA, first: INDEX, last: INDEX, user: CORE.USERDATA) []const ELEM {
+        fn get_const_slice(data: DATA, first: INDEX, last: INDEX, user: CORE.AUX_DATA) []const ELEM {
             return get_base_const_ptr(data, user)[first .. last + 1];
         }
-        fn get_len(data: DATA, _: CORE.USERDATA) INDEX {
+        fn get_len(data: DATA, _: CORE.AUX_DATA) INDEX {
             const len_offset: usize = comptime field_offset(LEN_FIELD_ACCESS, INDEX);
             const len = cast_offset_to_field_immutable(&data, len_offset, INDEX);
             return len.*;
         }
-        fn set_len(data_: DATA, new_len: INDEX, user: CORE.USERDATA) DATA {
+        fn set_len(data_: DATA, new_len: INDEX, user: CORE.AUX_DATA) DATA {
             var data = data_;
             if (comptime HAS_CAP) {
                 if (new_len > get_cap(data, user)) {
@@ -499,7 +499,7 @@ pub fn default_functions_for_contiguous_mem_not_allocated(
             len.* = new_len;
             return data;
         }
-        fn get_cap(data: DATA, user: CORE.USERDATA) INDEX {
+        fn get_cap(data: DATA, user: CORE.AUX_DATA) INDEX {
             if (comptime HAS_CAP) {
                 const cap_offset: usize = comptime field_offset(CAP_FIELD_ACCESS, INDEX);
                 const cap = cast_offset_to_field_immutable(&data, cap_offset, INDEX);
@@ -508,7 +508,7 @@ pub fn default_functions_for_contiguous_mem_not_allocated(
                 return get_len(data, user);
             }
         }
-        fn set_cap(data_: DATA, new_cap: INDEX, user: CORE.USERDATA) DATA {
+        fn set_cap(data_: DATA, new_cap: INDEX, user: CORE.AUX_DATA) DATA {
             if (comptime HAS_CAP) {
                 var data = data_;
                 const cap_offset: usize = comptime field_offset(CAP_FIELD_ACCESS, INDEX);

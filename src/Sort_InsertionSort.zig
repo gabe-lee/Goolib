@@ -131,8 +131,8 @@ pub fn insertion_sort_with_func(buffer: anytype, greater_than: *const fn (a: Typ
 pub fn insertion_sort_with_func_and_matching_buffers(buffer: anytype, matching_buffers: anytype, greater_than: *const fn (a: Types.IndexableChild(@TypeOf(buffer)), b: Types.IndexableChild(@TypeOf(buffer))) bool) void {
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
-    Types.assert_has_len(BUF);
-    inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
+    Types.assert_has_len(BUF, @src());
+    inline for (@typeInfo(@TypeOf(matching_buffers)).@"struct".fields) |matching_field| {
         _ = Types.IndexableChild(matching_field.type);
     }
     var i: usize = 1;

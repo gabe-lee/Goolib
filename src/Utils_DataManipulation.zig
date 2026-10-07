@@ -584,7 +584,7 @@ pub const DataManipulationCore = struct {
             pub const ELEM_ = CORE_.ELEM;
             pub const COUNT_ = CORE_.COUNT_INT;
             pub const ID_ = CORE_.ID;
-            pub const aux_data_ = CORE_.aux_data;
+            pub const AUX_DATA_ = CORE_.AUX_DATA;
 
             // FUNCS
             ID_LESS_THAN: FN_ID_COMPARE,
@@ -661,39 +661,39 @@ pub const DataManipulationCore = struct {
             pub const AllocSettings = Utils.Alloc.SmartAllocSettings(ELEM_);
             pub const ComptimeAllocSettings = Utils.Alloc.SmartAllocComptimeSettings(ELEM_);
 
-            pub const FN_ID_COMPARE = fn (DATA_, ID_, ID_, aux_data_) bool;
-            pub const FN_ID_CHECK = fn (DATA_, ID_, aux_data_) bool;
-            pub const FN_ELEM_COMPARE = fn (ELEM_, ELEM_, aux_data_) bool;
-            pub const FN_IMPLICIT_ID = fn (DATA_, aux_data_) ID_;
-            pub const FN_IMPLICIT_NTH_ID = fn (DATA_, COUNT_, aux_data_) ID_;
-            pub const FN_NTH_ID = fn (DATA_, ID_, COUNT_, aux_data_) ID_;
-            pub const FN_ADJACENT_ID = fn (DATA_, ID_, aux_data_) ID_;
-            pub const FN_CHILD_ID_WITH_COUNT = fn (DATA_, ID_, COUNT_, aux_data_) ID_;
-            pub const FN_NTH_CHILD_ID_WITH_COUNT = fn (DATA_, ID_, COUNT_, COUNT_, aux_data_) ID_;
-            pub const FN_IMPLICIT_COUNT = fn (DATA_, aux_data_) COUNT_;
-            pub const FN_SET_COUNT = fn (DATA_, COUNT_, aux_data_) DATA_;
-            pub const FN_RANGE_COUNT = fn (DATA_, ID_, ID_, aux_data_) COUNT_;
-            pub const FN_GET = fn (DATA_, ID_, aux_data_) ELEM_;
-            pub const FN_GET_PTR = fn (DATA_, ID_, aux_data_) *ELEM_;
-            pub const FN_GET_CONST_PTR = fn (DATA_, ID_, aux_data_) *const ELEM_;
-            pub const FN_GET_SLICE = fn (DATA_, ID_, ID_, aux_data_) []ELEM_;
-            pub const FN_GET_CONST_SLICE = fn (DATA_, ID_, ID_, aux_data_) []const ELEM_;
-            pub const FN_SET = fn (DATA_, ID_, ELEM_, aux_data_) DATA_;
-            pub const FN_SWAP = fn (DATA_, ID_, ID_, aux_data_) DATA_;
-            pub const FN_RANGE_OP = fn (DATA_, ID_, ID_, aux_data_) DATA_;
-            pub const FN_MOVE_RANGE_DISPLACE = fn (DATA_, ID_, ID_, ID_, aux_data_) DATA_;
-            pub const FN_MOVE_RANGE_OVERWRITE = fn (DATA_, ID_, ID_, COUNT_, aux_data_) DATA_;
-            pub const FN_ROTATE = fn (DATA_, ID_, ID_, COUNT_, aux_data_) DATA_;
-            pub const FN_SCRAMBLE = fn (DATA_, Random, ID_, ID_, COUNT_, aux_data_) DATA_;
-            pub const FN_APPEND_ONE_SLOT = fn (DATA_, aux_data_) struct { DATA_, ID_ };
-            pub const FN_APPEND_N_SLOTS = fn (DATA_, COUNT_, aux_data_) struct { DATA_, ID_, ID_ };
-            pub const FN_INSERT_ONE_SLOT = fn (DATA_, ID_, aux_data_) struct { DATA_, ID_ };
-            pub const FN_INSERT_N_SLOTS = fn (DATA_, ID_, COUNT_, aux_data_) struct { DATA_, ID_, ID_ };
-            pub const FN_DELETE_ONE = fn (DATA_, ID_, aux_data_) DATA_;
-            pub const FN_DELETE_RANGE = fn (DATA_, ID_, ID_, aux_data_) DATA_;
-            pub const FN_GET_BASE_PTR = fn (DATA_, aux_data_) [*]ELEM_;
-            pub const FN_GET_BASE_CONST_PTR = fn (DATA_, aux_data_) [*]const ELEM_;
-            pub const FN_SET_BASE_PTR = fn (DATA_, [*]ELEM_, aux_data_) DATA_;
+            pub const FN_ID_COMPARE = fn (DATA_, ID_, ID_, AUX_DATA_) bool;
+            pub const FN_ID_CHECK = fn (DATA_, ID_, AUX_DATA_) bool;
+            pub const FN_ELEM_COMPARE = fn (ELEM_, ELEM_, AUX_DATA_) bool;
+            pub const FN_IMPLICIT_ID = fn (DATA_, AUX_DATA_) ID_;
+            pub const FN_IMPLICIT_NTH_ID = fn (DATA_, COUNT_, AUX_DATA_) ID_;
+            pub const FN_NTH_ID = fn (DATA_, ID_, COUNT_, AUX_DATA_) ID_;
+            pub const FN_ADJACENT_ID = fn (DATA_, ID_, AUX_DATA_) ID_;
+            pub const FN_CHILD_ID_WITH_COUNT = fn (DATA_, ID_, COUNT_, AUX_DATA_) ID_;
+            pub const FN_NTH_CHILD_ID_WITH_COUNT = fn (DATA_, ID_, COUNT_, COUNT_, AUX_DATA_) ID_;
+            pub const FN_IMPLICIT_COUNT = fn (DATA_, AUX_DATA_) COUNT_;
+            pub const FN_SET_COUNT = fn (DATA_, COUNT_, AUX_DATA_) DATA_;
+            pub const FN_RANGE_COUNT = fn (DATA_, ID_, ID_, AUX_DATA_) COUNT_;
+            pub const FN_GET = fn (DATA_, ID_, AUX_DATA_) ELEM_;
+            pub const FN_GET_PTR = fn (DATA_, ID_, AUX_DATA_) *ELEM_;
+            pub const FN_GET_CONST_PTR = fn (DATA_, ID_, AUX_DATA_) *const ELEM_;
+            pub const FN_GET_SLICE = fn (DATA_, ID_, ID_, AUX_DATA_) []ELEM_;
+            pub const FN_GET_CONST_SLICE = fn (DATA_, ID_, ID_, AUX_DATA_) []const ELEM_;
+            pub const FN_SET = fn (DATA_, ID_, ELEM_, AUX_DATA_) DATA_;
+            pub const FN_SWAP = fn (DATA_, ID_, ID_, AUX_DATA_) DATA_;
+            pub const FN_RANGE_OP = fn (DATA_, ID_, ID_, AUX_DATA_) DATA_;
+            pub const FN_MOVE_RANGE_DISPLACE = fn (DATA_, ID_, ID_, ID_, AUX_DATA_) DATA_;
+            pub const FN_MOVE_RANGE_OVERWRITE = fn (DATA_, ID_, ID_, COUNT_, AUX_DATA_) DATA_;
+            pub const FN_ROTATE = fn (DATA_, ID_, ID_, COUNT_, AUX_DATA_) DATA_;
+            pub const FN_SCRAMBLE = fn (DATA_, Random, ID_, ID_, COUNT_, AUX_DATA_) DATA_;
+            pub const FN_APPEND_ONE_SLOT = fn (DATA_, AUX_DATA_) struct { DATA_, ID_ };
+            pub const FN_APPEND_N_SLOTS = fn (DATA_, COUNT_, AUX_DATA_) struct { DATA_, ID_, ID_ };
+            pub const FN_INSERT_ONE_SLOT = fn (DATA_, ID_, AUX_DATA_) struct { DATA_, ID_ };
+            pub const FN_INSERT_N_SLOTS = fn (DATA_, ID_, COUNT_, AUX_DATA_) struct { DATA_, ID_, ID_ };
+            pub const FN_DELETE_ONE = fn (DATA_, ID_, AUX_DATA_) DATA_;
+            pub const FN_DELETE_RANGE = fn (DATA_, ID_, ID_, AUX_DATA_) DATA_;
+            pub const FN_GET_BASE_PTR = fn (DATA_, AUX_DATA_) [*]ELEM_;
+            pub const FN_GET_BASE_CONST_PTR = fn (DATA_, AUX_DATA_) [*]const ELEM_;
+            pub const FN_SET_BASE_PTR = fn (DATA_, [*]ELEM_, AUX_DATA_) DATA_;
 
             pub const CustomFunctions_ = struct {
                 GET_LEN: ?FN_IMPLICIT_COUNT = null,
@@ -802,11 +802,11 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_ptr(data: DATA_, aux_data: aux_data_) [*]ELEM_ {
+                        fn infer_ptr(data: DATA_, aux_data: AUX_DATA_) [*]ELEM_ {
                             const ptr = GET_PTR.func(data, FIRST_ID.func(data, aux_data), aux_data);
                             return @ptrCast(ptr);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) [*]ELEM_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) [*]ELEM_ {
                             assert_unreachable(@src(), "no `get_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -821,18 +821,18 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_ptr(data: DATA_, aux_data: aux_data_) [*]const ELEM_ {
+                        fn infer_base_ptr(data: DATA_, aux_data: AUX_DATA_) [*]const ELEM_ {
                             return GET_BASE_PTR.func(data, aux_data);
                         }
-                        fn infer_ptr(data: DATA_, aux_data: aux_data_) [*]const ELEM_ {
+                        fn infer_ptr(data: DATA_, aux_data: AUX_DATA_) [*]const ELEM_ {
                             const ptr = GET_PTR.func(data, FIRST_ID.func(data, aux_data), aux_data);
                             return @ptrCast(ptr);
                         }
-                        fn infer_const_ptr(data: DATA_, aux_data: aux_data_) [*]const ELEM_ {
+                        fn infer_const_ptr(data: DATA_, aux_data: AUX_DATA_) [*]const ELEM_ {
                             const ptr = GET_CONST_PTR.func(data, FIRST_ID.func(data, aux_data), aux_data);
                             return @ptrCast(ptr);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) [*]const ELEM_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) [*]const ELEM_ {
                             assert_unreachable(@src(), "no `get_base_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -844,7 +844,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn unusable(_: DATA_, _: [*]ELEM_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: [*]ELEM_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_base_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -858,15 +858,15 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_ptr(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) []ELEM_ {
+                        fn infer_base_ptr(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) []ELEM_ {
                             const base = GET_BASE_PTR.func(data, aux_data);
                             return base[first .. last + 1];
                         }
-                        fn infer_ptr(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) []ELEM_ {
+                        fn infer_ptr(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) []ELEM_ {
                             const ptr: [*]ELEM_ = @ptrCast(GET_PTR.func(data, first, aux_data));
                             return ptr[0 .. (last + 1) - first];
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) []ELEM_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) []ELEM_ {
                             assert_unreachable(@src(), "no `get_range_slice` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -881,18 +881,18 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_range(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) []const ELEM_ {
+                        fn infer_range(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) []const ELEM_ {
                             return GET_RANGE_SLICE.func(data, first, last, aux_data);
                         }
-                        fn infer_base_const_ptr(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) []const ELEM_ {
+                        fn infer_base_const_ptr(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) []const ELEM_ {
                             const base = GET_BASE_PTR.func(data, aux_data);
                             return base[first .. last + 1];
                         }
-                        fn infer_const_ptr(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) []const ELEM_ {
+                        fn infer_const_ptr(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) []const ELEM_ {
                             const ptr: [*]ELEM_ = @ptrCast(GET_PTR.func(data, first, aux_data));
                             return ptr[0 .. (last + 1) - first];
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) []const ELEM_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) []const ELEM_ {
                             assert_unreachable(@src(), "no `get_range_const_slice` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -906,13 +906,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native_len(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_native_len(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return @intCast(GET_LEN.func(data, aux_data));
                         }
-                        fn infer_native_last(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_native_last(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return @intCast(LAST_ID.func(data, aux_data) + 1);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `invalid_id_after_last_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -926,13 +926,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, _: AUX_DATA_) ID_ {
                             return @intCast(math.maxInt(COUNT_));
                         }
-                        fn infer_native_offset(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_native_offset(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return @intCast(FIRST_ID.func(data, aux_data) -% 1);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `invalid_id_before_first_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -948,41 +948,41 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn default(data: DATA_, id: ID_, aux_data: aux_data_) bool {
+                        fn default(data: DATA_, id: ID_, aux_data: AUX_DATA_) bool {
                             return 0 <= id and id < GET_LEN.func(data, aux_data);
                         }
-                        fn infer_native(data: DATA_, id: ID_, aux_data: aux_data_) bool {
+                        fn infer_native(data: DATA_, id: ID_, aux_data: AUX_DATA_) bool {
                             return 0 <= id and id < GET_LEN.func(data, aux_data);
                         }
-                        fn infer_native_offset(data: DATA_, id: ID_, aux_data: aux_data_) bool {
+                        fn infer_native_offset(data: DATA_, id: ID_, aux_data: AUX_DATA_) bool {
                             const first = FIRST_ID.func(data, aux_data);
                             const last = LAST_ID.func(data, aux_data);
                             return first <= id and id <= last;
                         }
-                        fn infer_first_last_id_less_equal(data: DATA_, id: ID_, aux_data: aux_data_) bool {
+                        fn infer_first_last_id_less_equal(data: DATA_, id: ID_, aux_data: AUX_DATA_) bool {
                             const first = FIRST_ID.func(data, aux_data);
                             const last = LAST_ID.func(data, aux_data);
                             return ID_LESS_THAN_OR_EQUAL.func(data, first, id, aux_data) and ID_LESS_THAN_OR_EQUAL.func(data, id, last, aux_data);
                         }
-                        fn infer_first_last_id_greater_equal(data: DATA_, id: ID_, aux_data: aux_data_) bool {
+                        fn infer_first_last_id_greater_equal(data: DATA_, id: ID_, aux_data: AUX_DATA_) bool {
                             const first = FIRST_ID.func(data, aux_data);
                             const last = LAST_ID.func(data, aux_data);
                             return ID_GREATER_THAN_OR_EQUAL.func(data, id, first, aux_data) and ID_GREATER_THAN_OR_EQUAL.func(data, last, id, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `valid_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
-                    fn assert_valid_id(data: DATA_, id: ID_, aux_data: aux_data_, comptime src: SourceLocation) void {
+                    fn assert_valid_id(data: DATA_, id: ID_, aux_data: AUX_DATA_, comptime src: SourceLocation) void {
                         const VALID = ID_VALID.func;
                         assert_with_reason(VALID(data, id, aux_data), src, "id `{any}` is not valid for the current data structure state", .{id});
                     }
-                    fn assert_valid_range(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_, comptime src: SourceLocation) void {
+                    fn assert_valid_range(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_, comptime src: SourceLocation) void {
                         assert_valid_id(data, first, aux_data, src);
                         assert_valid_id(data, last, aux_data, src);
                         assert_with_reason(ID_LESS_THAN_OR_EQUAL.func(data, first, last, aux_data), src, "first id `{any}` was not before or equal to last id `{any}`", .{ first, last });
                     }
-                    fn assert_id_less(data: DATA_, a: ID_, b: ID_, aux_data: aux_data_, comptime src: SourceLocation) void {
+                    fn assert_id_less(data: DATA_, a: ID_, b: ID_, aux_data: AUX_DATA_, comptime src: SourceLocation) void {
                         assert_with_reason(ID_LESS_THAN.func(data, a, b, aux_data), src, "id a `{any}` is not located before id b `{any}", .{ a, b });
                     }
                     const ID_LESS_THAN = struct {
@@ -997,19 +997,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: aux_data_) bool {
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: AUX_DATA_) bool {
                             return id_a < id_b;
                         }
-                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_GREATER_THAN.func(data, id_b, id_a, aux_data);
                         }
-                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_GREATER_THAN_OR_EQUAL.func(data, id_a, id_b, aux_data);
                         }
-                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_GREATER_THAN.func(data, id_a, id_b, aux_data) and !ID_EQUALS.func(data, id_a, id_b, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `id_less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1025,19 +1025,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: aux_data_) bool {
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: AUX_DATA_) bool {
                             return id_a <= id_b;
                         }
-                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_GREATER_THAN_OR_EQUAL.func(data, id_b, id_a, aux_data);
                         }
-                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_GREATER_THAN.func(data, id_a, id_b, aux_data);
                         }
-                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_LESS_THAN.func(data, id_a, id_b, aux_data) or ID_EQUALS.func(data, id_a, id_b, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `id_less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1053,19 +1053,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: aux_data_) bool {
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: AUX_DATA_) bool {
                             return id_a > id_b;
                         }
-                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_LESS_THAN.func(data, id_b, id_a, aux_data);
                         }
-                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_LESS_THAN_OR_EQUAL.func(data, id_a, id_b, aux_data);
                         }
-                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_LESS_THAN.func(data, id_a, id_b, aux_data) and !ID_EQUALS.func(data, id_a, id_b, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `id_greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1081,19 +1081,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: aux_data_) bool {
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: AUX_DATA_) bool {
                             return id_a >= id_b;
                         }
-                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lteq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_LESS_THAN_OR_EQUAL.func(data, id_b, id_a, aux_data);
                         }
-                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_LESS_THAN.func(data, id_a, id_b, aux_data);
                         }
-                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gt_eq(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return ID_GREATER_THAN.func(data, id_a, id_b, aux_data) or ID_EQUALS.func(data, id_a, id_b, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `id_greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1107,13 +1107,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: aux_data_) bool {
+                        fn infer_native(_: DATA_, id_a: ID_, id_b: ID_, _: AUX_DATA_) bool {
                             return id_a == id_b;
                         }
-                        fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) bool {
+                        fn infer_gt_lt(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) bool {
                             return !ID_GREATER_THAN.func(data, id_a, id_b, aux_data) and !ID_LESS_THAN.func(data, id_a, id_b, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) bool {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `id_a less than or equal id_b` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1126,11 +1126,11 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, 0, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `first_child_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1143,11 +1143,11 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_child(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return NTH_CHILD_ID.func(data, id, exact_num_children_per_element, exact_num_children_per_element - 1, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `last_child_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1161,19 +1161,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native_offset(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native_offset(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             const id_n = LIMIT_LEN.func(data, FIRST_ID.func(data, aux_data), id, aux_data);
                             const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, nth_child + 1);
                             return NTH_FROM_START.func(data, child_n, aux_data);
                         }
-                        fn infer_native(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native(data: DATA_, id: ID_, nth_child: COUNT_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             const id_n = id;
                             const child_n = nth_child_of_n_ary_flat_array_tree(id_n, exact_num_children_per_element, nth_child + 1);
                             return NTH_FROM_START.func(data, child_n, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_child_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1187,19 +1187,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native_offset(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native_offset(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             const child_n = LIMIT_LEN.func(data, FIRST_ID.func(data, aux_data), id, aux_data);
                             const parent_n = parent_of_n_ary_flat_array_tree(child_n, exact_num_children_per_element);
                             return NTH_FROM_START.func(data, parent_n, aux_data);
                         }
-                        fn infer_native(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native(data: DATA_, id: ID_, exact_num_children_per_element: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, id, aux_data, @src());
                             const child_n = id;
                             const parent_n = parent_of_n_ary_flat_array_tree(child_n, exact_num_children_per_element);
                             return NTH_FROM_START.func(data, parent_n, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `parent_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1215,23 +1215,23 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_const_ptr(data: DATA_, id: ID_, aux_data: aux_data_) ELEM_ {
+                        fn infer_base_const_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return GET_BASE_CONST_PTR.func(data, aux_data)[id];
                         }
-                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: aux_data_) ELEM_ {
+                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return GET_BASE_PTR.func(data, aux_data)[id];
                         }
-                        fn infer_ptr(data: DATA_, id: ID_, aux_data: aux_data_) ELEM_ {
+                        fn infer_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return CUSTOM.GET_PTR.?(data, id, aux_data).*;
                         }
-                        fn infer_const_ptr(data: DATA_, id: ID_, aux_data: aux_data_) ELEM_ {
+                        fn infer_const_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return CUSTOM.GET_PTR_CONST.?(data, id, aux_data).*;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) ELEM_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) ELEM_ {
                             assert_unreachable(@src(), "no `get` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1244,11 +1244,11 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: aux_data_) *ELEM_ {
+                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) *ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return &GET_BASE_PTR.func(data, aux_data)[id];
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) *ELEM_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) *ELEM_ {
                             assert_unreachable(@src(), "no `get_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1263,19 +1263,19 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_const_ptr(data: DATA_, id: ID_, aux_data: aux_data_) *const ELEM_ {
+                        fn infer_base_const_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) *const ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return &GET_BASE_CONST_PTR.func(data, aux_data)[id];
                         }
-                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: aux_data_) *const ELEM_ {
+                        fn infer_base_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) *const ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return &GET_BASE_PTR.func(data, aux_data)[id];
                         }
-                        fn infer_ptr(data: DATA_, id: ID_, aux_data: aux_data_) *const ELEM_ {
+                        fn infer_ptr(data: DATA_, id: ID_, aux_data: AUX_DATA_) *const ELEM_ {
                             assert_valid_id(data, id, aux_data, @src());
                             return GET_PTR.func(data, id, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) *const ELEM_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) *const ELEM_ {
                             assert_unreachable(@src(), "no `get_const_ptr` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1289,18 +1289,18 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_base_ptr(data: DATA_, id: ID_, val: ELEM_, aux_data: aux_data_) DATA_ {
+                        fn infer_base_ptr(data: DATA_, id: ID_, val: ELEM_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, id, aux_data, @src());
                             const new_data = data;
                             GET_BASE_PTR.func(new_data, aux_data)[id] = val;
                             return new_data;
                         }
-                        fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, aux_data: aux_data_) DATA_ {
+                        fn infer_ptr(data: DATA_, id: ID_, val: ELEM_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, id, aux_data, @src());
                             GET_PTR.func(data, id, aux_data).* = val;
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ELEM_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ELEM_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `set` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1313,14 +1313,14 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set(data: DATA_, id_a: ID_, id_b: ID_, aux_data: AUX_DATA_) DATA_ {
                             var new_data = data;
                             const tmp = GET.func(new_data, id_b, aux_data);
                             new_data = SET.func(new_data, id_b, GET.func(new_data, id_a, aux_data), aux_data);
                             new_data = SET.func(new_data, id_a, tmp, aux_data);
                             return new_data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `swap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1337,22 +1337,22 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a < val_b;
                         }
-                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return GREATER_THAN.func(val_b, val_a, aux_data);
                         }
-                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN_OR_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !EXACT_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !ORDER_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `less_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1369,22 +1369,22 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a <= val_b;
                         }
-                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gteq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return GREATER_THAN_OR_EQUAL.func(val_b, val_a, aux_data);
                         }
-                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data);
                         }
-                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return LESS_THAN.func(val_a, val_b, aux_data) or EXACT_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return LESS_THAN.func(val_a, val_b, aux_data) or ORDER_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `less_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1401,22 +1401,22 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a > val_b;
                         }
-                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return LESS_THAN.func(val_b, val_a, aux_data);
                         }
-                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !LESS_THAN_OR_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !LESS_THAN.func(val_a, val_b, aux_data) and !EXACT_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !LESS_THAN.func(val_a, val_b, aux_data) and !ORDER_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `greater_than` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1433,22 +1433,22 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a >= val_b;
                         }
-                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lteq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return LESS_THAN_OR_EQUAL.func(val_b, val_a, aux_data);
                         }
-                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_lt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !LESS_THAN.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_eq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !EXACT_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_oq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !ORDER_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `greater_than_or_equal` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1463,16 +1463,16 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a == val_b;
                         }
-                        fn infer_eq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_eq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !EXACT_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !LESS_THAN.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `order_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1487,16 +1487,16 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: aux_data_) bool {
+                        fn infer_native(val_a: ELEM_, val_b: ELEM_, _: AUX_DATA_) bool {
                             return val_a == val_b;
                         }
-                        fn infer_oq(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_oq(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !ORDER_EQUAL.func(val_a, val_b, aux_data);
                         }
-                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, aux_data: aux_data_) bool {
+                        fn infer_gt_lt(val_a: ELEM_, val_b: ELEM_, aux_data: AUX_DATA_) bool {
                             return !GREATER_THAN.func(val_a, val_b, aux_data) and !LESS_THAN.func(val_a, val_b, aux_data);
                         }
-                        fn unusable(_: ELEM_, _: ELEM_, _: aux_data_) bool {
+                        fn unusable(_: ELEM_, _: ELEM_, _: AUX_DATA_) bool {
                             assert_unreachable(@src(), "no `exactly_equals` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1511,16 +1511,16 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, _: AUX_DATA_) ID_ {
                             return 0;
                         }
-                        fn infer_nth_from_start(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_from_start(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return NTH_FROM_START.func(data, 0, aux_data);
                         }
-                        fn infer_len_nth_from_end(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_len_nth_from_end(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return NTH_FROM_END.func(data, GET_LEN.func(data, aux_data), aux_data);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `first_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1535,16 +1535,16 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_native(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return @intCast(GET_LEN.func(data, aux_data) - 1);
                         }
-                        fn infer_nth_from_end(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_from_end(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return NTH_FROM_END.func(data, 0, aux_data);
                         }
-                        fn infer_len_nth_from_start(data: DATA_, aux_data: aux_data_) ID_ {
+                        fn infer_len_nth_from_start(data: DATA_, aux_data: AUX_DATA_) ID_ {
                             return NTH_FROM_START.func(data, GET_LEN.func(data, aux_data) - 1, aux_data);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `last_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1559,13 +1559,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, curr: ID_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, curr: ID_, _: AUX_DATA_) ID_ {
                             return curr + 1;
                         }
-                        fn infer_nth_next(data: DATA_, curr: ID_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_next(data: DATA_, curr: ID_, aux_data: AUX_DATA_) ID_ {
                             return NTH_NEXT_ID.func(data, curr, 1, aux_data);
                         }
-                        fn infer_last_prev(data: DATA_, curr: ID_, aux_data: aux_data_) ID_ {
+                        fn infer_last_prev(data: DATA_, curr: ID_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, curr, aux_data, @src());
                             var i = LAST_ID.func(data, aux_data);
                             if (ID_EQUALS.func(data, i, curr, aux_data)) return INVALID_ID_AFTER.func(data, aux_data);
@@ -1577,7 +1577,7 @@ pub const DataManipulationCore = struct {
                             }
                             return i;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1592,13 +1592,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, curr: ID_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, curr: ID_, _: AUX_DATA_) ID_ {
                             return curr - 1;
                         }
-                        fn infer_nth_prev(data: DATA_, curr: ID_, aux_data: aux_data_) ID_ {
+                        fn infer_nth_prev(data: DATA_, curr: ID_, aux_data: AUX_DATA_) ID_ {
                             return NTH_PREV_ID.func(data, curr, 1, aux_data);
                         }
-                        fn infer_first_next(data: DATA_, curr: ID_, aux_data: aux_data_) ID_ {
+                        fn infer_first_next(data: DATA_, curr: ID_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, curr, aux_data, @src());
                             var i = FIRST_ID.func(data, aux_data);
                             if (ID_EQUALS.func(data, i, curr, aux_data)) return INVALID_ID_BEFORE.func(data, aux_data);
@@ -1610,7 +1610,7 @@ pub const DataManipulationCore = struct {
                             }
                             return i;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `prev_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1625,10 +1625,10 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: AUX_DATA_) ID_ {
                             return curr + @as(ID_, @intCast(n));
                         }
-                        fn infer_next(data: DATA_, curr: ID_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_next(data: DATA_, curr: ID_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             var i = curr;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
@@ -1636,7 +1636,7 @@ pub const DataManipulationCore = struct {
                             }
                             return i;
                         }
-                        fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_last_prev(data: DATA_, curr: ID_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             if (n == 0) return curr;
                             const last = LAST_ID.func(data, aux_data);
                             var left_i = last;
@@ -1657,7 +1657,7 @@ pub const DataManipulationCore = struct {
                             }
                             return right_i;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_next_index` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1672,10 +1672,10 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, curr: ID_, n: COUNT_, _: AUX_DATA_) ID_ {
                             return curr - n;
                         }
-                        fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_prev(data: DATA_, curr: ID_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             var i = curr;
                             var nn: COUNT_ = 0;
                             while (nn < n) : (nn += 1) {
@@ -1683,7 +1683,7 @@ pub const DataManipulationCore = struct {
                             }
                             return i;
                         }
-                        fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_first_next(data: DATA_, curr: ID_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             assert_valid_id(data, curr, aux_data, @src());
                             const first = FIRST_ID.func(data, aux_data);
                             var right_i = first;
@@ -1704,7 +1704,7 @@ pub const DataManipulationCore = struct {
                             }
                             return left_i;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_prev_id` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1719,16 +1719,16 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, n: COUNT_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, n: COUNT_, _: AUX_DATA_) ID_ {
                             return n;
                         }
-                        fn infer_native_first(data: DATA_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native_first(data: DATA_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             return FIRST_ID.func(data, aux_data) + @as(ID_, @intCast(n));
                         }
-                        fn infer_first_nth_next(data: DATA_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_first_nth_next(data: DATA_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             return NTH_NEXT_ID.func(data, FIRST_ID.func(data, aux_data), n, aux_data);
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_index_from_start` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1742,13 +1742,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native_last(data: DATA_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_native_last(data: DATA_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             return @intCast(LAST_ID.func(data, aux_data) - n);
                         }
-                        fn infer_last_nth_prev(data: DATA_, n: COUNT_, aux_data: aux_data_) ID_ {
+                        fn infer_last_nth_prev(data: DATA_, n: COUNT_, aux_data: AUX_DATA_) ID_ {
                             return NTH_PREV_ID.func(data, LAST_ID.func(data, aux_data), n, aux_data);
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) ID_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) ID_ {
                             assert_unreachable(@src(), "no `nth_index_from_end` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1762,13 +1762,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native_last(data: DATA_, aux_data: aux_data_) COUNT_ {
+                        fn infer_native_last(data: DATA_, aux_data: AUX_DATA_) COUNT_ {
                             return @intCast(LAST_ID.func(data, aux_data) + 1);
                         }
-                        fn infer_range(data: DATA_, aux_data: aux_data_) COUNT_ {
+                        fn infer_range(data: DATA_, aux_data: AUX_DATA_) COUNT_ {
                             return RANGE_LEN.func(FIRST_ID.func(data, aux_data), LAST_ID.func(data, aux_data), aux_data);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) COUNT_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) COUNT_ {
                             assert_unreachable(@src(), "no `get_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1780,7 +1780,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1792,7 +1792,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn unusable(_: DATA_, _: aux_data_) COUNT_ {
+                        fn unusable(_: DATA_, _: AUX_DATA_) COUNT_ {
                             assert_unreachable(@src(), "no `get_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1804,7 +1804,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `set_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1821,14 +1821,14 @@ pub const DataManipulationCore = struct {
                             },
                         };
 
-                        fn infer_native(_: DATA_, first: ID_, last: ID_, _: aux_data_) COUNT_ {
+                        fn infer_native(_: DATA_, first: ID_, last: ID_, _: AUX_DATA_) COUNT_ {
                             return @intCast((last + 1) - first);
                         }
-                        fn infer_limit(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) COUNT_ {
+                        fn infer_limit(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) COUNT_ {
                             const limit_len = LIMIT_LEN.func(data, first, last, aux_data);
                             return limit_len + 1;
                         }
-                        fn infer_next(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) COUNT_ {
+                        fn infer_next(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) COUNT_ {
                             if (ID_EQUALS.func(data, first, last, aux_data)) return 1;
                             var n: COUNT_ = 1;
                             var i: ID_ = NEXT_ID.func(data, first, aux_data);
@@ -1839,7 +1839,7 @@ pub const DataManipulationCore = struct {
                             }
                             return n;
                         }
-                        fn infer_prev(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) COUNT_ {
+                        fn infer_prev(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) COUNT_ {
                             assert_valid_range(data, first, last, aux_data, @src());
                             if (ID_EQUALS.func(data, first, last, aux_data)) return 1;
                             var n: COUNT_ = 1;
@@ -1851,7 +1851,7 @@ pub const DataManipulationCore = struct {
                             }
                             return n;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) COUNT_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) COUNT_ {
                             assert_unreachable(@src(), "no `range_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1867,15 +1867,15 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_native(_: DATA_, start: ID_, end_exclude: ID_, _: aux_data_) ID_ {
+                        fn infer_native(_: DATA_, start: ID_, end_exclude: ID_, _: AUX_DATA_) ID_ {
                             return end_exclude - start;
                         }
-                        fn infer_range(data: DATA_, start: ID_, end_exclude: ID_, aux_data: aux_data_) ID_ {
+                        fn infer_range(data: DATA_, start: ID_, end_exclude: ID_, aux_data: AUX_DATA_) ID_ {
                             if (ID_EQUALS.func(data, start, end_exclude, aux_data)) return 0;
                             const range_len = RANGE_LEN.func(data, start, PREV_ID.func(data, end_exclude, aux_data), aux_data);
                             return range_len;
                         }
-                        fn infer_next(data: DATA_, start: ID_, end_exclude: ID_, aux_data: aux_data_) COUNT_ {
+                        fn infer_next(data: DATA_, start: ID_, end_exclude: ID_, aux_data: AUX_DATA_) COUNT_ {
                             if (ID_EQUALS.func(data, start, end_exclude, aux_data)) return 0;
                             var n: COUNT_ = 0;
                             var i: ID_ = NEXT_ID.func(data, start, aux_data);
@@ -1886,7 +1886,7 @@ pub const DataManipulationCore = struct {
                             }
                             return n;
                         }
-                        fn infer_prev(data: DATA_, start: ID_, end_exclude: ID_, aux_data: aux_data_) COUNT_ {
+                        fn infer_prev(data: DATA_, start: ID_, end_exclude: ID_, aux_data: AUX_DATA_) COUNT_ {
                             if (ID_EQUALS.func(data, start, end_exclude, aux_data)) return 0;
                             var n: COUNT_ = 0;
                             var i: ID_ = PREV_ID.func(data, end_exclude, aux_data);
@@ -1897,7 +1897,7 @@ pub const DataManipulationCore = struct {
                             }
                             return n;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) COUNT_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) COUNT_ {
                             assert_unreachable(@src(), "no `limit_len` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1911,13 +1911,13 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_slice(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_slice(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) DATA_ {
                             const new_data = data;
                             const slice = GET_RANGE_SLICE.func(data, first, last, aux_data);
                             Utils.Mem.reverse_slice(slice);
                             return new_data;
                         }
-                        fn infer_swap(data: DATA_, first: ID_, last: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_swap(data: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, first, aux_data, @src());
                             assert_valid_id(data, last, aux_data, @src());
                             if (!ID_LESS_THAN_OR_EQUAL.func(data, first, last, aux_data)) return data;
@@ -1932,7 +1932,7 @@ pub const DataManipulationCore = struct {
                             }
                             return new_data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `reverse_range` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -1947,14 +1947,14 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_rot_left(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_left(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             const range_len = RANGE_LEN.func(data, first, last, aux_data);
                             if (range_len == 0) return data;
                             const count_mod = count % range_len;
                             const inverse_count = range_len - count_mod;
                             return ROTATE_LEFT.func(data, first, last, inverse_count, aux_data);
                         }
-                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, first, aux_data, @src());
                             assert_valid_id(data, last, aux_data, @src());
                             if (!ID_LESS_THAN.func(data, first, last, aux_data)) return data;
@@ -1969,7 +1969,7 @@ pub const DataManipulationCore = struct {
                             new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
-                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, first, aux_data, @src());
                             assert_valid_id(data, last, aux_data, @src());
                             if (!ID_LESS_THAN.func(data, first, last, aux_data)) return data;
@@ -1985,7 +1985,7 @@ pub const DataManipulationCore = struct {
                             new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `rotate_range_right` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2000,14 +2000,14 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_rot_right(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_right(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             const range_len = RANGE_LEN.func(data, first, last, aux_data);
                             if (range_len == 0) return data;
                             const count_mod = count % range_len;
                             const inverse_count = range_len - count_mod;
                             return ROTATE_RIGHT.func(data, first, last, inverse_count, aux_data);
                         }
-                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_reverse_nth_next(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, first, aux_data, @src());
                             assert_valid_id(data, last, aux_data, @src());
                             if (!ID_LESS_THAN.func(data, first, last, aux_data)) return data;
@@ -2022,7 +2022,7 @@ pub const DataManipulationCore = struct {
                             new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
-                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_reverse_nth_prev(data: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, first, aux_data, @src());
                             assert_valid_id(data, last, aux_data, @src());
                             if (!ID_LESS_THAN.func(data, first, last, aux_data)) return data;
@@ -2038,7 +2038,7 @@ pub const DataManipulationCore = struct {
                             new_data = REVERSE_RANGE.func(new_data, first, last, new_data);
                             return new_data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `rotate_range_left` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2053,7 +2053,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set_move_block_left_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set_move_block_left_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             var data = data_;
                             assert_valid_id(data, old_id, aux_data, @src());
                             assert_valid_id(data, new_id, aux_data, @src());
@@ -2065,17 +2065,17 @@ pub const DataManipulationCore = struct {
                             data = SET.func(data, new_id, val, aux_data);
                             return data;
                         }
-                        fn infer_mv_block_right(data: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_mv_block_right(data: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             return MOVE_RANGE_RIGHT_DISPLACE.func(data, old_id, old_id, new_id, aux_data);
                         }
-                        fn infer_rot_left(data: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_left(data: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, old_id, aux_data, @src());
                             assert_valid_id(data, new_id, aux_data, @src());
                             if (ID_EQUALS.func(data, old_id, new_id, aux_data)) return data;
                             assert_id_less(data, old_id, new_id, aux_data);
                             return ROTATE_LEFT.func(data, old_id, new_id, 1, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_one_right_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2090,7 +2090,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set_move_block_right_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set_move_block_right_overwrite(data_: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             var data = data_;
                             assert_valid_id(data, old_id, aux_data, @src());
                             assert_valid_id(data, new_id, aux_data, @src());
@@ -2102,17 +2102,17 @@ pub const DataManipulationCore = struct {
                             data = SET.func(data, new_id, val, aux_data);
                             return data;
                         }
-                        fn infer_mv_block_left(data: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_mv_block_left(data: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             return MOVE_RANGE_LEFT_DISPLACE.func(data, old_id, old_id, new_id, aux_data);
                         }
-                        fn infer_rot_right(data: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_right(data: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data, old_id, aux_data, @src());
                             assert_valid_id(data, new_id, aux_data, @src());
                             if (ID_EQUALS.func(data, old_id, new_id, aux_data)) return data;
                             assert_id_less(data, old_id, new_id, aux_data);
                             return ROTATE_RIGHT.func(data, old_id, new_id, 1, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_one_left_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2125,10 +2125,10 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set(data: DATA_, old_id: ID_, new_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             return SET.func(data, new_id, GET.func(data, old_id, aux_data), aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_one_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2141,7 +2141,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_rot_left(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_left(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first_old_id, last_old_id, aux_data, @src());
                             assert_valid_id(data_, new_first_id, aux_data, @src());
                             var data = data_;
@@ -2153,7 +2153,7 @@ pub const DataManipulationCore = struct {
                             data = ROTATE_LEFT.func(data, first_old_id, new_last, block_len, aux_data);
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_range_right_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2166,7 +2166,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_rot_right(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_rot_right(data_: DATA_, first_old_id: ID_, last_old_id: ID_, new_first_id: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first_old_id, last_old_id, aux_data, @src());
                             assert_valid_id(data_, new_first_id, aux_data, @src());
                             var data = data_;
@@ -2176,7 +2176,7 @@ pub const DataManipulationCore = struct {
                             data = ROTATE_RIGHT.func(data, new_first_id, last_old_id, block_len, aux_data);
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_range_left_displace` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2189,7 +2189,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first, last, aux_data, @src());
                             if (count == 0) {
                                 @branchHint(.unlikely);
@@ -2207,7 +2207,7 @@ pub const DataManipulationCore = struct {
                             }
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_range_left_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2220,7 +2220,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_mv_one_overwrite(data_: DATA_, first: ID_, last: ID_, count: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first, last, aux_data, @src());
                             if (count == 0) {
                                 @branchHint(.unlikely);
@@ -2238,7 +2238,7 @@ pub const DataManipulationCore = struct {
                             }
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `move_range_right_overwrite` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2252,7 +2252,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_mv_one_overwrite(data_: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_mv_one_overwrite(data_: DATA_, rand: Random, first: ID_, last: ID_, iterations: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             var data = data_;
                             const span = RANGE_LEN.func(data, first, last, aux_data);
                             if (span <= 1) return data;
@@ -2281,7 +2281,7 @@ pub const DataManipulationCore = struct {
                             }
                             return SET.func(data, empty_id, first_val, aux_data);
                         }
-                        fn unusable(_: DATA_, _: Random, _: ID_, _: ID_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: Random, _: ID_, _: ID_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `scramble_elements` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2295,17 +2295,17 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_set_len(data_: DATA_, aux_data: aux_data_) struct { DATA_, ID_ } {
+                        fn infer_set_len(data_: DATA_, aux_data: AUX_DATA_) struct { DATA_, ID_ } {
                             const len = GET_LEN.func(data_, aux_data);
                             const data = SET_LEN.func(data_, len + 1, aux_data);
                             const last = LAST_ID.func(data_, aux_data);
                             return .{ data, last };
                         }
-                        fn infer_append_many(data_: DATA_, aux_data: aux_data_) struct { DATA_, ID_ } {
+                        fn infer_append_many(data_: DATA_, aux_data: AUX_DATA_) struct { DATA_, ID_ } {
                             const data, const id, _ = APPEND_MANY_SLOTS_ASSUME_CAP.func(data_, 1, aux_data);
                             return .{ data, id };
                         }
-                        fn unusable(_: DATA_, _: aux_data_) struct { DATA_, ID_ } {
+                        fn unusable(_: DATA_, _: AUX_DATA_) struct { DATA_, ID_ } {
                             assert_unreachable(@src(), "no `append_one_slot_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2319,7 +2319,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_set_len(data_: DATA_, n: COUNT_, aux_data: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn infer_set_len(data_: DATA_, n: COUNT_, aux_data: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return .{ data_, INVALID_ID_AFTER.func(data_, aux_data) };
                             const len = GET_LEN.func(data_, aux_data);
                             const data = SET_LEN.func(data_, len + n, aux_data);
@@ -2327,7 +2327,7 @@ pub const DataManipulationCore = struct {
                             const first_new_id = NTH_PREV_ID.func(data, n - 1, aux_data);
                             return .{ data, first_new_id, last_new_id };
                         }
-                        fn infer_append_one(data_: DATA_, n: COUNT_, aux_data: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn infer_append_one(data_: DATA_, n: COUNT_, aux_data: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return .{ data_, INVALID_ID_AFTER.func(data_, aux_data) };
                             var data, const first = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, aux_data);
                             var last: ID_ = first;
@@ -2337,7 +2337,7 @@ pub const DataManipulationCore = struct {
                             }
                             return .{ data, first, last };
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             assert_unreachable(@src(), "no `append_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2351,18 +2351,18 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_append_one(data_: DATA_, id: ID_, aux_data: aux_data_) struct { DATA_, ID_ } {
+                        fn infer_append_one(data_: DATA_, id: ID_, aux_data: AUX_DATA_) struct { DATA_, ID_ } {
                             assert_valid_id(data_, id, aux_data, @src());
                             const last_to_move = LAST_ID.func(data_, aux_data);
                             var data, _ = APPEND_ONE_SLOT_ASSUME_CAP.func(data_, aux_data);
                             data = MOVE_RANGE_RIGHT_OVERWRITE.func(data, id, last_to_move, 1, aux_data);
                             return .{ data, id };
                         }
-                        fn infer_insert_many(data_: DATA_, id: ID_, aux_data: aux_data_) struct { DATA_, ID_ } {
+                        fn infer_insert_many(data_: DATA_, id: ID_, aux_data: AUX_DATA_) struct { DATA_, ID_ } {
                             const data, const new_id, _ = INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP.func(data_, id, 1, aux_data);
                             return .{ data, new_id };
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) struct { DATA_, ID_ } {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) struct { DATA_, ID_ } {
                             assert_unreachable(@src(), "no `insert_one_slot_before_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2376,7 +2376,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_insert_one(data_: DATA_, id: ID_, n: COUNT_, aux_data: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn infer_insert_one(data_: DATA_, id: ID_, n: COUNT_, aux_data: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return .{ data_, undefined, undefined };
                             assert_valid_id(data_, id, aux_data, @src());
                             var nn = n;
@@ -2387,7 +2387,7 @@ pub const DataManipulationCore = struct {
                             }
                             return .{ data, first, NTH_NEXT_ID.func(data, first, n - 1, aux_data) };
                         }
-                        fn infer_append_many(data_: DATA_, id: ID_, n: COUNT_, aux_data: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn infer_append_many(data_: DATA_, id: ID_, n: COUNT_, aux_data: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) return data_;
                             assert_valid_id(data_, id, aux_data, @src());
                             const last_to_move = LAST_ID.func(data_, aux_data);
@@ -2395,7 +2395,7 @@ pub const DataManipulationCore = struct {
                             data = MOVE_RANGE_RIGHT_OVERWRITE.func(data, id, last_to_move, n, aux_data);
                             return .{ data, id, NTH_NEXT_ID.func(data, id, n - 1, aux_data) };
                         }
-                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn unusable(_: DATA_, _: ID_, _: COUNT_, _: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             assert_unreachable(@src(), "no `insert_many_slots_before_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2408,7 +2408,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_insert_one(data: DATA_, aux_data: aux_data_) struct { DATA_, ID_ } {
+                        fn infer_insert_one(data: DATA_, aux_data: AUX_DATA_) struct { DATA_, ID_ } {
                             if (GET_LEN.func(data, aux_data) == 0) {
                                 @branchHint(.unlikely);
                                 return APPEND_ONE_SLOT_ASSUME_CAP.func(data, aux_data);
@@ -2416,7 +2416,7 @@ pub const DataManipulationCore = struct {
                             const first = FIRST_ID.func(data, aux_data);
                             return INSERT_ONE_SLOT_BEFORE_ASSUME_CAP.func(data, first, aux_data);
                         }
-                        fn unusable(_: DATA_, _: aux_data_) struct { DATA_, ID_ } {
+                        fn unusable(_: DATA_, _: AUX_DATA_) struct { DATA_, ID_ } {
                             assert_unreachable(@src(), "no `prepend_one_slot_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2429,7 +2429,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_insert_many(data: DATA_, n: COUNT_, aux_data: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn infer_insert_many(data: DATA_, n: COUNT_, aux_data: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             if (n == 0) {
                                 @branchHint(.unlikely);
                                 return data;
@@ -2441,7 +2441,7 @@ pub const DataManipulationCore = struct {
                             const first = FIRST_ID.func(data, aux_data);
                             return INSERT_MANY_SLOTS_BEFORE_ASSUME_CAP.func(data, first, n, aux_data);
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) struct { DATA_, ID_, ID_ } {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) struct { DATA_, ID_, ID_ } {
                             assert_unreachable(@src(), "no `prepend_many_slots_assume_cap` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2455,7 +2455,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_set_len(data_: DATA_, id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_set_len(data_: DATA_, id: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_id(data_, id, aux_data, @src());
                             var data = data_;
                             const last = LAST_ID.func(data, aux_data);
@@ -2467,10 +2467,10 @@ pub const DataManipulationCore = struct {
                             data = SET_LEN.func(data, old_len - 1, aux_data);
                             return data;
                         }
-                        fn infer_delete_range(data_: DATA_, id: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_delete_range(data_: DATA_, id: ID_, aux_data: AUX_DATA_) DATA_ {
                             return DELETE_RANGE.func(data_, id, id, aux_data);
                         }
-                        fn unusable(_: DATA_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `delete_one` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2484,7 +2484,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_set_len(data_: DATA_, first: ID_, last: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_set_len(data_: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first, last, aux_data, @src());
                             var data = data_;
                             const last_in_list = LAST_ID.func(data, aux_data);
@@ -2497,7 +2497,7 @@ pub const DataManipulationCore = struct {
                             data = SET_LEN.func(data, old_len - count, aux_data);
                             return data;
                         }
-                        fn infer_delete_one(data_: DATA_, first: ID_, last: ID_, aux_data: aux_data_) DATA_ {
+                        fn infer_delete_one(data_: DATA_, first: ID_, last: ID_, aux_data: AUX_DATA_) DATA_ {
                             assert_valid_range(data_, first, last, aux_data, @src());
                             var data = data_;
                             var count = RANGE_LEN.func(data, first, last, aux_data);
@@ -2514,7 +2514,7 @@ pub const DataManipulationCore = struct {
                             }
                             return data;
                         }
-                        fn unusable(_: DATA_, _: ID_, _: ID_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: ID_, _: ID_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `delete_range` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2527,7 +2527,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set_cap(data: DATA_, free_space_to_keep: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set_cap(data: DATA_, free_space_to_keep: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             const len = GET_LEN.func(data, aux_data);
                             const cap = GET_CAP.func(data, aux_data);
                             const space = cap - len;
@@ -2535,7 +2535,7 @@ pub const DataManipulationCore = struct {
                             const new_cap = len + free_space_to_keep;
                             return SET_CAP.func(data, new_cap, aux_data);
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `ensure_free_space` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2548,7 +2548,7 @@ pub const DataManipulationCore = struct {
                                 else => unreachable,
                             },
                         };
-                        fn infer_get_set_cap(data: DATA_, free_space_to_keep: COUNT_, aux_data: aux_data_) DATA_ {
+                        fn infer_get_set_cap(data: DATA_, free_space_to_keep: COUNT_, aux_data: AUX_DATA_) DATA_ {
                             const len = GET_LEN.func(data, aux_data);
                             const cap = GET_CAP.func(data, aux_data);
                             const space = cap - len;
@@ -2556,7 +2556,7 @@ pub const DataManipulationCore = struct {
                             const new_cap = len + free_space_to_keep;
                             return SET_CAP.func(data, new_cap, aux_data);
                         }
-                        fn unusable(_: DATA_, _: COUNT_, _: aux_data_) DATA_ {
+                        fn unusable(_: DATA_, _: COUNT_, _: AUX_DATA_) DATA_ {
                             assert_unreachable(@src(), "no `trim_free_space` function provided, no way to infer one from other provided funcs, and cannot use default fallback", .{});
                         }
                     };
@@ -2573,7 +2573,7 @@ pub const DataManipulationCore = struct {
                     pub const ID = DEF.ID;
                     pub const ELEM = DEF.ELEM;
                     pub const COUNT = DEF.COUNT_INT;
-                    pub const AUX_DATA = DEF.aux_data;
+                    pub const AUX_DATA = DEF.AUX_DATA;
                     pub const AUX_UNINIT = if (AUX_DATA == void) void{} else undefined;
                     pub const MAX_COUNT = math.maxInt(COUNT);
 
@@ -5306,7 +5306,7 @@ const TEST_UTILS = struct {
             .DATA = DATA,
             .ELEM = ELEM,
             .ID = ID,
-            .aux_data = AUX_DATA,
+            .AUX_DATA = AUX_DATA,
         };
         const PKG_FULL_CUSTOM_FUNCS = CORE.select_functions(7000, .ALLOW_INFERED_IMPLEMENTATIONS, CORE.Builder().CustomFunctions_{
             .GET = FUNC.get,
@@ -5444,7 +5444,7 @@ test "Utils_DataManipulation => sorting algorithms" {
             .len = 0,
             .cap = 0,
         };
-        const udata: TEST_UTILS.BLIND.aux_data = &udata_concrete;
+        const udata: TEST_UTILS.BLIND.AUX_DATA = &udata_concrete;
         var data = TEST_UTILS.BLIND.DATA{};
         for (SORT_TEST_CASES.BLIND_CASES[0..]) |case| {
             buf_len = @intCast(case.input.len);

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const BreakoutApp = @import("./build/Breakout.zig");
+const BreakoutAdvancedApp = @import("./build/BreakoutAdvanced.zig");
 const LayoutApp = @import("./build/Layout.zig");
 const SDL3 = @import("./build/SDL3.zig");
 const FuzzTests = @import("./build/FuzzTests.zig");
@@ -87,6 +88,7 @@ pub fn build(b: *std.Build) void {
 
     //SAMPLE APPS
     BreakoutApp.sub_build(b, goolib, opts);
+    BreakoutAdvancedApp.sub_build(b, goolib, opts);
     LayoutApp.sub_build(b, goolib, opts);
 
     //TESTING PROGRAMS

@@ -656,9 +656,9 @@ pub inline fn type_is_optional(comptime T: type) bool {
 pub inline fn optional_type_child(comptime T: type) type {
     return @typeInfo(T).optional.child;
 }
-
+//DEPRECATE
 pub inline fn type_is_comptime(comptime T: type) bool {
-    return @typeInfo(T) == .comptime_int or @typeInfo(T) == .comptime_float;
+    return type_is_comptime_only(T);
 }
 pub inline fn type_is_float(comptime T: type) bool {
     return @typeInfo(T) == .float or @typeInfo(T) == .comptime_float;
@@ -1477,6 +1477,30 @@ pub fn type_equals_mode(comptime T: type) EqualsMode {
     }
 }
 
+pub fn type_is_comptime_only(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .comptime_int, .comptime_float, .type, .frame => return true,
+        .@"struct" => |info| {
+            inline for (info.fields) |field| {
+                if (type_is_comptime_only(field.type)) return true;
+            }
+            return false;
+        },
+        .@"union" => |info| {
+            inline for (info.fields) |field| {
+                if (type_is_comptime_only(field.type)) return true;
+            }
+            return false;
+        },
+        .array => |info| return type_is_comptime_only(info.child),
+        .pointer => |info| return type_is_comptime_only(info.child),
+        .vector => |info| return type_is_comptime_only(info.child),
+        .optional => |info| return type_is_comptime_only(info.child),
+        .error_union => |info| return type_is_comptime_only(info.payload) or type_is_comptime_only(info.error_set),
+        else => return false,
+    }
+}
+
 pub const InterfaceSignatureError = error{
     missing_function,
     function_has_wrong_signature,
@@ -2218,4 +2242,19 @@ pub fn CombinedErrorsPayload(comptime payload: type, comptime possible_errors: [
     } else {
         return payload;
     }
+}
+
+pub const StructFieldTypeAttrPkg = struct {
+    type: type,
+    name: []const u8,
+    attr: StructFieldAttr,
+};
+
+pub fn StructWithAllFieldsSameType(comptime FIELDS: type, comptime TYPE: type) type {
+    assert_with_reason(type_is_enum(FIELDS), @src(), "type `FIELDS` must be an enum type, got type `{s}`", .{@typeName(FIELDS)});
+    const NUM_FIELDS = enum_defined_field_count(FIELDS);
+    comptime var names: [NUM_FIELDS][:0]const u8 = undefined;
+    comptime var types: [NUM_FIELDS]type = @splat(TYPE);
+    comptime var attrs: [NUM_FIELDS]std.builtin.Type.StructField.Attributes = @splat(.{});
+    return @Struct(.auto, null, names[0..], &types, &attrs);
 }

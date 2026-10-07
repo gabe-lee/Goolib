@@ -222,7 +222,7 @@ pub fn StorageStructField(comptime FIELDS: type) type {
 
 /// A struct that is written to a uniform/constant/storage buffer
 ///
-/// Follows `std140` packing rules
+/// Follows `std140` packing rules for SDL cross-compile compatability
 pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
     @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
@@ -238,20 +238,21 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     comptime var field_sizes: [_NUM_FIELDS]usize = undefined;
     comptime var field_hlsl_names: [_NUM_FIELDS]HLSL_NAME = undefined;
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
-    comptime var empty_spots_len: usize = 0;
     comptime var current_max_offset: usize = 0;
-    const BufSpanPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(BufferSpan);
-    // const FieldOrPadPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(FieldOrPad);
+    const StorageStructFieldList = Root.GooListSlice.SliceMutableAdvanced(_Field, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    const BufferSpanList = Root.GooListSlice.SliceMutableAdvanced(BufferSpan, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    comptime var _fields_list = StorageStructFieldList.from_slice_keep_data(_fields[0..]);
+    comptime var empty_spots_list = BufferSpanList.from_slice_set_empty(empty_spots[0..]);
     const SORT = struct {
-        fn align_lesser_then_size_lesser(a: _Field, b: _Field) bool {
-            if (a.gpu_type.uniform_alignment < b.gpu_type.uniform_alignment) return true;
-            return a.gpu_type.uniform_size < a.gpu_type.uniform_size;
+        fn align_lesser_then_size_lesser(list: StorageStructFieldList, idx_a: u32, val_b: _Field, _: void, comptime _: void) bool {
+            if (list.get(idx_a).gpu_type.uniform_alignment < val_b.gpu_type.uniform_alignment) return true;
+            return list.get(idx_a).gpu_type.uniform_size < val_b.gpu_type.uniform_size;
         }
-        fn offset_larger(a: BufferSpan, b: BufferSpan) bool {
-            return a.offset > b.offset;
+        fn offset_larger(list: BufferSpanList, idx_a: u32, idx_b: u32, _: void, comptime _: void) bool {
+            return list.get(idx_a).offset > list.get(idx_b).offset;
         }
     };
-    Sort.insertion_sort_with_func(_fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    _fields_list.insertion_sort_advanced(void{}, void{}, .COMPTIME_FN_BODY, void{}, SORT.align_lesser_then_size_lesser);
     // PACKING ALGORITHM
     for (_fields) |field| {
         const fidx = @intFromEnum(field.field);
@@ -262,7 +263,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         comptime var empty_spot_offset: usize = math.maxInt(isize);
         comptime var empty_spot_space_after: usize = math.maxInt(isize);
         const needed_align = @max(field.gpu_type.uniform_alignment, field.gpu_type.cpu_align);
-        for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+        for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
             if (empty.len >= field.gpu_type.uniform_size) {
                 const next_aligned_within_empty = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
                 const len_lost = next_aligned_within_empty - empty.offset;
@@ -289,14 +290,14 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         }
         comptime var field_loc: usize = undefined;
         if (found_empty_space) {
-            const old_empty = empty_spots[empty_spot_that_fits];
+            const old_empty = empty_spots_list.get(@intCast(empty_spot_that_fits));
             comptime var overwrite_old_empty = true;
             if (empty_spot_offset > 0) {
                 const new_empty_before = BufferSpan{
                     .offset = old_empty.offset,
                     .len = empty_spot_offset,
                 };
-                empty_spots[empty_spot_that_fits] = new_empty_before;
+                empty_spots_list.set(@intCast(empty_spot_that_fits), new_empty_before);
                 overwrite_old_empty = false;
             }
             if (empty_spot_space_after > 0) {
@@ -305,16 +306,14 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                     .len = empty_spot_space_after,
                 };
                 if (overwrite_old_empty) {
-                    empty_spots[empty_spot_that_fits] = new_empty_after;
+                    empty_spots_list.set(@intCast(empty_spot_that_fits), new_empty_after);
                     overwrite_old_empty = false;
                 } else {
-                    empty_spots[empty_spots_len] = new_empty_after;
-                    empty_spots_len += 1;
+                    empty_spots_list.append_one_assume_cap(new_empty_after);
                 }
             }
             if (overwrite_old_empty) {
-                _ = BufSpanPkg.delete_one(empty_spots[0..empty_spots_len], empty_spot_that_fits, void{});
-                empty_spots_len -= 1;
+                empty_spots_list.delete_one(@intCast(empty_spot_that_fits));
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
@@ -322,7 +321,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
-                for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+                for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
                     if (empty.offset + empty.len == current_max_offset) {
                         empty_spots[e].len += new_empty_len;
                         combined_with_another_empty = true;
@@ -334,8 +333,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                         .offset = current_max_offset,
                         .len = new_empty_len,
                     };
-                    empty_spots[empty_spots_len] = new_empty;
-                    empty_spots_len += 1;
+                    empty_spots_list.append_one_assume_cap(new_empty);
                 }
             }
             field_loc = next_aligned_offset;
@@ -349,21 +347,20 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     // END PACKING ALGORITHM
     const _BYTES: usize = std.mem.alignForward(usize, current_max_offset, GPU_UNIFORM_BOUNDARY_ALIGN);
     if (_BYTES > current_max_offset) {
-        empty_spots[empty_spots_len] = BufferSpan{
+        empty_spots_list.append_one_assume_cap(BufferSpan{
             .len = _BYTES - current_max_offset,
             .offset = current_max_offset,
-        };
-        empty_spots_len += 1;
+        });
     }
     comptime var wasted_bytes: usize = 0;
-    const SLOT_COUNT = _NUM_FIELDS + empty_spots_len;
+    const SLOT_COUNT = _NUM_FIELDS + empty_spots_list.get_len();
     comptime var all_slots: [SLOT_COUNT]FieldOrPad = undefined;
     comptime var slot_idx: usize = 0;
     for (0.._NUM_FIELDS) |fidx| {
         all_slots[slot_idx] = FieldOrPad{ .FIELD = fidx };
         slot_idx += 1;
     }
-    for (empty_spots[0..empty_spots_len]) |empty| {
+    for (empty_spots_list.zig_slice_entire()) |empty| {
         all_slots[slot_idx] = FieldOrPad{ .PAD = empty };
         slot_idx += 1;
     }
@@ -384,7 +381,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         }
     }
     const SPACE_BEWTEEN_SHORTEST_AND_LONGEST = longest_field_name_plus_type - shortest_field_name_plus_type;
-    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_len * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
+    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_list.get_len() * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
     comptime var hlsl_stub_inner: [HLSL_STUB_INNER_MAX_LEN]u8 = undefined;
     comptime var pad_idx: usize = 0;
     comptime var comptime_writer = QuickWriter.writer(hlsl_stub_inner[0..]);
@@ -542,6 +539,17 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             return @ptrCast(@alignCast(buffer + OFFSET));
         }
 
+        pub fn FieldOffsets(comptime OFFSET_INT: type) type {
+            return Types.StructWithAllFieldsSameType(FIELD, OFFSET_INT);
+        }
+        pub fn field_offsets(comptime OFFSET_INT: type) FieldOffsets(OFFSET_INT) {
+            var offs: FieldOffsets(OFFSET_INT) = undefined;
+            inline for (@typeInfo(FIELD).@"enum".fields) |enum_field| {
+                @field(offs, enum_field.name) = @intCast(OFFSETS[enum_field.value]);
+            }
+            return offs;
+        }
+
         pub fn write_hlsl_uniform_stub(struct_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(HLSL_CBUFFER_SPACE);
             _ = try writer.write(struct_name);
@@ -680,19 +688,21 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     comptime var field_hlsl_names: [_NUM_FIELDS]HLSL_NAME = undefined;
     comptime var single_non_system_semantics_num: [_NUM_FIELDS]?u32 = @splat(null);
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
-    comptime var empty_spots_len: usize = 0;
     comptime var current_max_offset: usize = 0;
-    const BufSpanPkg = Utils.DataManipulation.Defaults.slice_not_allocated_package(BufferSpan);
+    const StreamStructFieldList = Root.GooListSlice.SliceMutableAdvanced(_Field, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    const BufferSpanList = Root.GooListSlice.SliceMutableAdvanced(BufferSpan, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    comptime var _fields_list = StreamStructFieldList.from_slice_keep_data(_fields[0..]);
+    comptime var empty_spots_list = BufferSpanList.from_slice_set_empty(empty_spots[0..]);
     const SORT = struct {
-        fn align_lesser_then_size_lesser(a: _Field, b: _Field) bool {
-            if (a.gpu_type.stream_alignment < b.gpu_type.stream_alignment) return true;
-            return a.gpu_type.stream_size < a.gpu_type.stream_size;
+        fn align_lesser_then_size_lesser(list: StreamStructFieldList, idx_a: u32, val_b: _Field, _: void, comptime _: void) bool {
+            if (list.get(idx_a).gpu_type.uniform_alignment < val_b.gpu_type.uniform_alignment) return true;
+            return list.get(idx_a).gpu_type.uniform_size < val_b.gpu_type.uniform_size;
         }
-        fn offset_larger(a: BufferSpan, b: BufferSpan) bool {
-            return a.offset > b.offset;
+        fn offset_larger(list: BufferSpanList, idx_a: u32, idx_b: u32, _: void, comptime _: void) bool {
+            return list.get(idx_a).offset > list.get(idx_b).offset;
         }
     };
-    Sort.insertion_sort_with_func(_fields[0.._NUM_FIELDS], SORT.align_lesser_then_size_lesser);
+    _fields_list.insertion_sort_advanced(void{}, void{}, .COMPTIME_FN_BODY, void{}, SORT.align_lesser_then_size_lesser);
     comptime var used_semantics: [128]u64 = undefined;
     comptime var used_semantic_len: usize = 0;
     comptime var issued_too_many_semantic_warning: bool = false;
@@ -729,7 +739,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         comptime var empty_spot_offset: usize = math.maxInt(isize);
         comptime var empty_spot_space_after: usize = math.maxInt(isize);
         const needed_align = @max(field.gpu_type.stream_alignment, field.gpu_type.cpu_align);
-        for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+        for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
             if (empty.len >= field.gpu_type.stream_size) {
                 const next_aligned_within_empty = Utils.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.stream_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
                 const len_lost = next_aligned_within_empty - empty.offset;
@@ -756,14 +766,14 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         }
         comptime var field_loc: usize = undefined;
         if (found_empty_space) {
-            const old_empty = empty_spots[empty_spot_that_fits];
+            const old_empty = empty_spots_list.get(@intCast(empty_spot_that_fits));
             comptime var overwrite_old_empty = true;
             if (empty_spot_offset > 0) {
                 const new_empty_before = BufferSpan{
                     .offset = old_empty.offset,
                     .len = empty_spot_offset,
                 };
-                empty_spots[empty_spot_that_fits] = new_empty_before;
+                empty_spots_list.set(@intCast(empty_spot_that_fits), new_empty_before);
                 overwrite_old_empty = false;
             }
             if (empty_spot_space_after > 0) {
@@ -772,16 +782,14 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
                     .len = empty_spot_space_after,
                 };
                 if (overwrite_old_empty) {
-                    empty_spots[empty_spot_that_fits] = new_empty_after;
+                    empty_spots_list.set(@intCast(empty_spot_that_fits), new_empty_after);
                     overwrite_old_empty = false;
                 } else {
-                    empty_spots[empty_spots_len] = new_empty_after;
-                    empty_spots_len += 1;
+                    empty_spots_list.append_one_assume_cap(new_empty_after);
                 }
             }
             if (overwrite_old_empty) {
-                _ = BufSpanPkg.delete_one(empty_spots[0..empty_spots_len], empty_spot_that_fits, void{});
-                empty_spots_len -= 1;
+                empty_spots_list.delete_one(@intCast(empty_spot_that_fits));
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
@@ -789,7 +797,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
-                for (empty_spots[0..empty_spots_len], 0..) |empty, e| {
+                for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
                     if (empty.offset + empty.len == current_max_offset) {
                         empty_spots[e].len += new_empty_len;
                         combined_with_another_empty = true;
@@ -801,8 +809,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
                         .offset = current_max_offset,
                         .len = new_empty_len,
                     };
-                    empty_spots[empty_spots_len] = new_empty;
-                    empty_spots_len += 1;
+                    empty_spots_list.append_one_assume_cap(new_empty);
                 }
             }
             field_loc = next_aligned_offset;
@@ -819,21 +826,20 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
     const _BYTES: usize = std.mem.alignForward(usize, current_max_offset, GPU_UNIFORM_BOUNDARY_ALIGN);
     assert_with_reason(_BYTES <= MAX_SHADER_STAGE_IN_OUT_SIZE, @src(), "a shader stage can only take a maximum of 16 x (32bit x 4) vectors as an input or output ({d} bytes), got {d} bytes", .{ MAX_SHADER_STAGE_IN_OUT_SIZE, _BYTES });
     if (_BYTES > current_max_offset) {
-        empty_spots[empty_spots_len] = BufferSpan{
+        empty_spots_list.append_one_assume_cap(BufferSpan{
             .len = _BYTES - current_max_offset,
             .offset = current_max_offset,
-        };
-        empty_spots_len += 1;
+        });
     }
     comptime var wasted_bytes: usize = 0;
-    const SLOT_COUNT = _NUM_FIELDS + empty_spots_len;
+    const SLOT_COUNT = _NUM_FIELDS + empty_spots_list.get_len();
     comptime var all_slots: [SLOT_COUNT]FieldOrPad = undefined;
     comptime var slot_idx: usize = 0;
     for (0.._NUM_FIELDS) |fidx| {
         all_slots[slot_idx] = FieldOrPad{ .FIELD = fidx };
         slot_idx += 1;
     }
-    for (empty_spots[0..empty_spots_len]) |empty| {
+    for (empty_spots_list.zig_slice_entire()) |empty| {
         all_slots[slot_idx] = FieldOrPad{ .PAD = empty };
         slot_idx += 1;
     }
@@ -854,7 +860,7 @@ pub fn StreamStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayou
         }
     }
     const SPACE_BEWTEEN_SHORTEST_AND_LONGEST = longest_field_name_plus_type - shortest_field_name_plus_type;
-    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_len * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
+    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_list.get_len() * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
     comptime var hlsl_stub_inner: [HLSL_STUB_INNER_MAX_LEN]u8 = undefined;
     comptime var pad_idx: usize = 0;
     comptime var comptime_writer = QuickWriter.writer(hlsl_stub_inner[0..]);

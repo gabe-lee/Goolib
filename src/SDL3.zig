@@ -8242,6 +8242,13 @@ pub const GPU_IndexTypeSize = enum(c_uint) {
 
     pub const to_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).to_c;
     pub const from_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).from_c;
+
+    pub fn size(self: GPU_IndexTypeSize) u32 {
+        switch (self) {
+            .U16 => return 2,
+            .U32 => return 4,
+        }
+    }
 };
 
 pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
