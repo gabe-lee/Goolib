@@ -1991,6 +1991,23 @@ const UserSemantic = struct {
     }
 };
 
+pub const HLSL_SemanticNumTracker = struct {
+    SV_ClipDistance: u32 = 0,
+    SV_CullDistance: u32 = 0,
+    SV_Target: u4 = 0,
+    BINORMAL: u32 = 0,
+    BLENDINDICES: u32 = 0,
+    BLENDWEIGHT: u32 = 0,
+    COLOR: u32 = 0,
+    NORMAL: u32 = 0,
+    POSITION: u32 = 0,
+    PSIZE: u32 = 0,
+    TANGENT: u32 = 0,
+    TEXCOORD: u32 = 0,
+    TESSFACTOR: u32 = 0,
+    DEPTH: u32 = 0,
+};
+
 pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     // SYSTEM VALUE
     SV_ClipDistance: u32,
@@ -2100,7 +2117,17 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     pub fn sv_clip_distance(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .SV_ClipDistance = n };
     }
+    pub fn sv_clip_distance_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.SV_ClipDistance;
+        tracker.SV_ClipDistance += 1;
+        return HLSL_Semantic{ .SV_ClipDistance = n };
+    }
     pub fn sv_cull_distance(n: u32) HLSL_Semantic {
+        return HLSL_Semantic{ .SV_CullDistance = n };
+    }
+    pub fn sv_cull_distance_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.SV_CullDistance;
+        tracker.SV_CullDistance += 1;
         return HLSL_Semantic{ .SV_CullDistance = n };
     }
     pub fn sv_coverage() HLSL_Semantic {
@@ -2166,6 +2193,11 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     pub fn sv_target(n: u3) HLSL_Semantic {
         return HLSL_Semantic{ .SV_Target = n };
     }
+    pub fn sv_target_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.SV_Target;
+        tracker.SV_Target += 1;
+        return HLSL_Semantic{ .SV_Target = @intCast(n) };
+    }
     pub fn sv_tess_factor() HLSL_Semantic {
         return HLSL_Semantic{ .SV_TessFactor = void{} };
     }
@@ -2181,25 +2213,60 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     pub fn binormal(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .BINORMAL = n };
     }
+    pub fn binormal_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.BINORMAL;
+        tracker.BINORMAL += 1;
+        return HLSL_Semantic{ .BINORMAL = n };
+    }
     pub fn blend_indices(n: u32) HLSL_Semantic {
+        return HLSL_Semantic{ .BLENDINDICES = n };
+    }
+    pub fn blend_indices_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.BLENDINDICES;
+        tracker.BLENDINDICES += 1;
         return HLSL_Semantic{ .BLENDINDICES = n };
     }
     pub fn blend_weight(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .BLENDWEIGHT = n };
     }
+    pub fn blend_weight_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.BLENDWEIGHT;
+        tracker.BLENDWEIGHT += 1;
+        return HLSL_Semantic{ .BLENDWEIGHT = n };
+    }
     pub fn color(n: u32) HLSL_Semantic {
+        return HLSL_Semantic{ .COLOR = n };
+    }
+    pub fn color_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.COLOR;
+        tracker.COLOR += 1;
         return HLSL_Semantic{ .COLOR = n };
     }
     pub fn normal(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .NORMAL = n };
     }
+    pub fn normal_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.NORMAL;
+        tracker.NORMAL += 1;
+        return HLSL_Semantic{ .NORMAL = n };
+    }
     pub fn position(n: u32) HLSL_Semantic {
+        return HLSL_Semantic{ .POSITION = n };
+    }
+    pub fn position_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.POSITION;
+        tracker.POSITION += 1;
         return HLSL_Semantic{ .POSITION = n };
     }
     pub fn position_transformed() HLSL_Semantic {
         return HLSL_Semantic{ .POSITION = void{} };
     }
     pub fn point_size(n: u32) HLSL_Semantic {
+        return HLSL_Semantic{ .PSIZE = n };
+    }
+    pub fn point_size_auto(tracker: *HLSL_SemanticNumTracker) HLSL_Semantic {
+        const n = tracker.POSITION;
+        tracker.POSITION += 1;
         return HLSL_Semantic{ .PSIZE = n };
     }
     pub fn tangent(n: u32) HLSL_Semantic {
