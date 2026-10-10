@@ -41,7 +41,14 @@ const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
-pub const ShaderContract = @import("./SDL3_ShaderContract.zig");
+pub const GraphicsController_TypeUtils = @import("./SDL_GraphicsController_TypeUtils.zig");
+
+comptime {
+    if (build.is_test) {
+        _ = @import("./SDL3_GraphicsController.zig");
+        _ = @import("./SDL_GraphicsController_TypeUtils.zig");
+    }
+}
 
 /// ### SDL LICENSE: https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
 ///

@@ -104,10 +104,14 @@ pub const GPU_SwapchainTexture = SDL3.GPU_SwapchainTexture;
 pub const GPU_CopyPass = SDL3.GPU_CopyPass;
 pub const GPU_ColorTargetInfo = SDL3.GPU_ColorTargetInfo;
 
-const ShaderContract = SDL3.ShaderContract;
-const StorageStructField = ShaderContract.StorageStructField;
-const StorageStruct = ShaderContract.StorageStruct;
-const GPUType = ShaderContract.GPUType;
+const GraphicsController_TypeUtils = SDL3.GraphicsController_TypeUtils;
+const StorageStructField = GraphicsController_TypeUtils.StorageStructField;
+const StorageStruct = GraphicsController_TypeUtils.StorageStruct;
+const VertexShaderInputStruct = GraphicsController_TypeUtils.VertexShaderInputStruct;
+const VertexShaderInputStructField = GraphicsController_TypeUtils.VertexShaderInputStructField;
+const VertexToFragmentStruct = GraphicsController_TypeUtils.VertexToFragmentStruct;
+const VertexToFragmentField = GraphicsController_TypeUtils.VertexToFragmentField;
+const GPUType = GraphicsController_TypeUtils.GPUType;
 const ErrorBehavior = Common.ErrorBehavior;
 
 const ct_assert_with_reason = Assert.assert_with_reason;
