@@ -41,12 +41,12 @@ const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
-pub const GraphicsController_TypeUtils = @import("./SDL_GraphicsController_TypeUtils.zig");
+pub const ShaderUtils = @import("./SDL3_GraphicsController_ShaderUtils.zig");
 
 comptime {
     if (build.is_test) {
         _ = @import("./SDL3_GraphicsController.zig");
-        _ = @import("./SDL_GraphicsController_TypeUtils.zig");
+        _ = @import("./SDL3_GraphicsController_ShaderUtils.zig");
     }
 }
 

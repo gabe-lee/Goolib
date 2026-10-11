@@ -41,7 +41,7 @@
 const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
-const config = @import("config");
+const CONFIG = Root.CONFIG;
 const init_zero = std.mem.zeroes;
 
 const Root = @import("./_root.zig");
@@ -63,7 +63,6 @@ const SDL3 = Root.SDL3;
 const GPU_VertexElementFormat = SDL3.GPU_VertexElementFormat;
 const InterfaceSignature = Types.InterfaceSignature;
 const MethodDefinition = Types.MethodDefinition;
-const ParamDefinition = Types.ParamDefinition;
 const SourceLocation = std.builtin.SourceLocation;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -847,9 +846,9 @@ pub const HLSL_NAME = enum {
     int4x4,
 };
 
-pub const MAX_LOCATIONS: usize = 32;
-pub const MAX_COMPONENTS: usize = MAX_LOCATIONS * 4; // 128
-pub const MAX_TYPES: usize = 128;
+pub const MAX_LOCATIONS: usize = 16;
+pub const MAX_COMPONENTS: usize = MAX_LOCATIONS * 4;
+pub const MAX_TYPES: usize = 64;
 
 pub const BaseType = enum {
     float,
@@ -942,7 +941,6 @@ pub const Swizzle = struct {
     }
 };
 
-/// Represents an individual vector chunk inside a single location
 pub const PackedChunk = struct {
     location: u8,
     component_start: u8,
@@ -957,14 +955,12 @@ pub const PackedChunk = struct {
     }
 };
 
-/// Reports how a user GPUType is mapped, including shader reassembly instructions
-pub const TypePacking = struct {
+const TypePacking = struct {
     gpu_type: GPUType,
     original_index: usize,
     chunk_count: u8,
     chunks: [4]PackedChunk = undefined,
 
-    /// Returns the initial byte offset of this type in the vertex buffer
     pub fn byte_offset(self: TypePacking) u32 {
         return self.chunks[0].byte_offset;
     }
@@ -973,40 +969,9 @@ pub const TypePacking = struct {
     pub fn primary_location(self: TypePacking) u8 {
         return self.chunks[0].location;
     }
-
-    // FIXME: I need to be able to print directly to an .hlsl file that SDL_ShaderCross supports,
-    // /// Writes the exact HLSL expression to unpack or reassemble this type in the shader.
-    // /// Examples:
-    // ///   - Single float: "in_loc0.x"
-    // ///   - Packed float2: "in_loc0.zw"
-    // ///   - Reassembled float4x4: "float4x4(in_loc0, in_loc1, in_loc2, in_loc3)"
-    // ///   - Reassembled float2x2: "float2x2(in_loc0.xy, in_loc0.zw)"
-    // pub fn write_hlsl_expression(self: TypePacking, writer: anytype) !void {
-    //     if (self.chunk_count == 1) {
-    //         const c = self.chunks[0];
-    //         if (c.component_count == 4) {
-    //             try writer.print("in_loc{d}", .{c.location});
-    //         } else {
-    //             try writer.print("in_loc{d}.{s}", .{ c.location, c.swizzle().string() });
-    //         }
-    //     } else {
-    //         try writer.print("{s}(", .{@tagName(self.gpu_type.hlsl_name)});
-    //         for (0..self.chunk_count) |i| {
-    //             if (i > 0) try writer.writeAll(", ");
-    //             const c = self.chunks[i];
-    //             if (c.component_count == 4) {
-    //                 try writer.print("in_loc{d}", .{c.location});
-    //             } else {
-    //                 try writer.print("in_loc{d}.{s}", .{ c.location, c.swizzle().string() });
-    //             }
-    //         }
-    //         try writer.writeAll(")");
-    //     }
-    // }
 };
 
-/// Description of an active GPU vertex buffer location
-pub const LocationInfo = struct {
+const LocationInfo = struct {
     location: u8,
     format: GPU_VertexElementFormat,
     arangement: LocationComponentArangement,
@@ -1015,8 +980,7 @@ pub const LocationInfo = struct {
     byte_size: u32,
 };
 
-/// The complete packing report
-pub const PackedVertexLayout = struct {
+const PackedVertexLayout = struct {
     locations: [MAX_LOCATIONS]LocationInfo = undefined,
     location_count: usize = 0,
     types: [MAX_TYPES]TypePacking = undefined,
@@ -1058,14 +1022,8 @@ fn resolve_location_format(base: BaseType, component_count: u8) GPU_VertexElemen
     };
 }
 
-pub const PackError = error{
-    too_many_input_types,
-    out_of_vertex_locations,
-};
-
-/// Takes a list of GPUType and packs them into locations with offsets and packing/unpacking instructions.
-pub fn pack_vertex_locations(input_types: []const GPUType) PackError!PackedVertexLayout {
-    if (input_types.len > MAX_TYPES) return error.too_many_input_types;
+fn pack_vertex_locations(comptime input_types: []const GPUType) PackedVertexLayout {
+    assert_with_reason(input_types.len <= MAX_TYPES, @src(), "number of input types ({d}) exceeds the maximum ({d})", .{ input_types.len, MAX_TYPES });
 
     var result = PackedVertexLayout{};
     result.type_count = input_types.len;
@@ -1152,13 +1110,13 @@ pub fn pack_vertex_locations(input_types: []const GPUType) PackError!PackedVerte
 
         // Open a new location if it didn't fit
         if (!placed) {
-            if (active_locations >= MAX_LOCATIONS) return error.out_of_vertex_locations;
+            assert_with_reason(active_locations < MAX_LOCATIONS, @src(), "layout requires more than the maximum vertex attribute locations ({d})", .{MAX_LOCATIONS});
 
             const loc_idx = active_locations;
             active_locations += 1;
 
             const did_fit, const new_fitted_state, const fit_offset = location_states[loc_idx].can_fill_and_state_after_fill(chunk.size);
-            assert_with_reason(did_fit, @src(), "type did not fit into the vertex buffer anywhere, impossible to", .{});
+            assert_with_reason(did_fit, @src(), "type did not fit into the vertex buffer anywhere, impossible to complete vertex buffer layout", .{});
 
             chunk_placements[chunk.type_idx][chunk.chunk_idx] = .{
                 .loc = @intCast(loc_idx),
@@ -1733,6 +1691,11 @@ pub fn GPU_enum8_4(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, compt
 
 pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
+    if (ENUM_TYPE == Bool32) {
+        _ = try writer.write("#define TRUE 1\n");
+        _ = try writer.write("#define FALSE 0\n");
+        return;
+    }
     const LOCAL = comptime Utils.local_type_name(ENUM_TYPE);
     _ = try writer.write(COMMENT_SPACE_ENUM_SPACE);
     _ = try writer.write(LOCAL);
@@ -2115,7 +2078,6 @@ pub fn VertexShaderInputStructField(comptime STRUCT_FIELD_ENUM: type) type {
         }
     };
 }
-
 pub fn VertexShaderInputStruct(
     comptime NAME: []const u8,
     comptime STRUCT_FIELD_ENUM: type,
@@ -2295,13 +2257,173 @@ pub fn VertexShaderInputStruct(
         field_types[fidx] = f.gpu_type.cpu_type;
     }
 
+    // --- Helper to synthesize CPU-side extern struct per buffer slot ---
+    const SlotStructBuilder = struct {
+        const PAD_NAMES = blk: {
+            var names: [128][:0]const u8 = undefined;
+            for (0..128) |i| {
+                names[i] = std.fmt.comptimePrint("__pad_{d}", .{i});
+            }
+            break :blk names;
+        };
+
+        fn build_slot_type(
+            comptime target_slot: u32,
+            comptime in_fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM),
+            comptime in_offsets: [_NUM_FIELDS]usize,
+            comptime stride: u32,
+        ) type {
+            comptime var count: usize = 0;
+            for (in_fields) |f| {
+                if (f.from_vertex_buffer_slot == target_slot) count += 1;
+            }
+            if (count == 0) return extern struct {};
+
+            const SlotFieldRef = struct {
+                field_idx: usize,
+                offset: usize,
+                size: usize,
+                align_val: usize,
+                name: []const u8,
+                cpu_type: type,
+            };
+
+            comptime var slot_fields: [count]SlotFieldRef = undefined;
+            comptime var s_idx: usize = 0;
+            for (in_fields) |f| {
+                if (f.from_vertex_buffer_slot == target_slot) {
+                    const fidx = @intFromEnum(f.field_name);
+                    slot_fields[s_idx] = .{
+                        .field_idx = fidx,
+                        .offset = in_offsets[fidx],
+                        .size = @sizeOf(f.gpu_type.cpu_type),
+                        .align_val = f.gpu_type.cpu_align,
+                        .name = @tagName(f.field_name),
+                        .cpu_type = f.gpu_type.cpu_type,
+                    };
+                    s_idx += 1;
+                }
+            }
+
+            // Sort fields by their in-slot offset ascending
+            for (1..count) |i| {
+                var j = i;
+                while (j > 0 and slot_fields[j - 1].offset > slot_fields[j].offset) {
+                    const tmp = slot_fields[j - 1];
+                    slot_fields[j - 1] = slot_fields[j];
+                    slot_fields[j] = tmp;
+                    j -= 1;
+                }
+            }
+
+            // Pre-calculate exact field count (including explicit padding intervals)
+            comptime var total_fields: usize = 0;
+            comptime var temp_offset: usize = 0;
+            for (slot_fields) |sf| {
+                if (sf.offset > temp_offset) {
+                    total_fields += 1; // padding field
+                    temp_offset = sf.offset;
+                }
+                total_fields += 1; // field definition
+                temp_offset += sf.size;
+            }
+            if (temp_offset < stride) {
+                total_fields += 1; // trailing padding to match vertex stride
+                temp_offset = stride;
+            }
+
+            // Prepare parallel parameter arrays for @Struct
+            comptime var field_names: [total_fields][]const u8 = undefined;
+            comptime var field_types_: [total_fields]type = undefined;
+            comptime var field_attrs: [total_fields]std.builtin.Type.StructField.Attributes = @splat(.{});
+
+            comptime var curr_offset: usize = 0;
+            comptime var f_idx: usize = 0;
+            comptime var pad_idx: usize = 0;
+
+            for (slot_fields) |sf| {
+                // Gap padding
+                if (sf.offset > curr_offset) {
+                    const pad_len = sf.offset - curr_offset;
+                    field_names[f_idx] = PAD_NAMES[pad_idx];
+                    field_types_[f_idx] = [pad_len]u8;
+                    field_attrs[f_idx] = .{ .@"align" = 1 };
+                    f_idx += 1;
+                    pad_idx += 1;
+                    curr_offset = sf.offset;
+                }
+
+                assert_with_reason(sf.offset == curr_offset, @src(), "field `{s}` overlaps previous field in slot {d}", .{ sf.name, target_slot });
+
+                // User attribute field
+                field_names[f_idx] = sf.name;
+                field_types_[f_idx] = sf.cpu_type;
+                field_attrs[f_idx] = .{ .@"align" = @min(@alignOf(sf.cpu_type), sf.align_val) };
+                f_idx += 1;
+                curr_offset += sf.size;
+            }
+
+            // Trailing stride padding
+            if (curr_offset < stride) {
+                const pad_len = stride - curr_offset;
+                field_names[f_idx] = PAD_NAMES[pad_idx];
+                field_types_[f_idx] = [pad_len]u8;
+                field_attrs[f_idx] = .{ .@"align" = 1 };
+                f_idx += 1;
+                pad_idx += 1;
+                curr_offset = stride;
+            }
+
+            // Instantiate type using the @Struct builtin
+            const GeneratedType = @Struct(
+                .@"extern",
+                null,
+                &field_names,
+                &field_types_,
+                &field_attrs,
+            );
+
+            // Compile-time layout verification
+            comptime {
+                assert_with_reason(
+                    @sizeOf(GeneratedType) == stride,
+                    @src(),
+                    "generated struct for slot {d} size ({d}) != stride ({d})",
+                    .{ target_slot, @sizeOf(GeneratedType), stride },
+                );
+                for (slot_fields) |sf| {
+                    const actual_off = @offsetOf(GeneratedType, sf.name);
+                    assert_with_reason(
+                        actual_off == sf.offset,
+                        @src(),
+                        "field `{s}` in slot {d} offset ({d}) != expected offset ({d})",
+                        .{ sf.name, target_slot, actual_off, sf.offset },
+                    );
+                }
+            }
+
+            return GeneratedType;
+        }
+    };
+
+    // Construct the list of CPU-side types for every buffer input slot
+    comptime var generated_slot_types: [NUM_SLOTS]type = undefined;
+    for (0..NUM_SLOTS) |s| {
+        generated_slot_types[s] = SlotStructBuilder.build_slot_type(
+            @intCast(s),
+            fields,
+            field_offsets,
+            slot_strides[s],
+        );
+    }
+    const slot_types_const = generated_slot_types;
+
     // Build Comptime HLSL Stub Code
     const TOTAL_STRIDE: usize = if (NUM_SLOTS > 0) slot_strides[0] else 0;
     const HLSL_BUFFER_MAX_LEN = 16384;
     comptime var hlsl_buffer: [HLSL_BUFFER_MAX_LEN]u8 = undefined;
     comptime var comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
 
-    // Track user semantics
     comptime var next_texcoord: u32 = 0;
     const PACKED_NAME = NAME ++ "_PACKED";
 
@@ -2313,7 +2435,6 @@ pub fn VertexShaderInputStruct(
         const num_comps: u8 = @intCast(@popCount(location_states[l_idx].used_components));
         const base = location_base_types[l_idx] orelse .float;
 
-        // Print raw type (e.g. float4, uint2)
         const type_str = switch (base) {
             .float => switch (num_comps) {
                 1 => "float ",
@@ -2408,7 +2529,6 @@ pub fn VertexShaderInputStruct(
                 field_info.base_type,
             ) catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            // Multi-column matrix reconstruction
             _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.writeByte('(') catch |err| assert_comptime_write_failure(@src(), err);
 
@@ -2458,13 +2578,33 @@ pub fn VertexShaderInputStruct(
         pub const BYTES: usize = TOTAL_STRIDE;
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_LOCATIONS: usize = active_locs_const;
+        pub const NUM_BUFFER_SLOTS: u32 = NUM_SLOTS;
         pub const TYPES: [NUM_FIELDS]type = field_types_const;
         pub const OFFSETS: [NUM_FIELDS]usize = field_offsets_const;
         pub const FIELD = STRUCT_FIELD_ENUM;
         pub const HLSL_VERTEX_STUB = hlsl_stub_inner_const;
         pub const SLOT_STRIDES = slot_strides_const;
 
-        // CPU Buffer accessors
+        /// List of CPU-side slice element types, indexed by buffer slot [0..NUM_BUFFER_SLOTS - 1]
+        pub const SLOT_TYPES: [NUM_SLOTS]type = slot_types_const;
+
+        /// Returns the exact CPU-side struct type for a given buffer slot
+        pub fn SlotType(comptime slot: u32) type {
+            return SLOT_TYPES[slot];
+        }
+
+        /// Returns the slice type for a given buffer slot ([]SlotType(slot))
+        pub fn SlotSlice(comptime slot: u32) type {
+            return []SlotType(slot);
+        }
+
+        // Direct convenience aliases for the first slots
+        pub const Slot0 = SLOT_TYPES[0];
+        pub const Slot1 = if (NUM_SLOTS > 1) SLOT_TYPES[1] else void;
+        pub const Slot2 = if (NUM_SLOTS > 2) SLOT_TYPES[2] else void;
+        pub const Slot3 = if (NUM_SLOTS > 3) SLOT_TYPES[3] else void;
+
+        // CPU Buffer accessors (for single-slot usage)
         pub fn bytes(self: *Self) *[BYTES]u8 {
             return &self.buffer;
         }
@@ -2776,6 +2916,7 @@ pub fn VertexToFragmentStruct(
     comptime var hlsl_buffer: [HLSL_BUFFER_MAX_LEN]u8 = undefined;
     comptime var comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
 
+    // VERTEX STUB
     // Unpacked Intermediate Struct
     _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
@@ -2840,18 +2981,17 @@ pub fn VertexToFragmentStruct(
         }
 
         if (_LAYOUT) {
-            _ = comptime_writer.write("; // arange ") catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(@tagName(reg.state.arangement)) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+            // Add some layout info here?
+            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
             _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
     _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    // 3. Vertex Shader Packing Function
-    _ = comptime_writer.write("" ++ PACKED_NAME ++ " PackVertexOutput(" ++ NAME ++ " v) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ PACKED_NAME ++ " stage;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    // Vertex Shader Packing Function
+    _ = comptime_writer.write("" ++ PACKED_NAME ++ " pack_vertex_output(" ++ NAME ++ " vf) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
@@ -2861,11 +3001,11 @@ pub fn VertexToFragmentStruct(
             const plc = field_placements[fidx][col];
             const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
 
-            _ = comptime_writer.write("    stage.reg") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write("    pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(" = v.") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write(" = vf.") catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
 
             if (count > 1) {
@@ -2876,17 +3016,99 @@ pub fn VertexToFragmentStruct(
             _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("    return stage;\n}\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write("    return pck;\n}\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    // 4. Pixel Shader Unpacking Function
-    _ = comptime_writer.write("" ++ NAME ++ " UnpackFragmentInput(" ++ PACKED_NAME ++ " stage) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ NAME ++ " v;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    const hlsl_stub_vert_final_len = comptime_writer.end;
+    const hlsl_stub_vert_const: [hlsl_stub_vert_final_len]u8 = make_const: {
+        var out: [hlsl_stub_vert_final_len]u8 = undefined;
+        @memcpy(out[0..hlsl_stub_vert_final_len], hlsl_buffer[0..hlsl_stub_vert_final_len]);
+        break :make_const out;
+    };
+
+    // FRAGMENT STUB
+    comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
+
+    // Unpacked Intermediate Struct
+    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    for (fields) |f| {
+        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+    }
+    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    // Hardware Packed Stage Output / Input Struct
+    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    for (0..active_registers) |r_idx| {
+        const reg = stage_registers[r_idx];
+        const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
+
+        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+
+        // Interpolation qualifier
+        if (reg.interp != .DEFAULT) {
+            _ = comptime_writer.write(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
+        }
+
+        // HLSL Type
+        const type_str = switch (reg.base_type) {
+            .float => switch (num_comps) {
+                1 => "float ",
+                2 => "float2",
+                3 => "float3",
+                4 => "float4",
+                else => "float4",
+            },
+            .uint, .bool => switch (num_comps) {
+                1 => "uint  ",
+                2 => "uint2 ",
+                3 => "uint3 ",
+                4 => "uint4 ",
+                else => "uint4 ",
+            },
+            .int => switch (num_comps) {
+                1 => "int   ",
+                2 => "int2  ",
+                3 => "int3  ",
+                4 => "int4  ",
+                else => "int4  ",
+            },
+        };
+        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(" reg") catch |err| assert_comptime_write_failure(@src(), err);
+        comptime_writer.printInt(r_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(" : ") catch |err| assert_comptime_write_failure(@src(), err);
+
+        if (reg.is_dedicated and reg.semantic != null) {
+            _ = comptime_writer.write(@tagName(reg.semantic.?)) catch |err| assert_comptime_write_failure(@src(), err);
+            if (reg.semantic.?.get_num()) |num| {
+                comptime_writer.printInt(num, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+            }
+        } else {
+            _ = comptime_writer.write("TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
+            comptime_writer.printInt(reg.user_texcoord_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+        }
+
+        if (_LAYOUT) {
+            // Add some layout info here?
+            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        } else {
+            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        }
+    }
+    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    // Pixel Shader Unpacking Function
+    _ = comptime_writer.write("" ++ NAME ++ " unpack_frag_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write("    " ++ NAME ++ " vf;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
         const count = field_chunk_counts[fidx];
 
-        _ = comptime_writer.write("    v.") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write("    vf.") catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.write(" = ") catch |err| assert_comptime_write_failure(@src(), err);
 
@@ -2896,7 +3118,7 @@ pub fn VertexToFragmentStruct(
             const reg = stage_registers[plc.reg];
             const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-            _ = comptime_writer.write("stage.reg") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
             if (plc.comp_count < num_comps or plc.comp_count < 4) {
@@ -2914,7 +3136,7 @@ pub fn VertexToFragmentStruct(
                 const reg = stage_registers[plc.reg];
                 const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-                _ = comptime_writer.write("stage.reg") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
                 if (plc.comp_count < num_comps or plc.comp_count < 4) {
@@ -2926,28 +3148,492 @@ pub fn VertexToFragmentStruct(
         }
         _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("    return v;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write("    return vf;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    const hlsl_stub_final_len = comptime_writer.end;
-    const hlsl_stub_const: [hlsl_stub_final_len]u8 = make_const: {
-        var out: [hlsl_stub_final_len]u8 = undefined;
-        @memcpy(out[0..hlsl_stub_final_len], hlsl_buffer[0..hlsl_stub_final_len]);
+    const hlsl_stub_frag_final_len = comptime_writer.end;
+    const hlsl_stub_frag_const: [hlsl_stub_frag_final_len]u8 = make_const: {
+        var out: [hlsl_stub_frag_final_len]u8 = undefined;
+        @memcpy(out[0..hlsl_stub_frag_final_len], hlsl_buffer[0..hlsl_stub_frag_final_len]);
         break :make_const out;
     };
 
     return struct {
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_REGISTERS = active_registers;
-        pub const HLSL_STUB = hlsl_stub_const;
+        pub const HLSL_VERT_STUB = hlsl_stub_vert_const;
+        pub const HLSL_FRAG_STUB = hlsl_stub_frag_const;
 
-        pub fn write_hlsl_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_STUB[0..]);
+        pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(HLSL_VERT_STUB[0..]);
+        }
+        pub fn write_hlsl_frag_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(HLSL_FRAG_STUB[0..]);
         }
     };
 }
 
-/// Writes an unpack expression, inserting bitcast intrinsics when types differ.
-pub fn write_unpack_expr(
+pub fn FragmentShaderOutputField(comptime STRUCT_FIELD_ENUM: type) type {
+    return struct {
+        field_name: STRUCT_FIELD_ENUM,
+        gpu_type: GPUType,
+        semantic: HLSL_Semantic,
+
+        pub fn other(
+            comptime field_name: STRUCT_FIELD_ENUM,
+            comptime gpu_type: GPUType,
+            comptime semantic: HLSL_Semantic,
+        ) @This() {
+            return @This(){
+                .field_name = field_name,
+                .gpu_type = gpu_type,
+                .semantic = semantic,
+            };
+        }
+
+        pub fn target(
+            comptime field_name: STRUCT_FIELD_ENUM,
+            comptime gpu_type: GPUType,
+            comptime target_index: u3,
+        ) @This() {
+            return @This(){
+                .field_name = field_name,
+                .gpu_type = gpu_type,
+                .semantic = HLSL_Semantic.sv_target(target_index),
+            };
+        }
+
+        pub fn new_target_auto(
+            comptime field_name: STRUCT_FIELD_ENUM,
+            comptime gpu_type: GPUType,
+            tracker: *HLSL_SemanticNumTracker,
+        ) @This() {
+            return @This(){
+                .field_name = field_name,
+                .gpu_type = gpu_type,
+                .semantic = HLSL_Semantic.sv_target_auto(tracker),
+            };
+        }
+    };
+}
+
+pub fn FragmentShaderOutputStruct(
+    comptime NAME: []const u8,
+    comptime STRUCT_FIELD_ENUM: type,
+    comptime INCLUDE_LAYOUT: IncludeLayoutInStub,
+    comptime fields: []const FragmentShaderOutputField(STRUCT_FIELD_ENUM),
+    comptime EVAL_QUOTA: comptime_int,
+) type {
+    @setEvalBranchQuota(EVAL_QUOTA);
+
+    assert_with_reason(
+        Types.type_is_enum(STRUCT_FIELD_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STRUCT_FIELD_ENUM),
+        @src(),
+        "type `STRUCT_FIELD_ENUM` must be an enum type starting at 0 with no gaps, got `{s}`",
+        .{@typeName(STRUCT_FIELD_ENUM)},
+    );
+
+    const _NUM_FIELDS = Types.enum_defined_field_count(STRUCT_FIELD_ENUM);
+    assert_with_reason(
+        fields.len == _NUM_FIELDS,
+        @src(),
+        "(FragmentShaderOutputStruct '{s}') the number of fields in `STRUCT_FIELD_ENUM` ({d}) must match field definitions ({d})",
+        .{ NAME, _NUM_FIELDS, fields.len },
+    );
+
+    const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
+    const PACKED_NAME = NAME ++ "_PACKED";
+
+    // Uniqueness check
+    comptime var field_defined: [_NUM_FIELDS]bool = @splat(false);
+    for (fields) |f| {
+        const idx = @intFromEnum(f.field_name);
+        assert_with_reason(
+            !field_defined[idx],
+            @src(),
+            "(FragmentShaderOutputStruct '{s}') field `{s}` defined more than once",
+            .{ NAME, @tagName(f.field_name) },
+        );
+        field_defined[idx] = true;
+    }
+
+    // Fragment semantic and type validation
+    comptime var depth_field_idx: ?usize = null;
+    comptime var coverage_field_idx: ?usize = null;
+    comptime var stencil_field_idx: ?usize = null;
+
+    for (fields, 0..) |f, i| {
+        const info = get_hlsl_info(f.gpu_type.hlsl_name);
+        assert_with_reason(
+            info.cols == 1,
+            @src(),
+            "(FragmentShaderOutputStruct '{s}') field `{s}` with type `{s}` cannot be a matrix (fragment outputs must be scalar or vector)",
+            .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
+        );
+
+        switch (f.semantic) {
+            .SV_Depth, .SV_DepthGreaterEqual, .SV_DepthLessEqual => {
+                assert_with_reason(
+                    depth_field_idx == null,
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') multiple depth outputs declared (`{s}` and `{s}`); fragment shaders can output at most one depth value",
+                    .{ NAME, @tagName(fields[depth_field_idx orelse 0].field_name), @tagName(f.field_name) },
+                );
+                assert_with_reason(
+                    f.gpu_type.equals_gpu_only(GPU_f32),
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') depth output `{s}` must be a scalar float (GPU_f32), got `{s}`",
+                    .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
+                );
+                depth_field_idx = i;
+            },
+            .SV_Coverage => {
+                assert_with_reason(
+                    coverage_field_idx == null,
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') multiple coverage outputs declared (`{s}` and `{s}`); fragment shaders can output at most one coverage mask",
+                    .{ NAME, @tagName(fields[coverage_field_idx.?].field_name), @tagName(f.field_name) },
+                );
+                assert_with_reason(
+                    f.gpu_type.equals_gpu_only(GPU_u32),
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') coverage output `{s}` must be a scalar uint (GPU_u32), got `{s}`",
+                    .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
+                );
+                coverage_field_idx = i;
+            },
+            .SV_StencilRef => {
+                assert_with_reason(
+                    stencil_field_idx == null,
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') multiple stencil outputs declared (`{s}` and `{s}`); fragment shaders can output at most one stencil reference",
+                    .{ NAME, @tagName(fields[stencil_field_idx.?].field_name), @tagName(f.field_name) },
+                );
+                assert_with_reason(
+                    f.gpu_type.equals_gpu_only(GPU_u32),
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') stencil output `{s}` must be a scalar uint (GPU_u32), got `{s}`",
+                    .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
+                );
+                stencil_field_idx = i;
+            },
+            .SV_Target => {},
+            else => {
+                assert_with_reason(
+                    false,
+                    @src(),
+                    "(FragmentShaderOutputStruct '{s}') field `{s}` has invalid semantic `{s}`: fragment shader outputs only support SV_Target, SV_Depth*, SV_Coverage, and SV_StencilRef",
+                    .{ NAME, @tagName(f.field_name), @tagName(f.semantic) },
+                );
+            },
+        }
+    }
+
+    // Bin-pack fields targeted to SV_Target[0..7] slots
+    const TargetChunkToPack = struct {
+        field_idx: usize,
+        slot: u3,
+        size: VertexComponentSize,
+        base_type: BaseType,
+    };
+
+    comptime var target_chunk_count: usize = 0;
+    for (fields) |f| {
+        if (f.semantic == .SV_Target) {
+            target_chunk_count += 1;
+        }
+    }
+
+    comptime var target_chunks: [target_chunk_count]TargetChunkToPack = undefined;
+    comptime var tc_idx: usize = 0;
+    for (fields) |f| {
+        if (f.semantic == .SV_Target) {
+            const fidx = @intFromEnum(f.field_name);
+            const info = get_hlsl_info(f.gpu_type.hlsl_name);
+            target_chunks[tc_idx] = .{
+                .field_idx = fidx,
+                .slot = f.semantic.SV_Target,
+                .size = VertexComponentSize.from_int(info.rows),
+                .base_type = info.base_type,
+            };
+            tc_idx += 1;
+        }
+    }
+
+    // Sort chunks per target slot by component size descending (4 -> 3 -> 2 -> 1)
+    comptime var sorted_chunks: [target_chunk_count]TargetChunkToPack = undefined;
+    comptime var sorted_count: usize = 0;
+    for (0..8) |slot_idx| {
+        var size_scan: u8 = 4;
+        while (size_scan >= 1) : (size_scan -= 1) {
+            for (target_chunks) |chk| {
+                if (chk.slot == slot_idx and @intFromEnum(chk.size) == size_scan) {
+                    sorted_chunks[sorted_count] = chk;
+                    sorted_count += 1;
+                }
+            }
+        }
+    }
+
+    const MAX_TARGET_SLOTS = 8;
+    comptime var target_states: [MAX_TARGET_SLOTS]VertexLocationState = [_]VertexLocationState{.{}} ** MAX_TARGET_SLOTS;
+    comptime var target_base_types: [MAX_TARGET_SLOTS]?BaseType = [_]?BaseType{null} ** MAX_TARGET_SLOTS;
+    comptime var target_active: [MAX_TARGET_SLOTS]bool = @splat(false);
+
+    const TargetPlacement = struct {
+        slot: u3,
+        comp_start: u8,
+        comp_count: u8,
+    };
+
+    comptime var field_target_placements: [_NUM_FIELDS]TargetPlacement = undefined;
+
+    for (sorted_chunks) |chk| {
+        target_active[chk.slot] = true;
+        const did_fit, const new_state, const fit_offset = target_states[chk.slot].can_fill_and_state_after_fill(chk.size);
+        assert_with_reason(
+            did_fit,
+            @src(),
+            "(FragmentShaderOutputStruct '{s}') field `{s}` (size {d}) does not fit in SV_Target{d} (total components exceed 4)",
+            .{ NAME, @tagName(fields[chk.field_idx].field_name), @intFromEnum(chk.size), chk.slot },
+        );
+
+        target_states[chk.slot] = new_state;
+        if (target_base_types[chk.slot] == null) {
+            target_base_types[chk.slot] = chk.base_type;
+        }
+
+        field_target_placements[chk.field_idx] = .{
+            .slot = chk.slot,
+            .comp_start = @intCast(fit_offset / 4),
+            .comp_count = @intFromEnum(chk.size),
+        };
+    }
+
+    // Determine active target count and formats
+    comptime var num_active_targets: usize = 0;
+    for (target_active) |act| {
+        if (act) num_active_targets += 1;
+    }
+
+    comptime var active_target_slots: [num_active_targets]u3 = undefined;
+    comptime var active_target_formats: [num_active_targets]GPU_VertexElementFormat = undefined;
+    comptime var active_idx: usize = 0;
+
+    for (0..MAX_TARGET_SLOTS) |slot| {
+        if (target_active[slot]) {
+            const num_comps: u8 = @intCast(@popCount(target_states[slot].used_components));
+            const base = target_base_types[slot] orelse .float;
+            active_target_slots[active_idx] = @intCast(slot);
+            active_target_formats[active_idx] = resolve_location_format(base, num_comps);
+            active_idx += 1;
+        }
+    }
+
+    // --- Build HLSL Stubs ---
+    const HLSL_BUFFER_MAX_LEN = 32768;
+    comptime var hlsl_buffer: [HLSL_BUFFER_MAX_LEN]u8 = undefined;
+    comptime var comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
+
+    // Unpacked Logical Struct
+    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    for (fields) |f| {
+        const fidx = @intFromEnum(f.field_name);
+        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+
+        if (_LAYOUT) {
+            _ = comptime_writer.write("; // ") catch |err| assert_comptime_write_failure(@src(), err);
+            switch (f.semantic) {
+                .SV_Target => {
+                    const plc = field_target_placements[fidx];
+                    const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
+                    _ = comptime_writer.write("target ") catch |err| assert_comptime_write_failure(@src(), err);
+                    comptime_writer.printInt(plc.slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write(" [.") catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write("]\n") catch |err| assert_comptime_write_failure(@src(), err);
+                },
+                else => {
+                    _ = comptime_writer.write(@tagName(f.semantic)) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+                },
+            }
+        } else {
+            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        }
+    }
+    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    // Hardware Packed Stage Output Struct
+    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    // Write all active render targets in ascending slot index
+    for (0..MAX_TARGET_SLOTS) |slot| {
+        if (!target_active[slot]) continue;
+
+        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        const num_comps: u8 = @intCast(@popCount(target_states[slot].used_components));
+        const base = target_base_types[slot] orelse .float;
+
+        const type_str = switch (base) {
+            .float => switch (num_comps) {
+                1 => "float ",
+                2 => "float2",
+                3 => "float3",
+                4 => "float4",
+                else => "float4",
+            },
+            .uint, .bool => switch (num_comps) {
+                1 => "uint  ",
+                2 => "uint2 ",
+                3 => "uint3 ",
+                4 => "uint4 ",
+                else => "uint4 ",
+            },
+            .int => switch (num_comps) {
+                1 => "int   ",
+                2 => "int2  ",
+                3 => "int3  ",
+                4 => "int4  ",
+                else => "int4  ",
+            },
+        };
+        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(" target") catch |err| assert_comptime_write_failure(@src(), err);
+        comptime_writer.printInt(slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(" : SV_Target") catch |err| assert_comptime_write_failure(@src(), err);
+        comptime_writer.printInt(slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+
+        if (_LAYOUT) {
+            _ = comptime_writer.write("; // comps ") catch |err| assert_comptime_write_failure(@src(), err);
+            comptime_writer.printInt(num_comps, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+        } else {
+            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        }
+    }
+
+    // Write system values if present
+    if (depth_field_idx) |d_idx| {
+        _ = comptime_writer.write(SPACE_4 ++ "float depth : ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(@tagName(fields[d_idx].semantic)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+    }
+    if (coverage_field_idx) |_| {
+        _ = comptime_writer.write(SPACE_4 ++ "uint coverage : SV_Coverage;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    }
+    if (stencil_field_idx) |_| {
+        _ = comptime_writer.write(SPACE_4 ++ "uint stencil_ref : SV_StencilRef;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    }
+    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    // Pixel Shader Packing Function
+    _ = comptime_writer.write("" ++ PACKED_NAME ++ " pack_fragment_output(" ++ NAME ++ " f) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    for (fields) |f| {
+        const fidx = @intFromEnum(f.field_name);
+        const f_info = get_hlsl_info(f.gpu_type.hlsl_name);
+
+        switch (f.semantic) {
+            .SV_Target => {
+                const plc = field_target_placements[fidx];
+                const target_comps: u8 = @intCast(@popCount(target_states[plc.slot].used_components));
+                const target_base = target_base_types[plc.slot] orelse .float;
+                const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
+
+                _ = comptime_writer.write("    pck.target") catch |err| assert_comptime_write_failure(@src(), err);
+                comptime_writer.printInt(plc.slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+
+                // Add swizzle if field doesn't span all active components of the target
+                if (plc.comp_count < target_comps) {
+                    _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                }
+                _ = comptime_writer.write(" = ") catch |err| assert_comptime_write_failure(@src(), err);
+
+                // Bitcast conversion if target type and field scalar type differ
+                const needs_cast = target_base != f_info.base_type;
+                if (needs_cast) {
+                    switch (target_base) {
+                        .uint, .bool => _ = comptime_writer.write("asuint(") catch |err| assert_comptime_write_failure(@src(), err),
+                        .int => _ = comptime_writer.write("asint(") catch |err| assert_comptime_write_failure(@src(), err),
+                        .float => _ = comptime_writer.write("asfloat(") catch |err| assert_comptime_write_failure(@src(), err),
+                    }
+                }
+                _ = comptime_writer.write("f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                if (needs_cast) {
+                    _ = comptime_writer.writeByte(')') catch |err| assert_comptime_write_failure(@src(), err);
+                }
+                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            },
+            .SV_Depth, .SV_DepthGreaterEqual, .SV_DepthLessEqual => {
+                _ = comptime_writer.write("    pck.depth = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            },
+            .SV_Coverage => {
+                _ = comptime_writer.write("    pck.coverage = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            },
+            .SV_StencilRef => {
+                _ = comptime_writer.write("    pck.stencil_ref = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            },
+            else => unreachable,
+        }
+    }
+    _ = comptime_writer.write("    return pck;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
+
+    const hlsl_stub_final_len = comptime_writer.end;
+    const hlsl_stub_inner_const: [hlsl_stub_final_len]u8 = make_const: {
+        var out: [hlsl_stub_final_len]u8 = undefined;
+        @memcpy(out[0..hlsl_stub_final_len], hlsl_buffer[0..hlsl_stub_final_len]);
+        break :make_const out;
+    };
+
+    comptime var field_types: [_NUM_FIELDS]type = undefined;
+    for (fields) |f| {
+        field_types[@intFromEnum(f.field_name)] = f.gpu_type.cpu_type;
+    }
+
+    const field_types_const = field_types;
+    const active_targets_count = num_active_targets;
+    const active_slots_const = active_target_slots;
+    const target_formats_const = active_target_formats;
+
+    return struct {
+        pub const NUM_FIELDS = _NUM_FIELDS;
+        pub const NUM_COLOR_TARGETS: usize = active_targets_count;
+        pub const COLOR_TARGET_COUNT: u32 = @intCast(active_targets_count);
+        pub const HAS_DEPTH_OUTPUT: bool = depth_field_idx != null;
+        pub const HAS_STENCIL_OUTPUT: bool = stencil_field_idx != null;
+        pub const HAS_COVERAGE_OUTPUT: bool = coverage_field_idx != null;
+
+        pub const ACTIVE_TARGET_SLOTS: [NUM_COLOR_TARGETS]u3 = active_slots_const;
+        pub const TARGET_FORMATS: [NUM_COLOR_TARGETS]GPU_VertexElementFormat = target_formats_const;
+        pub const TYPES: [NUM_FIELDS]type = field_types_const;
+        pub const FIELD = STRUCT_FIELD_ENUM;
+
+        pub const HLSL_FRAGMENT_STUB = hlsl_stub_inner_const;
+        pub const HLSL_STUB = hlsl_stub_inner_const;
+
+        pub fn type_for_field_name(comptime field: FIELD) type {
+            return TYPES[@intFromEnum(field)];
+        }
+
+        pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(HLSL_FRAGMENT_STUB[0..]);
+        }
+    };
+}
+
+fn write_unpack_expr(
     writer: anytype,
     container_name: []const u8, // e.g. "input.in_loc" or "stage.reg"
     reg_idx: u8,
@@ -2981,8 +3667,7 @@ pub fn write_unpack_expr(
     }
 }
 
-/// Writes a pack assignment expression (for Vertex-to-Fragment output).
-pub fn write_pack_expr(
+fn write_pack_expr(
     writer: anytype,
     field_expr: []const u8, // e.g. "v.my_field"
     reg_base: BaseType,
@@ -3222,12 +3907,129 @@ test "SDL_GraphicsController_TypeUtils => Vertex-To-Fragment Layout/Stubs" {
     );
 
     try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
-    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/vert_to_frag_1.hlsl", .{});
+    {
+        const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/vert_to_frag_1.hlsl", .{});
+        defer file.close(std.testing.io);
+
+        var file_write_buf: [4096]u8 = undefined;
+        var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
+        var writer = &file_writer_holder.interface;
+        try MyV2FContract.write_hlsl_vert_stub(writer);
+        try writer.flush();
+    }
+    {
+        const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/vert_to_frag_2.hlsl", .{});
+        defer file.close(std.testing.io);
+
+        var file_write_buf: [4096]u8 = undefined;
+        var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
+        var writer = &file_writer_holder.interface;
+        try MyV2FContract.write_hlsl_frag_stub(writer);
+        try writer.flush();
+    }
+}
+
+test "SDL_GraphicsController_TypeUtils => Fragment Shader Output Layout/Stubs" {
+    const FS_OUT = enum(u8) {
+        albedo,
+        roughness,
+        normal,
+        depth,
+    };
+    const Field = FragmentShaderOutputField(FS_OUT);
+
+    const MyFragContract = FragmentShaderOutputStruct(
+        "MyFragOutput",
+        FS_OUT,
+        .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
+        &.{
+            // Target 0: albedo (vec3) + roughness (scalar) pack cleanly into SV_Target0 (float4)
+            Field.target(.albedo, GPU_f32_3, 0),
+            Field.target(.roughness, GPU_f32, 0),
+
+            // Target 1: normal (vec4) fills SV_Target1
+            Field.target(.normal, GPU_f32_4, 1),
+
+            // Depth buffer output: dedicated SV_Depth register
+            Field.other(.depth, GPU_f32, HLSL_Semantic.sv_depth()),
+        },
+        100000,
+    );
+
+    comptime {
+        assert_with_reason(MyFragContract.NUM_COLOR_TARGETS == 2, null, "", .{});
+        assert_with_reason(MyFragContract.HAS_DEPTH_OUTPUT == true, null, "", .{});
+        assert_with_reason(MyFragContract.HAS_STENCIL_OUTPUT == false, null, "", .{});
+        assert_with_reason(MyFragContract.ACTIVE_TARGET_SLOTS[0] == 0, null, "", .{});
+        assert_with_reason(MyFragContract.ACTIVE_TARGET_SLOTS[1] == 1, null, "", .{});
+    }
+
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
+    const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/frag_output_1.hlsl", .{});
     defer file.close(std.testing.io);
 
     var file_write_buf: [4096]u8 = undefined;
     var file_writer_holder = file.writer(std.testing.io, file_write_buf[0..]);
     var writer = &file_writer_holder.interface;
-    try MyV2FContract.write_hlsl_stub(writer);
+    try MyFragContract.write_hlsl_fragment_output_structs(writer);
     try writer.flush();
+}
+
+test "SDL_GraphicsController_TypeUtils => Vertex Struct Multi-Buffer Layout/Stubs" {
+    const V = enum(u8) {
+        // Slot 0: Per-vertex geometry
+        world_pos,
+        vert_normal,
+        uv,
+
+        // Slot 1: Per-instance data
+        instance_transform,
+        instance_color,
+    };
+    const S = VertexShaderInputStructField(V);
+
+    const MyInstancedPipeline = VertexShaderInputStruct(
+        "InstancedVertex",
+        V,
+        .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
+        &.{
+            S.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0),
+            S.new_advanced(.vert_normal, GPU_f32_3, .USER, .LINEAR, 0),
+            S.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0),
+
+            S.new_advanced(.instance_transform, GPU_f32_4x4, .USER, .NO_INTERP, 1),
+            S.new_advanced(.instance_color, GPU_f32_4, .USER, .NO_INTERP, 1),
+        },
+        100000,
+    );
+
+    // 1. Retrieve the typed struct definitions for each stream
+    const VertexGeometry = MyInstancedPipeline.SlotType(0);
+    const InstanceData = MyInstancedPipeline.SlotType(1);
+
+    // 2. Verified compile-time layout match
+    comptime {
+        assert_with_reason(@sizeOf(VertexGeometry) == MyInstancedPipeline.SLOT_STRIDES[0], null, "", .{});
+        assert_with_reason(@sizeOf(InstanceData) == MyInstancedPipeline.SLOT_STRIDES[1], null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "world_pos"), null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "vert_normal"), null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "uv"), null, "", .{});
+        assert_with_reason(@hasField(InstanceData, "instance_transform"), null, "", .{});
+        assert_with_reason(@hasField(InstanceData, "instance_color"), null, "", .{});
+    }
+
+    // 3. User code allocates and populates slices directly
+    var vertices: [3]VertexGeometry = undefined;
+    vertices[0].world_pos = .new(0.0, 1.0, 0.0);
+    vertices[0].vert_normal = .new(0.0, 0.0, 1.0);
+    vertices[0].uv = .new(0.5, 0.5);
+
+    var instances: [2]InstanceData = undefined;
+    instances[0].instance_color = .new(1.0, 0.0, 0.0, 1.0);
+
+    // Slices are ready to pass straight to SDL3 vertex buffer uploads:
+    const v_slice: []VertexGeometry = &vertices;
+    const i_slice: []InstanceData = &instances;
+    _ = v_slice;
+    _ = i_slice;
 }

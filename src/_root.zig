@@ -168,8 +168,6 @@ comptime {
         _ = @import("./RectPacker.zig");
         // _ = @import("./Result.zig");
         _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3.zig") else struct {};
-        _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3_ShaderContract.zig") else struct {};
-        _ = if (CONFIG.INCLUDE_SDL) @import("./SDL3_GraphicsController.zig") else struct {};
         _ = @import("./Serializer.zig");
         _ = @import("./Shape.zig");
         _ = @import("./SlabBucketAllocator.zig");

@@ -83,19 +83,19 @@ pub fn define_vec3_type(comptime T: type) type {
         pub const MAX_T = if (IS_FLOAT) math.inf(T) else math.maxInt(T);
 
         pub fn new(x: T, y: T, z: T) Vec3 {
-            return Vec3{ .vec = .{ x, y, z } };
+            return Vec3{ .x = x, .y = y, .z = z };
         }
         pub fn new_splat(val: T) Vec3 {
-            return Vec3{ .vec = @splat(val) };
+            return Vec3{ .x = val, .y = val, .z = val };
         }
         pub fn new_any(x: anytype, y: anytype, z: anytype) Vec3 {
-            return Vec3{ .vec = .{ num_cast(x, T), num_cast(y, T), num_cast(z, T) } };
+            return Vec3{ .x = num_cast(x, T), .y = num_cast(y, T), .z = num_cast(z, T) };
         }
         pub fn new_splat_any(val: anytype) Vec3 {
-            return Vec3{ .vec = num_cast(val, T) };
+            return Vec3{ .x = num_cast(val, T), .y = num_cast(val, T), .z = num_cast(val, T) };
         }
 
-        pub fn flat(self: Vec2) VEC {
+        pub fn vec(self: Vec3) VEC {
             return @bitCast(self);
         }
 
@@ -104,30 +104,30 @@ pub fn define_vec3_type(comptime T: type) type {
         // }
 
         pub fn swizzle(self: Vec3, new_x: Component, new_y: Component, new_z: Component) Vec3 {
-            return Vec3{ .x = self.flat[@intFromEnum(new_x)], .y = self.flat[@intFromEnum(new_y)], .z = self.flat[@intFromEnum(new_z)] };
+            return Vec3{ .x = self.vec[@intFromEnum(new_x)], .y = self.vec[@intFromEnum(new_y)], .z = self.vec[@intFromEnum(new_z)] };
         }
 
         pub fn inverse(self: Vec3) Vec3 {
-            return Vec3{ .vec = ONE.vec / self.vec };
+            return @bitCast(ONE.vec() / self.vec());
         }
 
         pub fn ceil(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return Vec3{ .vec = @ceil(self.vec) };
+            return @bitCast(@ceil(self.vec()));
         }
 
         pub fn floor(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return Vec3{ .vec = @floor(self.vec) };
+            return @bitCast(@floor(self.vec()));
         }
 
         pub fn round(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return Vec3{ .vec = @round(self.vec) };
+            return @bitCast(@round(self.vec()));
         }
 
         pub fn dot_product(self: Vec3, other: Vec3) T {
-            const products = self.vec * other.vec;
+            const products = self.vec() * other.vec();
             return @reduce(.Add, products);
         }
         pub inline fn dot(self: Vec3, other: Vec3) T {
@@ -189,25 +189,25 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn add(self: Vec3, other: Vec3) Vec3 {
-            return Vec3{ .vec = self.vec + other.vec };
+            return @bitCast(self.vec() + other.vec());
         }
 
         pub fn subtract(self: Vec3, other: Vec3) Vec3 {
-            return Vec3{ .vec = self.vec - other.vec };
+            return @bitCast(self.vec() - other.vec());
         }
 
         pub fn multiply(self: Vec3, other: Vec3) Vec3 {
-            return Vec3{ .vec = self.vec * other.vec };
+            return @bitCast(self.vec() * other.vec());
         }
 
         pub fn divide(self: Vec3, other: Vec3) Vec3 {
-            assert_with_reason(!@reduce(.Or, other.vec == ZERO.vec), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.vec});
-            return Vec3{ .vec = self.vec / other.vec };
+            assert_with_reason(!@reduce(.Or, other.vec() == ZERO.vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.vec()});
+            return @bitCast(self.vec() / other.vec());
         }
 
         pub fn scale(self: Vec3, val: anytype) Vec3 {
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return Vec3{ .vec = MathX.upgrade_multiply_out(self.vec, val_vec, VEC) };
+            return @bitCast(MathX.upgrade_multiply_out(self.vec(), val_vec, VEC));
         }
         pub fn inverse_scale(self: Vec3, val: anytype) Vec3 {
             if (@TypeOf(val) == bool) {
@@ -216,7 +216,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 assert_with_reason(val != 0, @src(), "cannot `inverse_scale()` when the scale value is 0, (divide by zero)", .{});
             }
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return Vec3{ .vec = MathX.upgrade_divide_out(self.vec, val_vec, VEC) };
+            return @bitCast(MathX.upgrade_divide_out(self.vec(), val_vec, VEC));
         }
 
         pub fn add_scale(self: Vec3, add_vec: Vec3, scale_add_vec_by: anytype) Vec3 {
@@ -228,11 +228,11 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn squared(self: Vec3) Vec3 {
-            return Vec3{ .vec = self.vec * self.vec };
+            return @bitCast(self.vec() * self.vec());
         }
 
         pub fn component_sum(self: Vec3) T {
-            return @reduce(.Add, self.vec);
+            return @reduce(.Add, self.vec());
         }
 
         pub fn distance_to(self: Vec3, other: Vec3) T {
@@ -257,13 +257,13 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn length_using_squares(self_squared: Vec3) T {
-            assert_with_reason(@reduce(.And, self_squared.vec >= ZERO.vec), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.vec() >= ZERO.vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec()});
             const sum = self_squared.component_sum();
             return num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
         }
 
         pub fn normalize(self: Vec3) Vec3 {
-            assert_with_reason(@reduce(.Or, self.vec != ZERO.vec), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
+            assert_with_reason(@reduce(.Or, self.vec() != ZERO.vec()), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
             const len = self.length();
             return self.inverse_scale(len);
         }
@@ -274,14 +274,14 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn normalize_using_squares(self: Vec3, self_squared: Vec3) Vec3 {
-            assert_with_reason(@reduce(.And, self_squared.vec >= ZERO.vec), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.vec() >= ZERO.vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec()});
             const sum = self_squared.component_sum();
             const len = num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
             return self.inverse_scale(len);
         }
 
         pub fn normalize_may_be_zero(self: Vec3, comptime zero_behavior: NormalizeZero) Vec3 {
-            if (@reduce(.Add, self.vec == ZERO.vec)) {
+            if (@reduce(.Add, self.vec() == ZERO.vec())) {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
@@ -370,17 +370,17 @@ pub fn define_vec3_type(comptime T: type) type {
         /// this equals `a.x / b.x` or `a.y / b.y` or `a.z / b.z`
         pub fn colinear_ratio_a_of_b(a: Vec3, b: Vec3) T {
             inline for (0..3) |i| {
-                if (b.vec[i] != 0) return a.vec[i] / b.vec[i];
+                if (b.vec()[i] != 0) return a.vec()[i] / b.vec()[i];
             }
             return 0;
         }
 
         pub fn perp_any(self: Vec3) Vec3 {
-            return Vec3{ .vec = .{
-                math.copysign(self.z, self.x),
-                math.copysign(self.z, self.y),
-                -math.copysign(self.x, self.z) - math.copysign(self.y, self.z),
-            } };
+            return Vec3{
+                .x = math.copysign(self.z, self.x),
+                .y = math.copysign(self.z, self.y),
+                .z = -math.copysign(self.x, self.z) - math.copysign(self.y, self.z),
+            };
         }
         pub fn perp_with_righthand(self: Vec3, other: Vec3) Vec3 {
             return self.cross(other);
@@ -398,10 +398,10 @@ pub fn define_vec3_type(comptime T: type) type {
                 assert_is_float(@TypeOf(percent), @src());
                 break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
             };
-            const nums = MathX.upgrade_3_numbers_for_math(p1.vec, p2.vec, delta);
+            const nums = MathX.upgrade_3_numbers_for_math(p1.vec(), p2.vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
             const result = @mulAdd(TU, nums.c, nums.b, @mulAdd(TU, -nums.c, nums.a, nums.a));
-            return Vec3{ .vec = num_cast(result, VEC) };
+            return @bitCast(num_cast(result, VEC));
         }
 
         pub fn lerp(p1: Vec3, p2: Vec3, percent: anytype) Vec3 {
@@ -469,11 +469,11 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn rotate_around_x_axis_sin_cos(self: Vec3, sin: anytype, cos: anytype) Vec3 {
-            return Vec3{ .vec = .{
-                self.get_x(),
-                MathX.upgrade_subtract_out(MathX.upgrade_multiply(self.get_y(), cos), MathX.upgrade_multiply(self.get_z(), sin), T),
-                MathX.upgrade_add_out(MathX.upgrade_multiply(self.get_y(), sin), MathX.upgrade_multiply(self.get_z(), cos), T),
-            } };
+            return Vec3{
+                .x = self.x,
+                .y = MathX.upgrade_subtract_out(MathX.upgrade_multiply(self.y, cos), MathX.upgrade_multiply(self.z, sin), T),
+                .z = MathX.upgrade_add_out(MathX.upgrade_multiply(self.y, sin), MathX.upgrade_multiply(self.z, cos), T),
+            };
         }
 
         pub fn rotate_around_y_axis_degrees(self: Vec3, degrees: anytype) Vec3 {
@@ -488,11 +488,11 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn rotate_around_y_axis_sin_cos(self: Vec3, sin: anytype, cos: anytype) Vec3 {
-            return Vec3{ .vec = .{
-                MathX.upgrade_add_out(MathX.upgrade_multiply(self.get_x(), cos), MathX.upgrade_multiply(self.get_z(), sin), T),
-                self.get_y(),
-                MathX.upgrade_add_out(MathX.upgrade_multiply(-self.get_x(), sin), MathX.upgrade_multiply(self.get_z(), cos), T),
-            } };
+            return Vec3{
+                .x = MathX.upgrade_add_out(MathX.upgrade_multiply(self.x, cos), MathX.upgrade_multiply(self.z, sin), T),
+                .y = self.y,
+                .z = MathX.upgrade_add_out(MathX.upgrade_multiply(-self.x, sin), MathX.upgrade_multiply(self.z, cos), T),
+            };
         }
 
         pub fn rotate_around_z_axis_degrees(self: Vec3, degrees: anytype) Vec3 {
@@ -507,33 +507,33 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn rotate_around_z_axis_sin_cos(self: Vec3, sin: anytype, cos: anytype) Vec3 {
-            return Vec3{ .vec = .{
-                MathX.upgrade_subtract_out(MathX.upgrade_multiply(self.get_x(), cos), MathX.upgrade_multiply(self.get_y(), sin), T),
-                MathX.upgrade_add_out(MathX.upgrade_multiply(self.get_x(), sin), MathX.upgrade_multiply(self.get_y(), cos), T),
-                self.get_z(),
-            } };
+            return Vec3{
+                .x = MathX.upgrade_subtract_out(MathX.upgrade_multiply(self.x, cos), MathX.upgrade_multiply(self.y, sin), T),
+                .y = MathX.upgrade_add_out(MathX.upgrade_multiply(self.x, sin), MathX.upgrade_multiply(self.y, cos), T),
+                .z = self.z,
+            };
         }
 
         pub fn negate(self: Vec3) Vec3 {
-            return Vec3{ .vec = -self.vec };
+            return @bitCast(-self.vec());
         }
 
         pub fn equals(self: Vec3, other: Vec3) bool {
-            return @reduce(.And, self.vec == other.vec);
+            return @reduce(.And, self.vec() == other.vec());
         }
 
         pub fn approx_equal(self: Vec3, other: Vec3) bool {
-            return MathX.approx_equal_vec(VEC, self.vec, other.vec);
+            return MathX.approx_equal_vec(VEC, self.vec(), other.vec());
         }
         pub fn approx_equal_with_epsilon(self: Vec3, other: Vec3, epsilon: Vec3) bool {
-            return MathX.approx_equal_with_epsilon_vec(VEC, self.vec, other.vec, epsilon);
+            return MathX.approx_equal_with_epsilon_vec(VEC, self.vec(), other.vec(), epsilon);
         }
 
         pub fn is_zero(self: Vec3) bool {
-            return @reduce(.And, self.vec == ZERO.vec);
+            return @reduce(.And, self.vec() == ZERO.vec());
         }
         pub fn non_zero(self: Vec3) bool {
-            return !@reduce(.And, self.vec == ZERO.vec);
+            return !@reduce(.And, self.vec() == ZERO.vec());
         }
 
         /// 'rise' (component not in `reference_plane`) / 'run' (the length of the 2D vector formed by the components belonging to the `reference_plane`)
@@ -542,15 +542,15 @@ pub fn define_vec3_type(comptime T: type) type {
             var rise: T = undefined;
             switch (reference_plane) {
                 .XY => {
-                    run = Vec2{ .vec = .{ self.x, self.y } };
+                    run = Vec2.new(self.x, self.y);
                     rise = self.z;
                 },
                 .YZ => {
-                    run = Vec2{ .vec = .{ self.y, self.z } };
+                    run = Vec2.new(self.y, self.z);
                     rise = self.x;
                 },
                 .XZ => {
-                    run = Vec2{ .vec = .{ self.x, self.z } };
+                    run = Vec2.new(self.x, self.z);
                     rise = self.y;
                 },
             }
@@ -563,15 +563,15 @@ pub fn define_vec3_type(comptime T: type) type {
             var rise: T = undefined;
             switch (reference_plane) {
                 .XY => {
-                    run = Vec2{ .vec = .{ self.x, self.y } };
+                    run = Vec2.new(self.x, self.y);
                     rise = self.z;
                 },
                 .YZ => {
-                    run = Vec2{ .vec = .{ self.y, self.z } };
+                    run = Vec2.new(self.y, self.z);
                     rise = self.x;
                 },
                 .XZ => {
-                    run = Vec2{ .vec = .{ self.x, self.z } };
+                    run = Vec2.new(self.x, self.z);
                     rise = self.y;
                 },
             }
@@ -610,7 +610,7 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn change_component_type(self: Vec3, comptime NEW_T: type) define_vec3_type(NEW_T) {
             const V = define_vec3_type(NEW_T);
-            return V{ .vec = num_cast(self.vec, V.VEC) };
+            return V.new_any(self.x, self.y, self.z);
         }
 
         pub fn forms_corner_simple(self: Vec3, other: Vec3) bool {
@@ -713,26 +713,26 @@ pub fn define_vec3_type(comptime T: type) type {
         }
         fn apply_transform_advanced(self: Vec3, transform: TransformStep, should_translate: ShouldTranslate) Vec3 {
             return switch (transform) {
-                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.add(vec) else self,
-                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + x, self.get_y(), self.get_z() } } else self,
-                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() + y, self.get_z() } } else self,
-                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + z } } else self,
-                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + xy[0], self.get_y() + xy[1], self.get_z() } } else self,
-                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() + yz[0], self.get_z() + yz[1] } } else self,
-                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() + xz[0], self.get_y(), self.get_z() + xz[1] } } else self,
-                .SCALE => |vec| self.multiply(vec),
-                .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() * x, self.get_y(), self.get_z() } },
-                .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() * y, self.get_z() } },
-                .SCALE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() * z } },
-                .SCALE_XY => |xy| Vec3{ .vec = .{ self.get_x() * xy[0], self.get_y() * xy[1], self.get_z() } },
-                .SCALE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() * yz[0], self.get_z() * yz[1] } },
-                .SCALE_XZ => |xz| Vec3{ .vec = .{ self.get_x() * xz[0], self.get_y(), self.get_z() * xz[1] } },
-                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x() + (ratio * self.get_y()), self.get_y(), self.get_z() } },
-                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x() + (ratio * self.get_z()), self.get_y(), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (ratio * self.get_x()), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (ratio * self.get_z()), self.get_z() } },
-                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (ratio * self.get_x()) } },
-                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (ratio * self.get_y()) } },
+                .TRANSLATE => |v| if (should_translate == .PREFORM_TRANSLATIONS) self.add(v) else self,
+                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x + x, self.y, self.z) else self,
+                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y + y, self.z) else self,
+                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y, self.z + z) else self,
+                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x + xy[0], self.y + xy[1], self.z) else self,
+                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y + yz[0], self.z + yz[1]) else self,
+                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x + xz[0], self.y, self.z + xz[1]) else self,
+                .SCALE => |v| self.multiply(v),
+                .SCALE_X => |x| Vec3.new(self.x * x, self.y, self.z),
+                .SCALE_Y => |y| Vec3.new(self.x, self.y * y, self.z),
+                .SCALE_Z => |z| Vec3.new(self.x, self.y, self.z * z),
+                .SCALE_XY => |xy| Vec3.new(self.x * xy[0], self.y * xy[1], self.z),
+                .SCALE_YZ => |yz| Vec3.new(self.x, self.y * yz[0], self.z * yz[1]),
+                .SCALE_XZ => |xz| Vec3.new(self.x * xz[0], self.y, self.z * xz[1]),
+                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3.new(self.x + (ratio * self.y), self.y, self.z),
+                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3.new(self.x + (ratio * self.z), self.y, self.z),
+                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3.new(self.x, self.y + (ratio * self.x), self.z),
+                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3.new(self.x, self.y + (ratio * self.z), self.z),
+                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3.new(self.x, self.y, self.z + (ratio * self.x)),
+                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3.new(self.x, self.y, self.z + (ratio * self.y)),
                 .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
@@ -746,26 +746,26 @@ pub fn define_vec3_type(comptime T: type) type {
         }
         fn apply_inverse_transform_advanced(self: Vec3, transform: TransformStep, should_translate: ShouldTranslate) Vec3 {
             return switch (transform) {
-                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.add(vec) else self,
-                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - x, self.get_y(), self.get_z() } } else self,
-                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() - y, self.get_z() } } else self,
-                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() - z } } else self,
-                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - xy[0], self.get_y() - xy[1], self.get_z() } } else self,
-                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x(), self.get_y() - yz[0], self.get_z() - yz[1] } } else self,
-                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3{ .vec = .{ self.get_x() - xz[0], self.get_y(), self.get_z() - xz[1] } } else self,
-                .SCALE => |vec| self.multiply(vec),
-                .SCALE_X => |x| Vec3{ .vec = .{ self.get_x() / x, self.get_y(), self.get_z() } },
-                .SCALE_Y => |y| Vec3{ .vec = .{ self.get_x(), self.get_y() / y, self.get_z() } },
-                .SCALE_Z => |z| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() / z } },
-                .SCALE_XY => |xy| Vec3{ .vec = .{ self.get_x() / xy[0], self.get_y() / xy[1], self.get_z() } },
-                .SCALE_YZ => |yz| Vec3{ .vec = .{ self.get_x(), self.get_y() / yz[0], self.get_z() / yz[1] } },
-                .SCALE_XZ => |xz| Vec3{ .vec = .{ self.get_x() / xz[0], self.get_y(), self.get_z() / xz[1] } },
-                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x() + (-ratio * self.get_y()), self.get_y(), self.get_z() } },
-                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x() + (-ratio * self.get_z()), self.get_y(), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (-ratio * self.get_x()), self.get_z() } },
-                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y() + (-ratio * self.get_z()), self.get_z() } },
-                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (-ratio * self.get_x()) } },
-                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3{ .vec = .{ self.get_x(), self.get_y(), self.get_z() + (-ratio * self.get_y()) } },
+                .TRANSLATE => |v| if (should_translate == .PREFORM_TRANSLATIONS) self.add(v) else self,
+                .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - x, self.y, self.z) else self,
+                .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y - y, self.z) else self,
+                .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y, self.z - z) else self,
+                .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - xy[0], self.y - xy[1], self.z) else self,
+                .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y - yz[0], self.z - yz[1]) else self,
+                .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - xz[0], self.y, self.z - xz[1]) else self,
+                .SCALE => |v| self.multiply(v),
+                .SCALE_X => |x| Vec3.new(self.x / x, self.y, self.z),
+                .SCALE_Y => |y| Vec3.new(self.x, self.y / y, self.z),
+                .SCALE_Z => |z| Vec3.new(self.x, self.y, self.z / z),
+                .SCALE_XY => |xy| Vec3.new(self.x / xy[0], self.y / xy[1], self.z),
+                .SCALE_YZ => |yz| Vec3.new(self.x, self.y / yz[0], self.z / yz[1]),
+                .SCALE_XZ => |xz| Vec3.new(self.x / xz[0], self.y, self.z / xz[1]),
+                .SKEW_X_AWAY_FROM_Y => |ratio| Vec3.new(self.x + (-ratio * self.y), self.y, self.z),
+                .SKEW_X_AWAY_FROM_Z => |ratio| Vec3.new(self.x + (-ratio * self.z), self.y, self.z),
+                .SKEW_Y_AWAY_FROM_X => |ratio| Vec3.new(self.x, self.y + (-ratio * self.x), self.z),
+                .SKEW_Y_AWAY_FROM_Z => |ratio| Vec3.new(self.x, self.y + (-ratio * self.z), self.z),
+                .SKEW_Z_AWAY_FROM_X => |ratio| Vec3.new(self.x, self.y, self.z + (-ratio * self.x)),
+                .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3.new(self.x, self.y, self.z + (-ratio * self.y)),
                 .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(-sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
@@ -867,7 +867,7 @@ pub fn define_vec3_type(comptime T: type) type {
             const DEF = Matrix.assert_anytype_is_matrix_and_get_def(matrix, @src());
             assert_with_reason(DEF.COLS == 4 and DEF.ROWS == 4, @src(), "affine matrix to apply MUST be a 4x4 matrix, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
             const result = Matrix.Advanced.multiply_matrices(DEF, matrix, SEFL_DEF, self_as_mat, T, .COLUMN_MAJOR, 0);
-            return Vec3{ .vec = .{ result[0][0], result[0][1], result[0][2] } };
+            return @bitCast(.{ result[0][0], result[0][1], result[0][2] });
         }
 
         pub const TransformStep = union(TransformKind) {
@@ -911,8 +911,8 @@ pub fn define_vec3_type(comptime T: type) type {
                 };
             }
 
-            pub fn translate(vec: Vec3) TransformStep {
-                return TransformStep{ .TRANSLATE = vec };
+            pub fn translate(v: Vec3) TransformStep {
+                return TransformStep{ .TRANSLATE = v };
             }
             pub fn translate_x(x: T) TransformStep {
                 return TransformStep{ .TRANSLATE_X = x };
@@ -933,8 +933,8 @@ pub fn define_vec3_type(comptime T: type) type {
                 return TransformStep{ .TRANSLATE_XZ = .{ x, z } };
             }
 
-            pub fn scale(vec: Vec3) TransformStep {
-                return TransformStep{ .SCALE = vec };
+            pub fn scale(v: Vec3) TransformStep {
+                return TransformStep{ .SCALE = v };
             }
             pub fn scale_x(x: T) TransformStep {
                 return TransformStep{ .SCALE_X = x };
@@ -1084,9 +1084,9 @@ pub fn define_vec3_type(comptime T: type) type {
                     // 0 0 0 1
                     .TRANSLATE => |v| {
                         if (should_translate == .PREFORM_TRANSLATIONS) {
-                            DEF.set_cell(&m.mat, 0, 3, num_cast(v.get_x(), MAT_T));
-                            DEF.set_cell(&m.mat, 1, 3, num_cast(v.get_y(), MAT_T));
-                            DEF.set_cell(&m.mat, 2, 3, num_cast(v.get_z(), MAT_T));
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(v.x, MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(v.y, MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(v.z, MAT_T));
                         }
                     },
                     .TRANSLATE_X => |v| {
@@ -1129,9 +1129,9 @@ pub fn define_vec3_type(comptime T: type) type {
                     // 0 0 z 0
                     // 0 0 0 1
                     .SCALE => |v| {
-                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.get_x(), MAT_T));
-                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.get_y(), MAT_T));
-                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.get_z(), MAT_T));
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(v.x, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(v.y, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(v.z, MAT_T));
                     },
                     .SCALE_X => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(v, MAT_T));
@@ -1228,9 +1228,9 @@ pub fn define_vec3_type(comptime T: type) type {
                     // 0 0 0 1
                     .TRANSLATE => |v| {
                         if (should_translate == .PREFORM_TRANSLATIONS) {
-                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v.get_x(), MAT_T));
-                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v.get_y(), MAT_T));
-                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v.get_z(), MAT_T));
+                            DEF.set_cell(&m.mat, 0, 3, num_cast(-v.x, MAT_T));
+                            DEF.set_cell(&m.mat, 1, 3, num_cast(-v.y, MAT_T));
+                            DEF.set_cell(&m.mat, 2, 3, num_cast(-v.z, MAT_T));
                         }
                     },
                     .TRANSLATE_X => |v| {
@@ -1273,9 +1273,9 @@ pub fn define_vec3_type(comptime T: type) type {
                     // 0 0 z 0
                     // 0 0 0 1
                     .SCALE => |v| {
-                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v.get_x(), MAT_T));
-                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v.get_y(), MAT_T));
-                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v.get_z(), MAT_T));
+                        DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v.x, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 1, num_cast(1 / v.y, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 2, num_cast(1 / v.z, MAT_T));
                     },
                     .SCALE_X => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(1 / v, MAT_T));
