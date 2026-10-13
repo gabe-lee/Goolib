@@ -55,7 +55,9 @@ const Vec3 = Root.Vec3;
 const Vec4 = Root.Vec4;
 const Matrix = Root.Matrix;
 const Common = Root.CommonTypes;
-const Bool32 = Common.Bool32;
+pub const Bool32 = Common.Bool32;
+pub const Bool16 = Common.Bool16;
+pub const Bool8 = Common.Bool8;
 const Sort = Root.Sort.InsertionSort;
 const QuickWriter = Root.QuickWriter;
 const IncludeOffests = Common.IncludeOffests;
@@ -200,13 +202,27 @@ pub fn StorageStructField(comptime FIELDS: type) type {
 /// Follows `std140` packing rules for SDL cross-compile compatability
 pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
     @setEvalBranchQuota(EVAL_QUOTA);
-    assert_with_reason(Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS), @src(), "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`", .{@typeName(FIELDS)});
+    assert_with_reason(
+        Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS),
+        @src(),
+        "type `FIELDS` must be an enum type, and all enum tags in `FIELDS` must start at zero and have no gaps up to the max tag value, got type `{s}`",
+        .{@typeName(FIELDS)},
+    );
+
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS);
-    assert_with_reason(fields.len == _NUM_FIELDS, @src(), "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len", .{ _NUM_FIELDS, fields.len });
+    assert_with_reason(
+        fields.len == _NUM_FIELDS,
+        @src(),
+        "the number of field names in `FIELDS` must equal the length of field definitions `fields`, got names {d} != {d} len",
+        .{ _NUM_FIELDS, fields.len },
+    );
+
     const _Field = StorageStructField(FIELDS);
     const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
+
     comptime var _fields: [_NUM_FIELDS]_Field = undefined;
     @memcpy(_fields[0.._NUM_FIELDS], fields);
+
     comptime var field_init: [_NUM_FIELDS]bool = @splat(false);
     comptime var field_locations: [_NUM_FIELDS]usize = undefined;
     comptime var field_types: [_NUM_FIELDS]type = undefined;
@@ -214,21 +230,54 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
     comptime var field_hlsl_names: [_NUM_FIELDS]HLSL_NAME = undefined;
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
     comptime var current_max_offset: usize = 0;
+
     const StorageStructFieldList = Root.GooListSlice.SliceMutableAdvanced(_Field, .WHOLE_STRUCTS, .SERIAL_INDEXES);
     const BufferSpanList = Root.GooListSlice.SliceMutableAdvanced(BufferSpan, .WHOLE_STRUCTS, .SERIAL_INDEXES);
     comptime var _fields_list = StorageStructFieldList.from_slice_keep_data(_fields[0..]);
     comptime var empty_spots_list = BufferSpanList.from_slice_set_empty(empty_spots[0..]);
+
     const SORT = struct {
         fn align_lesser_then_size_lesser(list: StorageStructFieldList, idx_a: u32, val_b: _Field, _: void, comptime _: void) bool {
-            if (list.get(idx_a).gpu_type.uniform_alignment < val_b.gpu_type.uniform_alignment) return true;
-            return list.get(idx_a).gpu_type.uniform_size < val_b.gpu_type.uniform_size;
+            if (list.get(idx_a).gpu_type.uniform_alignment() < val_b.gpu_type.uniform_alignment()) return true;
+            return list.get(idx_a).gpu_type.uniform_size() < val_b.gpu_type.uniform_size();
         }
         fn offset_larger(list: BufferSpanList, idx_a: u32, idx_b: u32, _: void, comptime _: void) bool {
             return list.get(idx_a).offset > list.get(idx_b).offset;
         }
     };
     _fields_list.insertion_sort_advanced(void{}, void{}, .COMPTIME_FN_BODY, void{}, SORT.align_lesser_then_size_lesser);
-    // PACKING ALGORITHM
+
+    comptime var num_enums: usize = 0;
+    for (_fields) |f| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            num_enums += 1;
+        }
+    }
+    const num_enums_const = num_enums;
+    comptime var unique_enums: [num_enums_const]type = undefined;
+    comptime var unique_enums_idx: [num_enums_const]u32 = undefined;
+    comptime var unique_enums_len: u32 = 0;
+    next_field: for (_fields, 0..) |f, fidx| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            for (unique_enums[0..unique_enums_len]) |unique_type| {
+                if (unique_type == f.gpu_type.cpu_type) {
+                    continue :next_field;
+                }
+            }
+            unique_enums[unique_enums_len] = f.gpu_type.cpu_type;
+            unique_enums_idx[unique_enums_len] = fidx;
+            unique_enums_len += 1;
+        }
+    }
+    const unique_enums_const = make: {
+        comptime var out: [unique_enums_len]type = undefined;
+        for (unique_enums_idx[0..unique_enums_len], 0..) |fidx, uidx| {
+            out[uidx] = _fields[fidx].gpu_type.cpu_type;
+        }
+        break :make out;
+    };
+
+    // PACKING ALGORITHM (std140 + HLSL cbuffer boundary packing)
     for (_fields) |field| {
         const fidx = @intFromEnum(field.field);
         assert_with_reason(field_init[fidx] == false, @src(), "field `{s}` was defined more than once", .{@tagName(field.field)});
@@ -237,15 +286,21 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         comptime var empty_spot_that_fits: usize = 0;
         comptime var empty_spot_offset: usize = math.maxInt(isize);
         comptime var empty_spot_space_after: usize = math.maxInt(isize);
-        const needed_align = @max(field.gpu_type.uniform_alignment, field.gpu_type.cpu_align);
+        const needed_align = @max(field.gpu_type.uniform_alignment(), field.gpu_type.uniform_alignment());
+
         for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
-            if (empty.len >= field.gpu_type.uniform_size) {
-                const next_aligned_within_empty = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(empty.offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
+            if (empty.len >= field.gpu_type.uniform_size()) {
+                const next_aligned_within_empty = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(
+                    empty.offset,
+                    field.gpu_type.uniform_size(),
+                    needed_align,
+                    GPU_UNIFORM_BOUNDARY_ALIGN,
+                );
                 const len_lost = next_aligned_within_empty - empty.offset;
                 if (len_lost >= empty.len) continue;
                 const aligned_len = empty.len - len_lost;
-                if (aligned_len >= field.gpu_type.uniform_size) {
-                    const space_after = empty.len - len_lost - field.gpu_type.uniform_size;
+                if (aligned_len >= field.gpu_type.uniform_size()) {
+                    const space_after = empty.len - len_lost - field.gpu_type.uniform_size();
                     comptime var potential_space_savings: isize = 0;
                     if (found_empty_space) {
                         @branchHint(.likely);
@@ -263,6 +318,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                 }
             }
         }
+
         comptime var field_loc: usize = undefined;
         if (found_empty_space) {
             const old_empty = empty_spots_list.get(@intCast(empty_spot_that_fits));
@@ -277,7 +333,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             }
             if (empty_spot_space_after > 0) {
                 const new_empty_after = BufferSpan{
-                    .offset = old_empty.offset + empty_spot_offset + field.gpu_type.uniform_size,
+                    .offset = old_empty.offset + empty_spot_offset + field.gpu_type.uniform_size(),
                     .len = empty_spot_space_after,
                 };
                 if (overwrite_old_empty) {
@@ -292,18 +348,25 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             }
             field_loc = old_empty.offset + empty_spot_offset;
         } else {
-            const next_aligned_offset = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(current_max_offset, field.gpu_type.uniform_size, needed_align, GPU_UNIFORM_BOUNDARY_ALIGN);
+            const next_aligned_offset = Utils.Mem.align_forward_without_breaking_align_boundary_unless_offset_boundary_aligned(
+                current_max_offset,
+                field.gpu_type.uniform_size(),
+                needed_align,
+                GPU_UNIFORM_BOUNDARY_ALIGN,
+            );
             const new_empty_len = next_aligned_offset - current_max_offset;
             if (new_empty_len > 0) {
                 comptime var combined_with_another_empty: bool = false;
                 for (empty_spots_list.zig_slice_entire(), 0..) |empty, e| {
                     if (empty.offset + empty.len == current_max_offset) {
-                        empty_spots[e].len += new_empty_len;
+                        var updated = empty_spots_list.get(@intCast(e));
+                        updated.len += new_empty_len;
+                        empty_spots_list.set(@intCast(e), updated);
                         combined_with_another_empty = true;
                         break;
                     }
                 }
-                if (combined_with_another_empty == false) {
+                if (!combined_with_another_empty) {
                     const new_empty = BufferSpan{
                         .offset = current_max_offset,
                         .len = new_empty_len,
@@ -312,14 +375,17 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                 }
             }
             field_loc = next_aligned_offset;
-            current_max_offset = next_aligned_offset + field.gpu_type.uniform_size;
+            current_max_offset = next_aligned_offset + field.gpu_type.uniform_size();
         }
+
         field_locations[fidx] = field_loc;
         field_types[fidx] = field.gpu_type.cpu_type;
         field_hlsl_names[fidx] = field.gpu_type.hlsl_name;
-        field_sizes[fidx] = field.gpu_type.uniform_size;
+        field_sizes[fidx] = field.gpu_type.uniform_size();
     }
     // END PACKING ALGORITHM
+
+    // std140 rule: Total buffer size must be a multiple of 16 bytes
     const _BYTES: usize = std.mem.alignForward(usize, current_max_offset, GPU_UNIFORM_BOUNDARY_ALIGN);
     if (_BYTES > current_max_offset) {
         empty_spots_list.append_one_assume_cap(BufferSpan{
@@ -327,6 +393,7 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             .offset = current_max_offset,
         });
     }
+
     comptime var wasted_bytes: usize = 0;
     const SLOT_COUNT = _NUM_FIELDS + empty_spots_list.get_len();
     comptime var all_slots: [SLOT_COUNT]FieldOrPad = undefined;
@@ -339,8 +406,81 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         all_slots[slot_idx] = FieldOrPad{ .PAD = empty };
         slot_idx += 1;
     }
+
     const field_locs_slice: []const usize = field_locations[0.._NUM_FIELDS];
     Sort.insertion_sort_with_func_and_userdata(all_slots[0..SLOT_COUNT], field_locs_slice, FieldOrPad.field_or_pad_offset_larger);
+
+    // --- Synthesize the CPU-side Data struct with actual named fields ---
+    const PAD_NAMES = blk: {
+        var names: [256][:0]const u8 = undefined;
+        for (0..256) |i| {
+            names[i] = std.fmt.comptimePrint("__pad_{d}", .{i});
+        }
+        break :blk names;
+    };
+
+    comptime var struct_field_names: [SLOT_COUNT][]const u8 = undefined;
+    comptime var struct_field_types: [SLOT_COUNT]type = undefined;
+    comptime var struct_field_attrs: [SLOT_COUNT]std.builtin.Type.StructField.Attributes = @splat(.{});
+
+    comptime var cpu_pad_idx: usize = 0;
+    for (all_slots[0..SLOT_COUNT], 0..) |slot, s_i| {
+        const min_align: usize = if (s_i == 0) GPU_UNIFORM_BOUNDARY_ALIGN else 1;
+        switch (slot) {
+            .FIELD => |fidx| {
+                const fenum: FIELDS = @enumFromInt(fidx);
+                struct_field_names[s_i] = @tagName(fenum);
+                struct_field_types[s_i] = field_types[fidx];
+                struct_field_attrs[s_i] = .{ .@"align" = @max(@alignOf(field_types[fidx]), min_align) };
+            },
+            .PAD => |span| {
+                struct_field_names[s_i] = PAD_NAMES[cpu_pad_idx];
+                struct_field_types[s_i] = [span.len]u8;
+                struct_field_attrs[s_i] = .{ .@"align" = 1 };
+                cpu_pad_idx += 1;
+            },
+        }
+    }
+
+    // if (SLOT_COUNT > 0) {
+    //     struct_field_attrs[0].@"align" = @max(struct_field_attrs[0].@"align", GPU_UNIFORM_BOUNDARY_ALIGN);
+    // }
+
+    const GeneratedData = @Struct(
+        .@"extern",
+        null,
+        &struct_field_names,
+        &struct_field_types,
+        &struct_field_attrs,
+    );
+
+    // Compile-time layout verification against std140
+    comptime {
+        assert_with_reason(
+            @sizeOf(GeneratedData) == _BYTES,
+            @src(),
+            "generated Data struct size ({d}) != expected std140 uniform bytes ({d})",
+            .{ @sizeOf(GeneratedData), _BYTES },
+        );
+        assert_with_reason(
+            @alignOf(GeneratedData) == GPU_UNIFORM_BOUNDARY_ALIGN,
+            @src(),
+            "generated Data struct alignment ({d}) != 16",
+            .{@alignOf(GeneratedData)},
+        );
+        for (0.._NUM_FIELDS) |fidx| {
+            const fenum: FIELDS = @enumFromInt(fidx);
+            const actual_off = @offsetOf(GeneratedData, @tagName(fenum));
+            assert_with_reason(
+                actual_off == field_locations[fidx],
+                @src(),
+                "field `{s}` Data struct offset ({d}) != expected std140 offset ({d})",
+                .{ @tagName(fenum), actual_off, field_locations[fidx] },
+            );
+        }
+    }
+
+    // --- Generate HLSL Stubs ---
     comptime var total_len_of_field_names: usize = 0;
     comptime var longest_field_name_plus_type: usize = 17;
     comptime var shortest_field_name_plus_type: usize = 12;
@@ -348,19 +488,16 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         const F: FIELDS = @enumFromInt(fidx);
         total_len_of_field_names += @tagName(F).len;
         const name_plus_type = @tagName(F).len + @tagName(field_hlsl_names[fidx]).len + 1;
-        if (name_plus_type > longest_field_name_plus_type) {
-            longest_field_name_plus_type = name_plus_type;
-        }
-        if (name_plus_type < shortest_field_name_plus_type) {
-            shortest_field_name_plus_type = name_plus_type;
-        }
+        if (name_plus_type > longest_field_name_plus_type) longest_field_name_plus_type = name_plus_type;
+        if (name_plus_type < shortest_field_name_plus_type) shortest_field_name_plus_type = name_plus_type;
     }
-    const SPACE_BEWTEEN_SHORTEST_AND_LONGEST = longest_field_name_plus_type - shortest_field_name_plus_type;
-    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_list.get_len() * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BEWTEEN_SHORTEST_AND_LONGEST) else 0);
+    const SPACE_BETWEEN_SHORTEST_AND_LONGEST = longest_field_name_plus_type - shortest_field_name_plus_type;
+    const HLSL_STUB_INNER_MAX_LEN = (_NUM_FIELDS + (empty_spots_list.get_len() * 4)) * (LONGEST_GPU_NAME + HLSL_STRUCT_LINE_EXTRA + if (_LAYOUT) (LAYOUT_LINE_EXTRA + SPACE_BETWEEN_SHORTEST_AND_LONGEST) else 0);
     comptime var hlsl_stub_inner: [HLSL_STUB_INNER_MAX_LEN]u8 = undefined;
     comptime var pad_idx: usize = 0;
     comptime var comptime_writer = QuickWriter.writer(hlsl_stub_inner[0..]);
     _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+
     @setEvalBranchQuota(2000);
     for (all_slots[0..]) |slot| {
         switch (slot) {
@@ -415,9 +552,6 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
                             _ = comptime_writer.write(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                             comptime_writer.printInt(this_bytes, 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
                             _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
-                            // _ = comptime_writer.write(SEMICOL_SPACE_COMMENT_OFF) catch |err| assert_comptime_write_failure(@src(), err);
-                            // comptime_writer.printInt(curr_offset, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-                            // _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                         } else {
                             _ = comptime_writer.write(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                         }
@@ -429,21 +563,31 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             },
         }
     }
+
     const hlsl_stub_final_len = comptime_writer.end - if (_LAYOUT) 5 else 6;
     const hlsl_stub_inner_const: [hlsl_stub_final_len]u8 = make_const: {
         var out: [hlsl_stub_final_len]u8 = undefined;
         @memcpy(out[0..hlsl_stub_final_len], hlsl_stub_inner[0..hlsl_stub_final_len]);
         break :make_const out;
     };
+
     const field_locations_const: [_NUM_FIELDS]usize = field_locations;
     const field_types_const: [_NUM_FIELDS]type = field_types;
     const field_hlsl_names_const: [_NUM_FIELDS]HLSL_NAME = field_hlsl_names;
     const waste_bytes_const = wasted_bytes;
+
     return extern struct {
         const Self = @This();
 
-        buffer: [BYTES]u8 align(GPU_UNIFORM_BOUNDARY_ALIGN) = @splat(0),
+        pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_UNIFORM_OR_STORAGE_STRUCT: bool = true;
 
+        /// The synthesized CPU-side struct layout containing all traditional named fields
+        pub const Data = GeneratedData;
+
+        /// Direct typed instance data
+        data: Data align(GPU_UNIFORM_BOUNDARY_ALIGN) = init_zero(Data),
+
+        pub const ENUMS = unique_enums_const;
         pub const BYTES: usize = _BYTES;
         pub const WASTE_BYTES: usize = waste_bytes_const;
         pub const USED_BYTES: usize = BYTES - WASTE_BYTES;
@@ -459,60 +603,63 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
         pub const HLSL_NAMES: [NUM_FIELDS][]const u8 = field_hlsl_names_const;
         pub const HLSL_STUB_INNER = hlsl_stub_inner_const;
 
+        /// Convenient initializer from partial anonymous struct (omitted fields and padding stay zeroed)
+        pub fn init(values: anytype) Self {
+            var self = Self{};
+            inline for (@typeInfo(@TypeOf(values)).@"struct".fields) |f| {
+                @field(self.data, f.name) = @field(values, f.name);
+            }
+            return self;
+        }
+
+        // Buffer pointer helpers for passing to SDL3
         pub fn bytes(self: *Self) *[BYTES]u8 {
-            return &self.buffer;
+            return @ptrCast(&self.data);
         }
         pub fn bytes_const(self: *const Self) *const [BYTES]u8 {
-            return &self.buffer;
+            return @ptrCast(&self.data);
         }
         pub fn bytes_unbound(self: *Self) [*]u8 {
-            return @ptrCast(@alignCast(&self.buffer));
+            return @ptrCast(&self.data);
         }
         pub fn bytes_unbound_const(self: *const Self) [*]const u8 {
-            return @ptrCast(@alignCast(&self.buffer));
+            return @ptrCast(&self.data);
         }
         pub fn bytes_slice(self: *Self) []u8 {
-            return self.buffer[0..BYTES];
+            const ptr: *[BYTES]u8 = @ptrCast(&self.data);
+            return ptr[0..BYTES];
         }
         pub fn bytes_slice_const(self: *const Self) []const u8 {
-            return self.buffer[0..BYTES];
+            const ptr: *const [BYTES]u8 = @ptrCast(&self.data);
+            return ptr[0..BYTES];
         }
 
         pub fn type_for_field_name(comptime field: FIELD) type {
             return TYPES[@intFromEnum(field)];
         }
 
+        // Direct typed enum accessors targeting `self.data`
         pub fn get(self: *const Self, comptime field: FIELD) type_for_field_name(field) {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = self.bytes_unbound_const() + offset;
-            const t_ptr: *const T = @ptrCast(@alignCast(ptr));
-            return t_ptr.*;
+            return @field(self.data, @tagName(field));
         }
         pub fn get_ptr(self: *Self, comptime field: FIELD) *type_for_field_name(field) {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = self.bytes_unbound() + offset;
-            const t_ptr: *T = @ptrCast(@alignCast(ptr));
-            return t_ptr;
+            return &@field(self.data, @tagName(field));
         }
         pub fn get_ptr_const(self: *const Self, comptime field: FIELD) *const type_for_field_name(field) {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = self.bytes_unbound_const() + offset;
-            const t_ptr: *const T = @ptrCast(@alignCast(ptr));
-            return t_ptr;
+            return &@field(self.data, @tagName(field));
         }
         pub fn set(self: *Self, comptime field: FIELD, val: type_for_field_name(field)) void {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = self.bytes_unbound() + offset;
-            const t_ptr: *T = @ptrCast(@alignCast(ptr));
-            t_ptr.* = val;
+            @field(self.data, @tagName(field)) = val;
         }
+
+        // Storage buffer slice and index accessors
         pub fn get_from_buffer(buffer: [*]u8, index: usize) *Self {
             const OFFSET = Self.BYTES * index;
             return @ptrCast(@alignCast(buffer + OFFSET));
+        }
+        pub fn get_slice_from_buffer(buffer: [*]u8, count: usize) []Self {
+            const ptr: [*]Self = @ptrCast(@alignCast(buffer));
+            return ptr[0..count];
         }
 
         pub fn FieldOffsets(comptime OFFSET_INT: type) type {
@@ -579,6 +726,23 @@ pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayo
             _ = try writer.write(CLOSE_PAREN_SEMICOL_NEWLINE);
         }
     };
+}
+
+pub fn AnyUniformOrStorageStruct(comptime INNER: type) type {
+    assert_type_is_uniform_or_storage_struct(INNER, @src());
+    return struct {
+        pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
+        pub fn write_hlsl_uniform_stub(struct_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try INNER.write_hlsl_uniform_stub(struct_name, resgister_num, space_num, writer);
+        }
+        pub fn write_hlsl_storage_buffer_stub(struct_name: []const u8, buffer_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try INNER.write_hlsl_storage_buffer_stub(struct_name, buffer_name, resgister_num, space_num, writer);
+        }
+    };
+}
+
+pub fn assert_type_is_uniform_or_storage_struct(comptime TYPE: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_struct(TYPE) and @hasDecl(TYPE, "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_UNIFORM_OR_STORAGE_STRUCT"), src, "type `{s}` is not a Goolib SDL UniformOrStorageStruct", .{@typeName(TYPE)});
 }
 
 pub const WriteFormat = enum(u8) {
@@ -698,11 +862,7 @@ pub const VertexLocationState = struct {
 };
 
 pub const GPUType = struct {
-    /// The CPU (Zig) type
     cpu_type: type,
-    cpu_align: comptime_int,
-    uniform_size: comptime_int,
-    uniform_alignment: comptime_int,
     sdl_format: GPU_VertexElementFormat = .INVALID,
     hlsl_name: HLSL_NAME,
 
@@ -714,22 +874,7 @@ pub const GPUType = struct {
         self.assert_same_size(new_cpu_type, @src());
         return GPUType{
             .cpu_type = new_cpu_type,
-            .cpu_align = self.cpu_align,
             .sdl_format = self.sdl_format,
-            .uniform_size = self.uniform_size,
-            .uniform_alignment = self.uniform_alignment,
-
-            .hlsl_name = self.hlsl_name,
-        };
-    }
-    pub fn with_cpu_type_and_align(comptime self: GPUType, comptime new_cpu_type: type, comptime new_cpu_align: comptime_int) GPUType {
-        self.assert_same_size(new_cpu_type, @src());
-        return GPUType{
-            .cpu_type = new_cpu_type,
-            .cpu_align = new_cpu_align,
-            .sdl_format = self.sdl_format,
-            .uniform_size = self.uniform_size,
-            .uniform_alignment = self.uniform_alignment,
             .hlsl_name = self.hlsl_name,
         };
     }
@@ -737,22 +882,7 @@ pub const GPUType = struct {
         self.assert_same_size(new_cpu_type, @src());
         return GPUType{
             .cpu_type = new_cpu_type,
-            .cpu_align = self.cpu_align,
             .sdl_format = new_sdl_format,
-            .uniform_size = self.uniform_size,
-            .uniform_alignment = self.uniform_alignment,
-            .hlsl_name = self.hlsl_name,
-        };
-    }
-    pub fn with_cpu_and_sdl_type_and_align(comptime self: GPUType, new_cpu_type: type, comptime new_sdl_format: GPU_VertexElementFormat, comptime new_cpu_align: comptime_int) GPUType {
-        self.assert_same_size(new_cpu_type, @src());
-        return GPUType{
-            .cpu_type = new_cpu_type,
-            .cpu_align = new_cpu_align,
-            .sdl_format = new_sdl_format,
-            .uniform_size = self.uniform_size,
-            .uniform_alignment = self.uniform_alignment,
-
             .hlsl_name = self.hlsl_name,
         };
     }
@@ -776,6 +906,32 @@ pub const GPUType = struct {
             if (self.equals_gpu_only(other)) return true;
         }
         return false;
+    }
+
+    pub fn uniform_size(self: GPUType) comptime_int {
+        return @sizeOf(self.cpu_type);
+    }
+
+    /// std140 base alignment rules:
+    /// - 1 component (scalar) => 4 bytes
+    /// - 2 components (vec2)  => 8 bytes
+    /// - 3 or 4 components    => 16 bytes
+    /// - all matrices         => 16 bytes
+    pub fn uniform_alignment(self: GPUType) comptime_int {
+        const info = get_hlsl_info(self.hlsl_name);
+        if (info.cols > 1) {
+            return 16;
+        }
+        return switch (info.rows) {
+            1 => 4,
+            2 => 8,
+            3, 4 => 16,
+            else => unreachable,
+        };
+    }
+
+    pub fn cpu_align(self: GPUType) comptime_int {
+        return @alignOf(self.cpu_type);
     }
 };
 
@@ -941,7 +1097,7 @@ pub const Swizzle = struct {
     }
 };
 
-pub const PackedChunk = struct {
+const PackedChunk = struct {
     location: u8,
     component_start: u8,
     component_count: u8,
@@ -1175,466 +1331,247 @@ fn pack_vertex_locations(comptime input_types: []const GPUType) PackedVertexLayo
 // SCALARS
 pub const GPU_bool = GPUType{
     .cpu_type = Bool32,
-    .cpu_align = 4,
     .sdl_format = .U32_x1,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
     .hlsl_name = HLSL_NAME.bool,
 };
 pub const GPU_f32 = GPUType{
     .cpu_type = f32,
-    .cpu_align = 4,
     .sdl_format = .F32_x1,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
     .hlsl_name = HLSL_NAME.float,
 };
 pub const GPU_u32 = GPUType{
     .cpu_type = u32,
-    .cpu_align = 4,
     .sdl_format = .U32_x1,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
     .hlsl_name = HLSL_NAME.uint,
 };
 pub const GPU_i32 = GPUType{
     .cpu_type = i32,
-    .cpu_align = 4,
     .sdl_format = .I32_x1,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
     .hlsl_name = HLSL_NAME.int,
 };
 
 // 2D VECTORS
 pub const GPU_f32_2 = GPUType{
     .cpu_type = define_vec2_type(f32),
-    .cpu_align = 4,
     .sdl_format = .F32_x2,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
     .hlsl_name = HLSL_NAME.float2,
 };
 pub const GPU_u32_2 = GPUType{
     .cpu_type = define_vec2_type(u32),
-    .cpu_align = 4,
     .sdl_format = .U32_x2,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
     .hlsl_name = HLSL_NAME.uint2,
 };
 pub const GPU_i32_2 = GPUType{
     .cpu_type = define_vec2_type(i32),
-    .cpu_align = 4,
     .sdl_format = .I32_x2,
-    .uniform_size = 8,
-    .uniform_alignment = 8,
     .hlsl_name = HLSL_NAME.int2,
 };
 
 // 3D VECTORS
 pub const GPU_f32_3 = GPUType{
     .cpu_type = define_vec3_type(f32),
-    .cpu_align = 4,
     .sdl_format = .F32_x3,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float3,
 };
 pub const GPU_u32_3 = GPUType{
     .cpu_type = define_vec3_type(u32),
-    .cpu_align = 4,
     .sdl_format = .U32_x3,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint3,
 };
 pub const GPU_i32_3 = GPUType{
     .cpu_type = define_vec3_type(i32),
-    .cpu_align = 4,
     .sdl_format = .I32_x3,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int3,
 };
 
 // 4D VECTORS
 pub const GPU_f32_4 = GPUType{
     .cpu_type = define_vec4_type(f32),
-    .cpu_align = 4,
     .sdl_format = .F32_x4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float4,
 };
 pub const GPU_u32_4 = GPUType{
     .cpu_type = define_vec4_type(u32),
-    .cpu_align = 4,
     .sdl_format = .U32_x4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint4,
 };
 pub const GPU_i32_4 = GPUType{
     .cpu_type = define_vec4_type(i32),
-    .cpu_align = 4,
     .sdl_format = .I32_x4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int4,
 };
 
 // MATRICES
 // -- 1x1
-pub const GPU_f32_1x1 = GPUType{
-    .cpu_type = define_matx_type(f32, 1, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_NAME.float1x1,
-};
-pub const GPU_u32_1x1 = GPUType{
-    .cpu_type = define_matx_type(u32, 1, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_NAME.uint1x1,
-};
-pub const GPU_i32_1x1 = GPUType{
-    .cpu_type = define_matx_type(i32, 1, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 4,
-    .uniform_alignment = 4,
-    .hlsl_name = HLSL_NAME.int1x1,
-};
+pub const GPU_f32_1x1 = GPU_f32;
+pub const GPU_u32_1x1 = GPU_u32;
+pub const GPU_i32_1x1 = GPU_i32;
 // ---- 2x1
-pub const GPU_f32_2x1 = GPUType{
-    .cpu_type = define_matx_type(f32, 2, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 8,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.float2x1,
-};
-pub const GPU_u32_2x1 = GPUType{
-    .cpu_type = define_matx_type(u32, 2, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 8,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.uint2x1,
-};
-pub const GPU_i32_2x1 = GPUType{
-    .cpu_type = define_matx_type(i32, 2, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 8,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.int2x1,
-};
+pub const GPU_f32_2x1 = GPU_f32_2;
+pub const GPU_u32_2x1 = GPU_u32_2;
+pub const GPU_i32_2x1 = GPU_i32_2;
 // ---- 3x1
-pub const GPU_f32_3x1 = GPUType{
-    .cpu_type = define_matx_type(f32, 3, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.float3x1,
-};
-pub const GPU_u32_3x1 = GPUType{
-    .cpu_type = define_matx_type(u32, 3, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.uint3x1,
-};
-pub const GPU_i32_3x1 = GPUType{
-    .cpu_type = define_matx_type(i32, 3, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 12,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.int3x1,
-};
+pub const GPU_f32_3x1 = GPU_f32_3;
+pub const GPU_u32_3x1 = GPU_u32_3;
+pub const GPU_i32_3x1 = GPU_i32_3;
 // ---- 4x1
-pub const GPU_f32_4x1 = GPUType{
-    .cpu_type = define_matx_type(f32, 4, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.float4x1,
-};
-pub const GPU_u32_4x1 = GPUType{
-    .cpu_type = define_matx_type(u32, 4, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.uint4x1,
-};
-pub const GPU_i32_4x1 = GPUType{
-    .cpu_type = define_matx_type(i32, 4, 1, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 16,
-    .uniform_alignment = 16,
-    .hlsl_name = HLSL_NAME.int4x1,
-};
+pub const GPU_f32_4x1 = GPU_f32_4;
+pub const GPU_u32_4x1 = GPU_u32_4;
+pub const GPU_i32_4x1 = GPU_i32_4;
 // ---- 1x2
 pub const GPU_f32_1x2 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 2, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 20,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float1x2,
 };
 pub const GPU_u32_1x2 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 2, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 20,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint1x2,
 };
 pub const GPU_i32_1x2 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 2, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 20,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int1x2,
 };
 // ---- 2x2
 pub const GPU_f32_2x2 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 2, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 24,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float2x2,
 };
 pub const GPU_u32_2x2 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 2, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 24,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint2x2,
 };
 pub const GPU_i32_2x2 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 2, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 24,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int2x2,
 };
 // ---- 3x2
 pub const GPU_f32_3x2 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 2, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 28,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float3x2,
 };
 pub const GPU_u32_3x2 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 2, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 28,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint3x2,
 };
 pub const GPU_i32_3x2 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 2, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 28,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int3x2,
 };
 // ---- 4x2
 pub const GPU_f32_4x2 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 2, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 32,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float4x2,
 };
 pub const GPU_u32_4x2 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 2, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 32,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint4x2,
 };
 pub const GPU_i32_4x2 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 2, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 32,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int4x2,
 };
 // ---- 1x3
 pub const GPU_f32_1x3 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 3, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 36,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float1x3,
 };
 pub const GPU_u32_1x3 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 3, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 36,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint1x3,
 };
 pub const GPU_i32_1x3 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 3, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 36,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int1x3,
 };
 // ---- 2x3
 pub const GPU_f32_2x3 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 3, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 40,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float2x3,
 };
 pub const GPU_u32_2x3 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 3, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 40,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint2x3,
 };
 pub const GPU_i32_2x3 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 3, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 40,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int2x3,
 };
 // ---- 3x3
 pub const GPU_f32_3x3 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 3, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 44,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float3x3,
 };
 pub const GPU_u32_3x3 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 3, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 44,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint3x3,
 };
 pub const GPU_i32_3x3 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 3, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 44,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int3x3,
 };
 // ---- 4x3
 pub const GPU_f32_4x3 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 3, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 48,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float4x3,
 };
 pub const GPU_u32_4x3 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 3, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 48,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint4x3,
 };
 pub const GPU_i32_4x3 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 3, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 48,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int4x3,
 };
 // ---- 1x4
 pub const GPU_f32_1x4 = GPUType{
     .cpu_type = define_matx_type(f32, 1, 4, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 52,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float1x4,
 };
 pub const GPU_u32_1x4 = GPUType{
     .cpu_type = define_matx_type(u32, 1, 4, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 52,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint1x4,
 };
 pub const GPU_i32_1x4 = GPUType{
     .cpu_type = define_matx_type(i32, 1, 4, .COLUMN_MAJOR, 3),
-    .cpu_align = 4,
-    .uniform_size = 52,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int1x4,
 };
 // ---- 2x4
 pub const GPU_f32_2x4 = GPUType{
     .cpu_type = define_matx_type(f32, 2, 4, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 56,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float2x4,
 };
 pub const GPU_u32_2x4 = GPUType{
     .cpu_type = define_matx_type(u32, 2, 4, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 56,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint2x4,
 };
 pub const GPU_i32_2x4 = GPUType{
     .cpu_type = define_matx_type(i32, 2, 4, .COLUMN_MAJOR, 2),
-    .cpu_align = 4,
-    .uniform_size = 56,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int2x4,
 };
 // ---- 3x4
 pub const GPU_f32_3x4 = GPUType{
     .cpu_type = define_matx_type(f32, 3, 4, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 60,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float3x4,
 };
 pub const GPU_u32_3x4 = GPUType{
     .cpu_type = define_matx_type(u32, 3, 4, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 60,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint3x4,
 };
 pub const GPU_i32_3x4 = GPUType{
     .cpu_type = define_matx_type(i32, 3, 4, .COLUMN_MAJOR, 1),
-    .cpu_align = 4,
-    .uniform_size = 60,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int3x4,
 };
 // ---- 4x4
 pub const GPU_f32_4x4 = GPUType{
     .cpu_type = define_matx_type(f32, 4, 4, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 64,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.float4x4,
 };
 pub const GPU_u32_4x4 = GPUType{
     .cpu_type = define_matx_type(u32, 4, 4, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 64,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.uint4x4,
 };
 pub const GPU_i32_4x4 = GPUType{
     .cpu_type = define_matx_type(i32, 4, 4, .COLUMN_MAJOR, 0),
-    .cpu_align = 4,
-    .uniform_size = 64,
-    .uniform_alignment = 16,
     .hlsl_name = HLSL_NAME.int4x4,
 };
 
@@ -1691,7 +1628,8 @@ pub fn GPU_enum8_4(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, compt
 
 pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
-    if (ENUM_TYPE == Bool32) {
+    if (ENUM_TYPE == Bool32 or ENUM_TYPE == Bool16 or ENUM_TYPE == Bool8) {
+        _ = try writer.write(COMMENT_SPACE_ENUM_SPACE);
         _ = try writer.write("#define TRUE 1\n");
         _ = try writer.write("#define FALSE 0\n");
         return;
@@ -1709,6 +1647,13 @@ pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) st
         try writer.writeByte(SPACE);
         try writer.printInt(field.value, 10, .lower, .{});
         try writer.writeByte(NEWLINE);
+    }
+}
+
+pub fn write_all_hlsl_enum_stubs(comptime ALL_ENUM_TYPES: []const type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    inline for (ALL_ENUM_TYPES) |ENUM_TYPE| {
+        write_hlsl_enum_stub(ENUM_TYPE, writer);
+        writer.writeByte(NEWLINE);
     }
 }
 
@@ -2050,75 +1995,208 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     };
 };
 
-pub fn VertexShaderInputStructField(comptime STRUCT_FIELD_ENUM: type) type {
+pub fn VertexShaderInputStructField(
+    comptime STRUCT_FIELD_ENUM: type,
+    comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type,
+) type {
     return struct {
         field_name: STRUCT_FIELD_ENUM,
         gpu_type: GPUType,
         semantic: HLSL_SEMANTIC_KIND,
         interpolation: HLSL_INTERP_KIND = .NO_INTERP,
-        from_vertex_buffer_slot: u32 = 0,
+        from_vertex_buffer_slot: u32,
+        vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
 
-        pub fn new_advanced(comptime field_name: STRUCT_FIELD_ENUM, comptime gpu_type: GPUType, comptime semantic: HLSL_SEMANTIC_KIND, comptime interpolation: HLSL_INTERP_KIND, comptime from_vertex_buffer_slot: u32) @This() {
-            return @This(){
-                .field_name = field_name,
-                .gpu_type = gpu_type,
-                .semantic = semantic,
-                .interpolation = interpolation,
-                .from_vertex_buffer_slot = from_vertex_buffer_slot,
-            };
-        }
-        pub fn new(comptime field_name: STRUCT_FIELD_ENUM, comptime gpu_type: GPUType, comptime semantic: HLSL_SEMANTIC_KIND) @This() {
+        pub fn new(
+            comptime field_name: STRUCT_FIELD_ENUM,
+            comptime gpu_type: GPUType,
+            comptime semantic: HLSL_SEMANTIC_KIND,
+            comptime vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+        ) @This() {
             return @This(){
                 .field_name = field_name,
                 .gpu_type = gpu_type,
                 .semantic = semantic,
                 .interpolation = .NO_INTERP,
                 .from_vertex_buffer_slot = 0,
+                .vertex_buffer_slot_name = vertex_buffer_slot_name,
+            };
+        }
+
+        pub fn new_advanced(
+            comptime field_name: STRUCT_FIELD_ENUM,
+            comptime gpu_type: GPUType,
+            comptime semantic: HLSL_SEMANTIC_KIND,
+            comptime interpolation: HLSL_INTERP_KIND,
+            comptime from_vertex_buffer_slot: u32,
+            comptime vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+        ) @This() {
+            return @This(){
+                .field_name = field_name,
+                .gpu_type = gpu_type,
+                .semantic = semantic,
+                .interpolation = interpolation,
+                .from_vertex_buffer_slot = from_vertex_buffer_slot,
+                .vertex_buffer_slot_name = vertex_buffer_slot_name,
             };
         }
     };
 }
+
 pub fn VertexShaderInputStruct(
     comptime NAME: []const u8,
     comptime STRUCT_FIELD_ENUM: type,
+    comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type,
     comptime INCLUDE_LAYOUT: IncludeLayoutInStub,
-    comptime fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM),
+    comptime fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_SHADER_SLOT_STRUCT_ENUM),
     comptime EVAL_QUOTA: comptime_int,
 ) type {
     @setEvalBranchQuota(EVAL_QUOTA);
 
-    assert_with_reason(Types.type_is_enum(STRUCT_FIELD_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STRUCT_FIELD_ENUM), @src(), "type `STRUCT_FIELD_ENUM` must be an enum type starting at 0 with no gaps, got `{s}`", .{@typeName(STRUCT_FIELD_ENUM)});
+    assert_with_reason(
+        Types.type_is_enum(STRUCT_FIELD_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STRUCT_FIELD_ENUM),
+        @src(),
+        "type `STRUCT_FIELD_ENUM` must be an enum type starting at 0 with no gaps, got `{s}`",
+        .{@typeName(STRUCT_FIELD_ENUM)},
+    );
+
+    assert_with_reason(
+        Types.type_is_enum(VERTEX_SHADER_SLOT_STRUCT_ENUM),
+        @src(),
+        "type `VERTEX_SHADER_SLOT_STRUCT_ENUM` must be an enum type, got `{s}`",
+        .{@typeName(VERTEX_SHADER_SLOT_STRUCT_ENUM)},
+    );
 
     const _NUM_FIELDS = Types.enum_defined_field_count(STRUCT_FIELD_ENUM);
-    assert_with_reason(fields.len == _NUM_FIELDS, @src(), "(VertexShaderInputStruct '{s}') the number of fields in `STRUCT_FIELD_ENUM` ({d}) must match the field definitions ({d})", .{ _NUM_FIELDS, fields.len });
+    assert_with_reason(
+        fields.len == _NUM_FIELDS,
+        @src(),
+        "(VertexShaderInputStruct '{s}') the number of fields in `STRUCT_FIELD_ENUM` ({d}) must match field definitions ({d})",
+        .{ NAME, _NUM_FIELDS, fields.len },
+    );
 
     const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
 
-    // Verify all fields are uniquely defined
+    // 1. Verify all fields are uniquely defined
     comptime var field_defined: [_NUM_FIELDS]bool = @splat(false);
     for (fields) |f| {
         const idx = @intFromEnum(f.field_name);
-        assert_with_reason(!field_defined[idx], @src(), "(VertexShaderInputStruct '{s}') field `{s}` defined more than once", .{@tagName(f.field_name)});
+        assert_with_reason(!field_defined[idx], @src(), "(VertexShaderInputStruct '{s}') field `{s}` defined more than once", .{ NAME, @tagName(f.field_name) });
         field_defined[idx] = true;
     }
 
-    // Determine unique buffer slots used
-    comptime var max_slot: u32 = 0;
-    for (fields) |f| {
-        if (f.from_vertex_buffer_slot > max_slot) max_slot = f.from_vertex_buffer_slot;
-    }
-    const NUM_SLOTS = max_slot + 1;
+    // 2. Track pairs of (integer buffer slot, slot struct enum name) and validate 1-to-1 consistency
+    const SlotPair = struct {
+        slot_index: u32,
+        slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+    };
 
-    // Internal tracker for packing items
+    comptime var registered_pairs: [_NUM_FIELDS]SlotPair = undefined;
+    comptime var registered_pair_count: usize = 0;
+
+    for (fields) |f| {
+        var found_slot_index: ?usize = null;
+        var found_slot_name: ?usize = null;
+
+        for (0..registered_pair_count) |p_idx| {
+            if (registered_pairs[p_idx].slot_index == f.from_vertex_buffer_slot) {
+                found_slot_index = p_idx;
+            }
+            if (registered_pairs[p_idx].slot_name == f.vertex_buffer_slot_name) {
+                found_slot_name = p_idx;
+            }
+        }
+
+        if (found_slot_index) |idx| {
+            assert_with_reason(
+                registered_pairs[idx].slot_name == f.vertex_buffer_slot_name,
+                @src(),
+                "(VertexShaderInputStruct '{s}') slot index {d} was previously claimed by slot struct name `{s}`, but field `{s}` assigned it to `{s}`",
+                .{ NAME, f.from_vertex_buffer_slot, @tagName(registered_pairs[idx].slot_name), @tagName(f.field_name), @tagName(f.vertex_buffer_slot_name) },
+            );
+        }
+
+        if (found_slot_name) |idx| {
+            assert_with_reason(
+                registered_pairs[idx].slot_index == f.from_vertex_buffer_slot,
+                @src(),
+                "(VertexShaderInputStruct '{s}') slot struct name `{s}` was previously bound to slot index {d}, but field `{s}` bound it to slot index {d}",
+                .{ NAME, @tagName(f.vertex_buffer_slot_name), registered_pairs[idx].slot_index, @tagName(f.field_name), f.from_vertex_buffer_slot },
+            );
+        }
+
+        if (found_slot_index == null and found_slot_name == null) {
+            registered_pairs[registered_pair_count] = .{
+                .slot_index = f.from_vertex_buffer_slot,
+                .slot_name = f.vertex_buffer_slot_name,
+            };
+            registered_pair_count += 1;
+        }
+    }
+
+    // Sort registered active slot pairs ascending by integer slot_index
+    for (1..registered_pair_count) |i| {
+        var j = i;
+        while (j > 0 and registered_pairs[j - 1].slot_index > registered_pairs[j].slot_index) {
+            const tmp = registered_pairs[j - 1];
+            registered_pairs[j - 1] = registered_pairs[j];
+            registered_pairs[j] = tmp;
+            j -= 1;
+        }
+    }
+
+    const NUM_ACTIVE_SLOTS = registered_pair_count;
+    const active_pairs_const: [NUM_ACTIVE_SLOTS]SlotPair = registered_pairs[0..NUM_ACTIVE_SLOTS].*;
+
+    comptime var active_slot_names_arr: [NUM_ACTIVE_SLOTS]VERTEX_SHADER_SLOT_STRUCT_ENUM = undefined;
+    comptime var active_slot_indices_arr: [NUM_ACTIVE_SLOTS]u32 = undefined;
+    for (0..NUM_ACTIVE_SLOTS) |i| {
+        active_slot_names_arr[i] = active_pairs_const[i].slot_name;
+        active_slot_indices_arr[i] = active_pairs_const[i].slot_index;
+    }
+    const active_slot_names_const = active_slot_names_arr;
+    const active_slot_indices_const = active_slot_indices_arr;
+
+    // 3. Enum reflection
+    comptime var num_enums: usize = 0;
+    for (fields) |f| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            num_enums += 1;
+        }
+    }
+    const num_enums_const = num_enums;
+    comptime var unique_enums: [num_enums_const]type = undefined;
+    comptime var unique_enums_idx: [num_enums_const]u32 = undefined;
+    comptime var unique_enums_len: u32 = 0;
+    next_field: for (fields, 0..) |f, fidx| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            for (unique_enums[0..unique_enums_len]) |unique_type| {
+                if (unique_type == f.gpu_type.cpu_type) {
+                    continue :next_field;
+                }
+            }
+            unique_enums[unique_enums_len] = f.gpu_type.cpu_type;
+            unique_enums_idx[unique_enums_len] = fidx;
+            unique_enums_len += 1;
+        }
+    }
+    const unique_enums_const = make: {
+        comptime var out: [unique_enums_len]type = undefined;
+        for (unique_enums_idx[0..unique_enums_len], 0..) |fidx, uidx| {
+            out[uidx] = fields[fidx].gpu_type.cpu_type;
+        }
+        break :make out;
+    };
+
+    // 4. Deconstruct fields into vector chunks
     const ChunkToPack = struct {
         field_idx: usize,
         chunk_idx: u8,
         size: VertexComponentSize,
         base_type: BaseType,
-        slot: u32,
+        slot_index: u32,
     };
 
-    // Deconstruct all fields into 32-bit vector chunks
     comptime var total_chunks: usize = 0;
     for (fields) |f| {
         const info = get_hlsl_info(f.gpu_type.hlsl_name);
@@ -2136,21 +2214,22 @@ pub fn VertexShaderInputStruct(
                 .chunk_idx = @intCast(col),
                 .size = VertexComponentSize.from_int(info.rows),
                 .base_type = info.base_type,
-                .slot = f.from_vertex_buffer_slot,
+                .slot_index = f.from_vertex_buffer_slot,
             };
             c_idx += 1;
         }
     }
 
-    // Sort chunks in descending order of size (4 -> 3 -> 2 -> 1) per slot
+    // Sort chunks per active slot in descending order of size (4 -> 3 -> 2 -> 1)
     comptime var sorted_chunks: [total_chunks]ChunkToPack = undefined;
     comptime var sorted_count: usize = 0;
 
-    for (0..NUM_SLOTS) |slot| {
+    for (0..NUM_ACTIVE_SLOTS) |pair_i| {
+        const target_slot = active_pairs_const[pair_i].slot_index;
         var size_scan: u8 = 4;
         while (size_scan >= 1) : (size_scan -= 1) {
             for (chunks_to_pack) |chk| {
-                if (chk.slot == slot and @intFromEnum(chk.size) == size_scan) {
+                if (chk.slot_index == target_slot and @intFromEnum(chk.size) == size_scan) {
                     sorted_chunks[sorted_count] = chk;
                     sorted_count += 1;
                 }
@@ -2183,11 +2262,9 @@ pub fn VertexShaderInputStruct(
     for (sorted_chunks) |chk| {
         var placed = false;
 
-        // Try existing locations for this buffer slot
         for (0..active_locations) |l_idx| {
-            if (location_slots[l_idx] != chk.slot) continue;
+            if (location_slots[l_idx] != chk.slot_index) continue;
 
-            // HYBRID CHECK: Floats only with Floats; Ints with Uints
             if (location_base_types[l_idx]) |loc_base| {
                 if (!BaseTypeFamily.can_pack_together(loc_base, chk.base_type)) continue;
             }
@@ -2202,7 +2279,6 @@ pub fn VertexShaderInputStruct(
                 };
                 location_states[l_idx] = new_state;
 
-                // If an integer location mixes int and uint, promote the container to `uint`
                 if (location_base_types[l_idx] == null or chk.base_type == .uint or chk.base_type == .bool) {
                     location_base_types[l_idx] = if (chk.base_type == .float) .float else .uint;
                 }
@@ -2212,13 +2288,13 @@ pub fn VertexShaderInputStruct(
         }
 
         if (!placed) {
-            assert_with_reason(active_locations < MAX_LOCATIONS, @src(), "(VertexShaderInputStruct '{s}') exceeded maximum of {d} vertex locations", .{MAX_LOCATIONS});
+            assert_with_reason(active_locations < MAX_LOCATIONS, @src(), "(VertexShaderInputStruct '{s}') exceeded maximum of {d} vertex locations", .{ NAME, MAX_LOCATIONS });
             const l_idx = active_locations;
             active_locations += 1;
 
-            location_slots[l_idx] = chk.slot;
+            location_slots[l_idx] = chk.slot_index;
             const did_fit, const new_state, const fit_offset = location_states[l_idx].can_fill_and_state_after_fill(chk.size);
-            assert_with_reason(did_fit, @src(), "(VertexShaderInputStruct '{s}') fresh location could not fit chunk", .{});
+            assert_with_reason(did_fit, @src(), "(VertexShaderInputStruct '{s}') fresh location could not fit chunk", .{NAME});
 
             field_placements[chk.field_idx][chk.chunk_idx] = .{
                 .loc = @intCast(l_idx),
@@ -2231,22 +2307,31 @@ pub fn VertexShaderInputStruct(
         }
     }
 
-    // Calculate byte offsets and sizes per location and per slot
-    comptime var slot_strides: [NUM_SLOTS]u32 = @splat(0);
+    // 5. Calculate strides and attribute offsets per active slot
+    comptime var slot_strides: [NUM_ACTIVE_SLOTS]u32 = @splat(0);
     comptime var location_byte_offsets: [MAX_LOCATIONS]u32 = undefined;
     comptime var location_formats: [MAX_LOCATIONS]GPU_VertexElementFormat = undefined;
 
     for (0..active_locations) |l_idx| {
         const slot = location_slots[l_idx];
+
+        var pair_index: usize = 0;
+        for (0..NUM_ACTIVE_SLOTS) |p_i| {
+            if (active_pairs_const[p_i].slot_index == slot) {
+                pair_index = p_i;
+                break;
+            }
+        }
+
         const num_comps: u8 = @intCast(@popCount(location_states[l_idx].used_components));
         const loc_bytes: u32 = @as(u32, num_comps) * 4;
 
         location_formats[l_idx] = resolve_location_format(location_base_types[l_idx] orelse .float, num_comps);
-        location_byte_offsets[l_idx] = slot_strides[slot];
-        slot_strides[slot] += loc_bytes;
+        location_byte_offsets[l_idx] = slot_strides[pair_index];
+        slot_strides[pair_index] += loc_bytes;
     }
 
-    // Compute absolute field byte offsets within their respective vertex buffer slots
+    // Compute absolute field byte offsets relative to each slot's base
     comptime var field_offsets: [_NUM_FIELDS]usize = undefined;
     comptime var field_types: [_NUM_FIELDS]type = undefined;
 
@@ -2257,7 +2342,7 @@ pub fn VertexShaderInputStruct(
         field_types[fidx] = f.gpu_type.cpu_type;
     }
 
-    // --- Helper to synthesize CPU-side extern struct per buffer slot ---
+    // 6. Build the CPU-side extern struct per active buffer slot
     const SlotStructBuilder = struct {
         const PAD_NAMES = blk: {
             var names: [128][:0]const u8 = undefined;
@@ -2269,7 +2354,7 @@ pub fn VertexShaderInputStruct(
 
         fn build_slot_type(
             comptime target_slot: u32,
-            comptime in_fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM),
+            comptime in_fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_SHADER_SLOT_STRUCT_ENUM),
             comptime in_offsets: [_NUM_FIELDS]usize,
             comptime stride: u32,
         ) type {
@@ -2297,7 +2382,7 @@ pub fn VertexShaderInputStruct(
                         .field_idx = fidx,
                         .offset = in_offsets[fidx],
                         .size = @sizeOf(f.gpu_type.cpu_type),
-                        .align_val = f.gpu_type.cpu_align,
+                        .align_val = f.gpu_type.uniform_alignment(),
                         .name = @tagName(f.field_name),
                         .cpu_type = f.gpu_type.cpu_type,
                     };
@@ -2305,7 +2390,6 @@ pub fn VertexShaderInputStruct(
                 }
             }
 
-            // Sort fields by their in-slot offset ascending
             for (1..count) |i| {
                 var j = i;
                 while (j > 0 and slot_fields[j - 1].offset > slot_fields[j].offset) {
@@ -2316,23 +2400,21 @@ pub fn VertexShaderInputStruct(
                 }
             }
 
-            // Pre-calculate exact field count (including explicit padding intervals)
             comptime var total_fields: usize = 0;
             comptime var temp_offset: usize = 0;
             for (slot_fields) |sf| {
                 if (sf.offset > temp_offset) {
-                    total_fields += 1; // padding field
+                    total_fields += 1;
                     temp_offset = sf.offset;
                 }
-                total_fields += 1; // field definition
+                total_fields += 1;
                 temp_offset += sf.size;
             }
             if (temp_offset < stride) {
-                total_fields += 1; // trailing padding to match vertex stride
+                total_fields += 1;
                 temp_offset = stride;
             }
 
-            // Prepare parallel parameter arrays for @Struct
             comptime var field_names: [total_fields][]const u8 = undefined;
             comptime var field_types_: [total_fields]type = undefined;
             comptime var field_attrs: [total_fields]std.builtin.Type.StructField.Attributes = @splat(.{});
@@ -2342,7 +2424,6 @@ pub fn VertexShaderInputStruct(
             comptime var pad_idx: usize = 0;
 
             for (slot_fields) |sf| {
-                // Gap padding
                 if (sf.offset > curr_offset) {
                     const pad_len = sf.offset - curr_offset;
                     field_names[f_idx] = PAD_NAMES[pad_idx];
@@ -2355,7 +2436,6 @@ pub fn VertexShaderInputStruct(
 
                 assert_with_reason(sf.offset == curr_offset, @src(), "field `{s}` overlaps previous field in slot {d}", .{ sf.name, target_slot });
 
-                // User attribute field
                 field_names[f_idx] = sf.name;
                 field_types_[f_idx] = sf.cpu_type;
                 field_attrs[f_idx] = .{ .@"align" = @min(@alignOf(sf.cpu_type), sf.align_val) };
@@ -2363,7 +2443,6 @@ pub fn VertexShaderInputStruct(
                 curr_offset += sf.size;
             }
 
-            // Trailing stride padding
             if (curr_offset < stride) {
                 const pad_len = stride - curr_offset;
                 field_names[f_idx] = PAD_NAMES[pad_idx];
@@ -2374,7 +2453,6 @@ pub fn VertexShaderInputStruct(
                 curr_offset = stride;
             }
 
-            // Instantiate type using the @Struct builtin
             const GeneratedType = @Struct(
                 .@"extern",
                 null,
@@ -2383,7 +2461,6 @@ pub fn VertexShaderInputStruct(
                 &field_attrs,
             );
 
-            // Compile-time layout verification
             comptime {
                 assert_with_reason(
                     @sizeOf(GeneratedType) == stride,
@@ -2406,20 +2483,18 @@ pub fn VertexShaderInputStruct(
         }
     };
 
-    // Construct the list of CPU-side types for every buffer input slot
-    comptime var generated_slot_types: [NUM_SLOTS]type = undefined;
-    for (0..NUM_SLOTS) |s| {
-        generated_slot_types[s] = SlotStructBuilder.build_slot_type(
-            @intCast(s),
+    comptime var generated_slot_types: [NUM_ACTIVE_SLOTS]type = undefined;
+    for (0..NUM_ACTIVE_SLOTS) |p_i| {
+        generated_slot_types[p_i] = SlotStructBuilder.build_slot_type(
+            active_pairs_const[p_i].slot_index,
             fields,
             field_offsets,
-            slot_strides[s],
+            slot_strides[p_i],
         );
     }
     const slot_types_const = generated_slot_types;
 
-    // Build Comptime HLSL Stub Code
-    const TOTAL_STRIDE: usize = if (NUM_SLOTS > 0) slot_strides[0] else 0;
+    // 7. Generate HLSL Stubs
     const HLSL_BUFFER_MAX_LEN = 16384;
     comptime var hlsl_buffer: [HLSL_BUFFER_MAX_LEN]u8 = undefined;
     comptime var comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
@@ -2427,7 +2502,6 @@ pub fn VertexShaderInputStruct(
     comptime var next_texcoord: u32 = 0;
     const PACKED_NAME = NAME ++ "_PACKED";
 
-    // --- Generate HLSL Input Struct ---
     _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (0..active_locations) |l_idx| {
@@ -2479,7 +2553,6 @@ pub fn VertexShaderInputStruct(
     }
     _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    // --- Generate Unpacked HLSL Struct ---
     _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
@@ -2493,6 +2566,8 @@ pub fn VertexShaderInputStruct(
             comptime_writer.printInt(field_offsets[fidx], 10, .lower, .{ .alignment = .right, .width = 3 }) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.write(" (slot ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(f.from_vertex_buffer_slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write(", contract: ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.write(@tagName(f.vertex_buffer_slot_name)) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.write(")\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
             _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
@@ -2500,8 +2575,7 @@ pub fn VertexShaderInputStruct(
     }
     _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    // --- Generate Unpack/Reassembly Function ---
-    _ = comptime_writer.write(NAME ++ " unpack_vs_input(" ++ PACKED_NAME ++ " input) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.write(NAME ++ " unpack_vertex_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
     _ = comptime_writer.write("    " ++ NAME ++ " v;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
@@ -2520,7 +2594,7 @@ pub fn VertexShaderInputStruct(
 
             write_unpack_expr(
                 &comptime_writer,
-                "input.in_loc",
+                "pck.in_loc",
                 plc.loc,
                 plc.comp_start,
                 plc.comp_count,
@@ -2540,7 +2614,7 @@ pub fn VertexShaderInputStruct(
 
                 write_unpack_expr(
                     &comptime_writer,
-                    "input.in_loc",
+                    "pck.in_loc",
                     plc.loc,
                     plc.comp_start,
                     plc.comp_count,
@@ -2570,89 +2644,96 @@ pub fn VertexShaderInputStruct(
     const loc_formats_const = location_formats;
     const slot_strides_const = slot_strides;
 
-    return extern struct {
-        const Self = @This();
+    return struct {
+        pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_INPUT_STRUCT: bool = true;
 
-        buffer: [BYTES]u8 align(16) = @splat(0),
+        pub const VertexShaderSlotStructEnum = VERTEX_SHADER_SLOT_STRUCT_ENUM;
+        pub const SlotEnum = VERTEX_SHADER_SLOT_STRUCT_ENUM;
 
-        pub const BYTES: usize = TOTAL_STRIDE;
+        pub const ENUMS = unique_enums_const;
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_LOCATIONS: usize = active_locs_const;
-        pub const NUM_BUFFER_SLOTS: u32 = NUM_SLOTS;
         pub const TYPES: [NUM_FIELDS]type = field_types_const;
         pub const OFFSETS: [NUM_FIELDS]usize = field_offsets_const;
         pub const FIELD = STRUCT_FIELD_ENUM;
         pub const HLSL_VERTEX_STUB = hlsl_stub_inner_const;
-        pub const SLOT_STRIDES = slot_strides_const;
 
-        /// List of CPU-side slice element types, indexed by buffer slot [0..NUM_BUFFER_SLOTS - 1]
-        pub const SLOT_TYPES: [NUM_SLOTS]type = slot_types_const;
+        /// Number of distinct buffer slots used by this specific shader pipeline
+        pub const ACTIVE_SLOT_COUNT: usize = NUM_ACTIVE_SLOTS;
+        pub const NUM_ACTIVE_SLOTS_CONST: u32 = NUM_ACTIVE_SLOTS;
 
-        /// Returns the exact CPU-side struct type for a given buffer slot
-        pub fn SlotType(comptime slot: u32) type {
-            return SLOT_TYPES[slot];
+        /// All (slot_index, slot_name) pairs bound by this shader pipeline
+        pub const ACTIVE_SLOT_PAIRS: [NUM_ACTIVE_SLOTS]SlotPair = active_pairs_const;
+        pub const ACTIVE_SLOT_NAMES: [NUM_ACTIVE_SLOTS]VERTEX_SHADER_SLOT_STRUCT_ENUM = active_slot_names_const;
+        pub const ACTIVE_SLOT_INDICES: [NUM_ACTIVE_SLOTS]u32 = active_slot_indices_const;
+        pub const ACTIVE_SLOT_STRIDES: [NUM_ACTIVE_SLOTS]u32 = slot_strides_const;
+        pub const ACTIVE_SLOT_TYPES: [NUM_ACTIVE_SLOTS]type = slot_types_const;
+
+        /// Returns whether a given slot (by enum name or integer index) is active in this shader
+        pub fn has_slot(comptime slot: anytype) bool {
+            return resolve_pair_index(slot) != null;
         }
 
-        /// Returns the slice type for a given buffer slot ([]SlotType(slot))
-        pub fn SlotSlice(comptime slot: u32) type {
+        fn resolve_pair_index(comptime slot: anytype) ?usize {
+            switch (@typeInfo(@TypeOf(slot))) {
+                .@"enum", .enum_literal => {
+                    const tag: VERTEX_SHADER_SLOT_STRUCT_ENUM = slot;
+                    inline for (0..NUM_ACTIVE_SLOTS) |i| {
+                        if (ACTIVE_SLOT_NAMES[i] == tag) return i;
+                    }
+                    return null;
+                },
+                .int, .comptime_int => {
+                    const idx: u32 = @intCast(slot);
+                    inline for (0..NUM_ACTIVE_SLOTS) |i| {
+                        if (ACTIVE_SLOT_INDICES[i] == idx) return i;
+                    }
+                    return null;
+                },
+                else => @compileError("expected slot enum tag or integer slot index"),
+            }
+        }
+
+        /// Resolves the integer hardware slot index for a given slot name or validates an index
+        pub fn slot_index(comptime slot: anytype) u32 {
+            const pair_i = resolve_pair_index(slot) orelse @compileError("slot is not defined or active in this vertex shader input contract");
+            return ACTIVE_SLOT_INDICES[pair_i];
+        }
+
+        /// Resolves the global contract enum tag for a given slot index or validates an enum tag
+        pub fn slot_name(comptime slot: anytype) VERTEX_SHADER_SLOT_STRUCT_ENUM {
+            const pair_i = resolve_pair_index(slot) orelse @compileError("slot is not defined or active in this vertex shader input contract");
+            return ACTIVE_SLOT_NAMES[pair_i];
+        }
+
+        /// Resolves the vertex buffer stride (in bytes) for a given slot
+        pub fn slot_stride(comptime slot: anytype) u32 {
+            const pair_i = resolve_pair_index(slot) orelse @compileError("slot is not defined or active in this vertex shader input contract");
+            return ACTIVE_SLOT_STRIDES[pair_i];
+        }
+
+        /// Returns the exact synthesized CPU struct type for a slot (by enum name or integer index)
+        pub fn SlotType(comptime slot: anytype) type {
+            const pair_i = resolve_pair_index(slot) orelse @compileError("slot is not defined or active in this vertex shader input contract");
+            return ACTIVE_SLOT_TYPES[pair_i];
+        }
+
+        /// Returns the slice type for a slot ([]SlotType(slot))
+        pub fn SlotSlice(comptime slot: anytype) type {
             return []SlotType(slot);
-        }
-
-        // Direct convenience aliases for the first slots
-        pub const Slot0 = SLOT_TYPES[0];
-        pub const Slot1 = if (NUM_SLOTS > 1) SLOT_TYPES[1] else void;
-        pub const Slot2 = if (NUM_SLOTS > 2) SLOT_TYPES[2] else void;
-        pub const Slot3 = if (NUM_SLOTS > 3) SLOT_TYPES[3] else void;
-
-        // CPU Buffer accessors (for single-slot usage)
-        pub fn bytes(self: *Self) *[BYTES]u8 {
-            return &self.buffer;
-        }
-        pub fn bytes_const(self: *const Self) *const [BYTES]u8 {
-            return &self.buffer;
-        }
-        pub fn bytes_slice(self: *Self) []u8 {
-            return self.buffer[0..BYTES];
-        }
-        pub fn bytes_slice_const(self: *const Self) []const u8 {
-            return self.buffer[0..BYTES];
         }
 
         pub fn type_for_field_name(comptime field: FIELD) type {
             return TYPES[@intFromEnum(field)];
         }
 
-        pub fn get(self: *const Self, comptime field: FIELD) type_for_field_name(field) {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = @as([*]const u8, @ptrCast(&self.buffer)) + offset;
-            const t_ptr: *const T = @ptrCast(@alignCast(ptr));
-            return t_ptr.*;
-        }
-
-        pub fn get_ptr(self: *Self, comptime field: FIELD) *type_for_field_name(field) {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = @as([*]u8, @ptrCast(&self.buffer)) + offset;
-            const t_ptr: *T = @ptrCast(@alignCast(ptr));
-            return t_ptr;
-        }
-
-        pub fn set(self: *Self, comptime field: FIELD, val: type_for_field_name(field)) void {
-            const T = type_for_field_name(field);
-            const offset = OFFSETS[@intFromEnum(field)];
-            const ptr = @as([*]u8, @ptrCast(&self.buffer)) + offset;
-            const t_ptr: *T = @ptrCast(@alignCast(ptr));
-            t_ptr.* = val;
-        }
-
         /// Returns vertex buffer descriptions for SDL3/GPU pipeline creation
-        pub fn get_sdl_vertex_buffer_descriptions() [NUM_SLOTS]SDL3.SDL_GPUVertexBufferDescription {
-            var descs: [NUM_SLOTS]SDL3.SDL_GPUVertexBufferDescription = undefined;
-            inline for (0..NUM_SLOTS) |s| {
+        pub fn get_sdl_vertex_buffer_descriptions() [NUM_ACTIVE_SLOTS]SDL3.GPU_VertexBufferDescription {
+            var descs: [NUM_ACTIVE_SLOTS]SDL3.GPU_VertexBufferDescription = undefined;
+            inline for (0..NUM_ACTIVE_SLOTS) |s| {
                 descs[s] = .{
-                    .slot = @intCast(s),
-                    .pitch = slot_strides_const[s],
+                    .slot = ACTIVE_SLOT_INDICES[s],
+                    .stride = ACTIVE_SLOT_STRIDES[s],
                     .input_rate = SDL3.SDL_GPU_VERTEXINPUTRATE_VERTEX,
                     .instance_step_rate = 0,
                 };
@@ -2661,8 +2742,8 @@ pub fn VertexShaderInputStruct(
         }
 
         /// Returns vertex attributes for SDL3/GPU pipeline creation
-        pub fn get_sdl_vertex_attributes() [NUM_LOCATIONS]SDL3.SDL_GPUVertexAttribute {
-            var attrs: [NUM_LOCATIONS]SDL3.SDL_GPUVertexAttribute = undefined;
+        pub fn get_sdl_vertex_attributes() [NUM_LOCATIONS]SDL3.GPU_VertexAttribute {
+            var attrs: [NUM_LOCATIONS]SDL3.GPU_VertexAttribute = undefined;
             inline for (0..NUM_LOCATIONS) |l| {
                 attrs[l] = .{
                     .location = @intCast(l),
@@ -2678,6 +2759,42 @@ pub fn VertexShaderInputStruct(
             _ = try writer.write(HLSL_VERTEX_STUB[0..]);
         }
     };
+}
+
+pub fn AnyVertexShaderInputStruct(comptime INNER: type) type {
+    assert_type_is_vertex_shader_input_struct(INNER, @src());
+    return struct {
+        pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
+        pub const NUM_LOCATIONS = INNER.NUM_LOCATIONS;
+        pub const NUM_SLOTS = INNER.NUM_SLOTS;
+        pub const NUM_BUFFER_SLOTS = INNER.NUM_BUFFER_SLOTS;
+        pub const VertexShaderSlotStructEnum = INNER.VertexShaderSlotStructEnum;
+        pub const SlotEnum = INNER.SlotEnum;
+
+        pub fn SlotType(comptime slot: anytype) type {
+            return INNER.SlotType(slot);
+        }
+        pub fn SlotSlice(comptime slot: anytype) type {
+            return INNER.SlotSlice(slot);
+        }
+        pub fn slot_index(comptime slot: anytype) u32 {
+            return INNER.slot_index(slot);
+        }
+
+        pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(INNER.HLSL_VERTEX_STUB[0..]);
+        }
+        pub fn get_sdl_vertex_attributes() [INNER.NUM_LOCATIONS]SDL3.GPU_VertexAttribute {
+            return INNER.get_sdl_vertex_attributes();
+        }
+        pub fn get_sdl_vertex_buffer_descriptions() [INNER.NUM_SLOTS]SDL3.GPU_VertexBufferDescription {
+            return INNER.get_sdl_vertex_buffer_descriptions();
+        }
+    };
+}
+
+pub fn assert_type_is_vertex_shader_input_struct(comptime TYPE: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_struct(TYPE) and @hasDecl(TYPE, "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_INPUT_STRUCT"), src, "type `{s}` is not a Goolib SDL VertexShaderInputStruct", .{@typeName(TYPE)});
 }
 
 pub fn VertexToFragmentField(comptime STRUCT_FIELD_ENUM: type) type {
@@ -2756,6 +2873,35 @@ pub fn VertexToFragmentStruct(
         interp: HLSL_INTERP_KIND,
         is_system_value: bool,
         system_semantic: ?HLSL_Semantic,
+    };
+    comptime var num_enums: usize = 0;
+    for (fields) |f| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            num_enums += 1;
+        }
+    }
+    const num_enums_const = num_enums;
+    comptime var unique_enums: [num_enums_const]type = undefined;
+    comptime var unique_enums_idx: [num_enums_const]u32 = undefined;
+    comptime var unique_enums_len: u32 = 0;
+    next_field: for (fields, 0..) |f, fidx| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            for (unique_enums[0..unique_enums_len]) |unique_type| {
+                if (unique_type == f.gpu_type.cpu_type) {
+                    continue :next_field;
+                }
+            }
+            unique_enums[unique_enums_len] = f.gpu_type.cpu_type;
+            unique_enums_idx[unique_enums_len] = fidx;
+            unique_enums_len += 1;
+        }
+    }
+    const unique_enums_const = make: {
+        comptime var out: [unique_enums_len]type = undefined;
+        for (unique_enums_idx[0..unique_enums_len], 0..) |fidx, uidx| {
+            out[uidx] = fields[fidx].gpu_type.cpu_type;
+        }
+        break :make out;
     };
 
     comptime var total_chunks: usize = 0;
@@ -3158,10 +3304,11 @@ pub fn VertexToFragmentStruct(
     };
 
     return struct {
-        pub const NUM_FIELDS = _NUM_FIELDS;
-        pub const NUM_REGISTERS = active_registers;
+        pub const ENUMS = unique_enums_const;
         pub const HLSL_VERT_STUB = hlsl_stub_vert_const;
         pub const HLSL_FRAG_STUB = hlsl_stub_frag_const;
+
+        pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_TO_FRAG_STRUCT: bool = true;
 
         pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(HLSL_VERT_STUB[0..]);
@@ -3170,6 +3317,23 @@ pub fn VertexToFragmentStruct(
             _ = try writer.write(HLSL_FRAG_STUB[0..]);
         }
     };
+}
+
+pub fn AnyVertexToFragmentStruct(comptime INNER: type) type {
+    assert_type_is_vertex_to_frag_struct(INNER, @src());
+    return struct {
+        pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
+        pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(INNER.HLSL_VERT_STUB[0..]);
+        }
+        pub fn write_hlsl_frag_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(INNER.HLSL_FRAG_STUB[0..]);
+        }
+    };
+}
+
+pub fn assert_type_is_vertex_to_frag_struct(comptime TYPE: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_struct(TYPE) and @hasDecl(TYPE, "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_TO_FRAG_STRUCT"), src, "type `{s}` is not a Goolib SDL VertexToFragmentStruct", .{@typeName(TYPE)});
 }
 
 pub fn FragmentShaderOutputField(comptime STRUCT_FIELD_ENUM: type) type {
@@ -3762,7 +3926,7 @@ test "SDL_GraphicsController_TypeUtils => Uniform Layout/Stubs" {
         U2.new(.mat_2, GPU_i32_1x2),
         U2.new(.scalar_6, GPU_f32),
     }, 100000);
-    assert_with_reason(@sizeOf(MyUniform2) == 128, @src(), "layout failed", .{});
+    assert_with_reason(@sizeOf(MyUniform2) == 144, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyUniform2) == 16, @src(), "layout failed", .{});
     const file2 = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/uniform_stub_2.hlsl", .{});
     defer file2.close(std.testing.io);
@@ -3827,7 +3991,7 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
         U2.new(.mat_2, GPU_i32_1x2),
         U2.new(.scalar_6, GPU_f32),
     }, 100000);
-    assert_with_reason(@sizeOf(MyStruct2) == 128, @src(), "layout failed", .{});
+    assert_with_reason(@sizeOf(MyStruct2) == 144, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyStruct2) == 16, @src(), "layout failed", .{});
     const file2 = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/storage_stub_2.hlsl", .{});
     defer file2.close(std.testing.io);
@@ -3837,35 +4001,53 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
     try writer.flush();
 }
 
-test "SDL_GraphicsController_TypeUtils => Vertex Layout/Stubs" {
-    const F = enum(u8) {
-        transform,
+test "SDL_GraphicsController_TypeUtils => Vertex Struct Multi-Buffer Layout/Stubs" {
+    const V = enum(u8) {
+        // Geometry attributes
         world_pos,
-        color,
-        face_normal,
         vert_normal,
-        blend_mode,
+        uv,
+
+        // Instance attributes
+        instance_transform,
+        instance_color,
     };
-    const S = VertexShaderInputStructField(F);
-    const BlendMode = enum(u32) {
-        NONE,
-        SURFACE,
-        FACE_ONLY,
+
+    const PipelineSlots = enum(u32) {
+        geometry = 0,
+        instance_data = 1,
     };
+
+    const S = VertexShaderInputStructField(V, PipelineSlots);
+
     const MyVertex = VertexShaderInputStruct(
         "MyVertex",
-        F,
+        V,
+        PipelineSlots,
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
-            S.new(.transform, GPU_f32_4x4, .USER),
-            S.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0),
-            S.new(.color, GPU_f32_4, .USER),
-            S.new(.face_normal, GPU_f32_3, .USER),
-            S.new(.vert_normal, GPU_f32_2, .USER),
-            S.new(.blend_mode, GPU_enum32(BlendMode), .USER),
+            S.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry),
+            S.new_advanced(.vert_normal, GPU_f32_3, .USER, .LINEAR, 0, .geometry),
+            S.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0, .geometry),
+
+            S.new_advanced(.instance_transform, GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_data),
+            S.new_advanced(.instance_color, GPU_f32_4, .USER, .NO_INTERP, 1, .instance_data),
         },
         100000,
     );
+
+    const VertexGeometry = MyVertex.SlotType(.geometry);
+    const InstanceData = MyVertex.SlotType(.instance_data);
+
+    comptime {
+        assert_with_reason(@sizeOf(VertexGeometry) == MyVertex.ACTIVE_SLOT_STRIDES[MyVertex.slot_index(.geometry)], null, "", .{});
+        assert_with_reason(@sizeOf(InstanceData) == MyVertex.ACTIVE_SLOT_STRIDES[MyVertex.slot_index(.instance_data)], null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "world_pos"), null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "vert_normal"), null, "", .{});
+        assert_with_reason(@hasField(VertexGeometry, "uv"), null, "", .{});
+        assert_with_reason(@hasField(InstanceData, "instance_transform"), null, "", .{});
+        assert_with_reason(@hasField(InstanceData, "instance_color"), null, "", .{});
+    }
 
     try std.Io.Dir.cwd().createDirPath(std.testing.io, "test_out/SDL3_ShaderContract");
     const file = try std.Io.Dir.cwd().createFile(std.testing.io, "test_out/SDL3_ShaderContract/vertex_stub_1.hlsl", .{});
@@ -3975,61 +4157,86 @@ test "SDL_GraphicsController_TypeUtils => Fragment Shader Output Layout/Stubs" {
     try writer.flush();
 }
 
-test "SDL_GraphicsController_TypeUtils => Vertex Struct Multi-Buffer Layout/Stubs" {
-    const V = enum(u8) {
-        // Slot 0: Per-vertex geometry
-        world_pos,
-        vert_normal,
-        uv,
-
-        // Slot 1: Per-instance data
-        instance_transform,
-        instance_color,
+test "SDL_GraphicsController_TypeUtils => Multi-Pipeline Shared Vertex Buffer Contract" {
+    // 1. Global registry of ALL possible vertex buffer layouts in the entire engine:
+    const AppGlobalVertexBufferLayouts = enum {
+        geometry_static,
+        geometry_skinned,
+        instance_transforms,
+        instance_colors,
+        particle_billboard,
     };
-    const S = VertexShaderInputStructField(V);
 
-    const MyInstancedPipeline = VertexShaderInputStruct(
-        "InstancedVertex",
-        V,
+    // 2. Pipeline A (Static Mesh): Binds geometry_static at slot 0, instance_transforms at slot 1
+    const StaticMeshFields = enum(u8) {
+        world_pos,
+        normal,
+        uv,
+        instance_mat,
+    };
+    const FieldA = VertexShaderInputStructField(StaticMeshFields, AppGlobalVertexBufferLayouts);
+
+    const StaticMeshPipeline = VertexShaderInputStruct(
+        "StaticMeshShader",
+        StaticMeshFields,
+        AppGlobalVertexBufferLayouts,
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
-            S.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0),
-            S.new_advanced(.vert_normal, GPU_f32_3, .USER, .LINEAR, 0),
-            S.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0),
+            // Slot 0 => geometry_static
+            FieldA.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry_static),
+            FieldA.new_advanced(.normal, GPU_f32_3, .USER, .LINEAR, 0, .geometry_static),
+            FieldA.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0, .geometry_static),
 
-            S.new_advanced(.instance_transform, GPU_f32_4x4, .USER, .NO_INTERP, 1),
-            S.new_advanced(.instance_color, GPU_f32_4, .USER, .NO_INTERP, 1),
+            // Slot 1 => instance_transforms
+            FieldA.new_advanced(.instance_mat, GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_transforms),
         },
         100000,
     );
 
-    // 1. Retrieve the typed struct definitions for each stream
-    const VertexGeometry = MyInstancedPipeline.SlotType(0);
-    const InstanceData = MyInstancedPipeline.SlotType(1);
+    // 3. Pipeline B (Composite/Decal): Binds geometry_static at slot 2 (demonstrating non-zero, non-consecutive slots)
+    const DecalFields = enum(u8) {
+        world_pos,
+        normal,
+        uv,
+    };
+    const FieldB = VertexShaderInputStructField(DecalFields, AppGlobalVertexBufferLayouts);
 
-    // 2. Verified compile-time layout match
+    const DecalPipeline = VertexShaderInputStruct(
+        "DecalShader",
+        DecalFields,
+        AppGlobalVertexBufferLayouts,
+        .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
+        &.{
+            // Slot 2 => geometry_static (same global contract!)
+            FieldB.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 2, .geometry_static),
+            FieldB.new_advanced(.normal, GPU_f32_3, .USER, .LINEAR, 2, .geometry_static),
+            FieldB.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 2, .geometry_static),
+        },
+        100000,
+    );
+
+    // 4. Verification:
+    // Both pipelines generated identical structs for .geometry_static despite using different slot indices (0 vs 2)
+    const GeomA = StaticMeshPipeline.SlotType(.geometry_static);
+    const GeomB = DecalPipeline.SlotType(.geometry_static);
+
     comptime {
-        assert_with_reason(@sizeOf(VertexGeometry) == MyInstancedPipeline.SLOT_STRIDES[0], null, "", .{});
-        assert_with_reason(@sizeOf(InstanceData) == MyInstancedPipeline.SLOT_STRIDES[1], null, "", .{});
-        assert_with_reason(@hasField(VertexGeometry, "world_pos"), null, "", .{});
-        assert_with_reason(@hasField(VertexGeometry, "vert_normal"), null, "", .{});
-        assert_with_reason(@hasField(VertexGeometry, "uv"), null, "", .{});
-        assert_with_reason(@hasField(InstanceData, "instance_transform"), null, "", .{});
-        assert_with_reason(@hasField(InstanceData, "instance_color"), null, "", .{});
+        assert_with_reason(@sizeOf(GeomA) == @sizeOf(GeomB), null, "", .{});
+        assert_with_reason(@offsetOf(GeomA, "world_pos") == @offsetOf(GeomB, "world_pos"), null, "", .{});
+        assert_with_reason(@offsetOf(GeomA, "normal") == @offsetOf(GeomB, "normal"), null, "", .{});
+        assert_with_reason(@offsetOf(GeomA, "uv") == @offsetOf(GeomB, "uv"), null, "", .{});
+        assert_with_reason(StaticMeshPipeline.slot_index(.geometry_static) == 0, null, "", .{});
+        assert_with_reason(DecalPipeline.slot_index(.geometry_static) == 2, null, "", .{});
     }
 
-    // 3. User code allocates and populates slices directly
-    var vertices: [3]VertexGeometry = undefined;
-    vertices[0].world_pos = .new(0.0, 1.0, 0.0);
-    vertices[0].vert_normal = .new(0.0, 0.0, 1.0);
-    vertices[0].uv = .new(0.5, 0.5);
+    // 5. Single vertex buffer can be allocated once and bound to both pipelines:
+    var shared_geometry: [4]GeomA = undefined;
+    shared_geometry[0].world_pos = .new(0.0, 1.0, 0.0);
+    shared_geometry[0].normal = .new(0.0, 0.0, 1.0);
+    shared_geometry[0].uv = .new(0.5, 0.5);
 
-    var instances: [2]InstanceData = undefined;
-    instances[0].instance_color = .new(1.0, 0.0, 0.0, 1.0);
-
-    // Slices are ready to pass straight to SDL3 vertex buffer uploads:
-    const v_slice: []VertexGeometry = &vertices;
-    const i_slice: []InstanceData = &instances;
-    _ = v_slice;
-    _ = i_slice;
+    const static_slice: StaticMeshPipeline.SlotSlice(.geometry_static) = &shared_geometry;
+    const decal_slice: DecalPipeline.SlotSlice(.geometry_static) = &shared_geometry;
+    _ = static_slice;
+    _ = decal_slice;
 }

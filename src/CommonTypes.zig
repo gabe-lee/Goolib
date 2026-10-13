@@ -659,6 +659,14 @@ pub const Bool32 = enum(u32) {
     FALSE = 0,
     TRUE = 1,
 };
+pub const Bool16 = enum(u16) {
+    FALSE = 0,
+    TRUE = 1,
+};
+pub const Bool8 = enum(u8) {
+    FALSE = 0,
+    TRUE = 1,
+};
 
 pub const IncludeOffests = enum(u8) {
     DO_NOT_INCLUDE_OFFSETS,
