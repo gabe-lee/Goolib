@@ -6,7 +6,7 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
     const breakout_mod = b.addModule("breakout_advanced", .{
         .optimize = opts.OPTIMIZE,
         .target = opts.TARGET,
-        .root_source_file = b.path("samples/breakout_advanced.zig"),
+        .root_source_file = b.path("samples/BreakoutAdvanced/breakout_advanced.zig"),
     });
     const breakout = b.addExecutable(.{
         .name = "breakout_advanced",

@@ -2648,6 +2648,8 @@ pub fn VertexShaderInputStruct(
         pub const VertexShaderSlotStructEnum = VERTEX_BUFFER_NAMES_ENUM;
         pub const SlotEnum = VERTEX_BUFFER_NAMES_ENUM;
 
+        pub const STRUCT_NAME = NAME;
+        pub const STRUCT_NAME_PACKED = PACKED_NAME;
         pub const ENUMS = unique_enums_const;
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_LOCATIONS: usize = active_locs_const;
@@ -2753,8 +2755,6 @@ pub fn VertexShaderInputStruct(
             return attrs;
         }
 
-        pub fn get_sdl_buffer_bindings() SDL3.GPU_BufferBinding {}
-
         pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(HLSL_VERTEX_STUB[0..]);
         }
@@ -2764,19 +2764,19 @@ pub fn VertexShaderInputStruct(
 pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_BUFFER_NAMES_ENUM: type) type {
     assert_type_is_vertex_shader_input_struct(INNER, @src());
     return struct {
+        pub const STRUCT_NAME = INNER.STRUCT_NAME;
+        pub const STRUCT_NAME_PACKED = INNER.STRUCT_NAME_PACKED;
         pub const SlotPair = SlotPairDef(VERTEX_BUFFER_NAMES_ENUM);
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
-        pub const NUM_LOCATIONS = INNER.NUM_LOCATIONS;
-        pub const NUM_SLOTS = INNER.NUM_SLOTS;
-        pub const NUM_BUFFER_SLOTS = INNER.NUM_BUFFER_SLOTS;
+        pub const NUM_ATTRIBUTES = INNER.NUM_LOCATIONS;
+        pub const NUM_BUFFER_SLOTS = INNER.NUM_ACTIVE_SLOTS_CONST;
         pub const VertexShaderSlotStructEnum = INNER.VertexShaderSlotStructEnum;
         pub const SlotEnum = INNER.SlotEnum;
-        pub const ACTIVE_SLOT_COUNT: u32 = INNER.NUM_ACTIVE_SLOTS_CONST;
 
         /// All (slot_index, slot_name) pairs bound by this shader pipeline
-        pub const ACTIVE_SLOT_PAIRS: [ACTIVE_SLOT_COUNT]SlotPair = INNER.ACTIVE_SLOT_PAIRS;
-        pub const ACTIVE_SLOT_NAMES: [ACTIVE_SLOT_COUNT]VERTEX_BUFFER_NAMES_ENUM = INNER.ACTIVE_SLOT_NAMES;
-        pub const ACTIVE_SLOT_TYPES: [ACTIVE_SLOT_COUNT]type = INNER.ACTIVE_SLOT_TYPES;
+        pub const ACTIVE_SLOT_PAIRS: [NUM_BUFFER_SLOTS]SlotPair = INNER.ACTIVE_SLOT_PAIRS;
+        pub const ACTIVE_SLOT_NAMES: [NUM_BUFFER_SLOTS]VERTEX_BUFFER_NAMES_ENUM = INNER.ACTIVE_SLOT_NAMES;
+        pub const ACTIVE_SLOT_TYPES: [NUM_BUFFER_SLOTS]type = INNER.ACTIVE_SLOT_TYPES;
 
         pub fn SlotType(comptime slot: anytype) type {
             return INNER.SlotType(slot);
@@ -2791,10 +2791,10 @@ pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_BUFFER_N
         pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(INNER.HLSL_VERTEX_STUB[0..]);
         }
-        pub fn get_sdl_vertex_attributes() [INNER.NUM_LOCATIONS]SDL3.GPU_VertexAttribute {
+        pub fn get_sdl_vertex_attributes() [NUM_ATTRIBUTES]SDL3.GPU_VertexAttribute {
             return INNER.get_sdl_vertex_attributes();
         }
-        pub fn get_sdl_vertex_buffer_descriptions() [INNER.NUM_SLOTS]SDL3.GPU_VertexBufferDescription {
+        pub fn get_sdl_vertex_buffer_descriptions() [NUM_BUFFER_SLOTS]SDL3.GPU_VertexBufferDescription {
             return INNER.get_sdl_vertex_buffer_descriptions();
         }
     };
@@ -3311,6 +3311,8 @@ pub fn VertexToFragmentStruct(
     };
 
     return struct {
+        pub const STRUCT_NAME = NAME;
+        pub const STRUCT_NAME_PACKED = PACKED_NAME;
         pub const ENUMS = unique_enums_const;
         pub const HLSL_VERT_STUB = hlsl_stub_vert_const;
         pub const HLSL_FRAG_STUB = hlsl_stub_frag_const;
@@ -3329,6 +3331,8 @@ pub fn VertexToFragmentStruct(
 pub fn AnyVertexToFragmentStruct(comptime INNER: type) type {
     assert_type_is_vertex_to_frag_struct(INNER, @src());
     return struct {
+        pub const STRUCT_NAME = INNER.STRUCT_NAME;
+        pub const STRUCT_NAME_PACKED = INNER.STRUCT_NAME_PACKED;
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
         pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(INNER.HLSL_VERT_STUB[0..]);
@@ -3779,6 +3783,8 @@ pub fn FragmentShaderOutputStruct(
     const target_formats_const = active_target_formats;
 
     return struct {
+        pub const STRUCT_NAME = NAME;
+        pub const STRUCT_NAME_PACKED = PACKED_NAME;
         pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_FRAGMENT_OUTPUT_STRUCT: bool = true;
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_COLOR_TARGETS: usize = active_targets_count;
@@ -3808,6 +3814,8 @@ pub fn FragmentShaderOutputStruct(
 pub fn AnyFragmentShaderOutputStruct(comptime INNER: type) type {
     assert_type_is_fragment_shader_output_struct(INNER, @src());
     return struct {
+        pub const STRUCT_NAME = INNER.STRUCT_NAME;
+        pub const STRUCT_NAME_PACKED = INNER.STRUCT_NAME_PACKED;
         pub const NUM_COLOR_TARGETS: u32 = INNER.COLOR_TARGET_COUNT;
         pub const HAS_DEPTH_OUTPUT: bool = INNER.HAS_DEPTH_OUTPUT;
         pub const HAS_STENCIL_OUTPUT: bool = INNER.HAS_STENCIL_OUTPUT;
