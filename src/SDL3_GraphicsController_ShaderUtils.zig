@@ -1988,7 +1988,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
 
 pub fn VertexShaderInputStructField(
     comptime STRUCT_FIELD_ENUM: type,
-    comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type,
+    comptime VERTEX_BUFFER_NAMES_ENUM: type,
 ) type {
     return struct {
         field_name: STRUCT_FIELD_ENUM,
@@ -1996,13 +1996,13 @@ pub fn VertexShaderInputStructField(
         semantic: HLSL_SEMANTIC_KIND,
         interpolation: HLSL_INTERP_KIND = .NO_INTERP,
         from_vertex_buffer_slot: u32,
-        vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+        vertex_buffer_slot_name: VERTEX_BUFFER_NAMES_ENUM,
 
         pub fn new(
             comptime field_name: STRUCT_FIELD_ENUM,
             comptime gpu_type: GPUType,
             comptime semantic: HLSL_SEMANTIC_KIND,
-            comptime vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+            comptime vertex_buffer_slot_name: VERTEX_BUFFER_NAMES_ENUM,
         ) @This() {
             return @This(){
                 .field_name = field_name,
@@ -2020,7 +2020,7 @@ pub fn VertexShaderInputStructField(
             comptime semantic: HLSL_SEMANTIC_KIND,
             comptime interpolation: HLSL_INTERP_KIND,
             comptime from_vertex_buffer_slot: u32,
-            comptime vertex_buffer_slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+            comptime vertex_buffer_slot_name: VERTEX_BUFFER_NAMES_ENUM,
         ) @This() {
             return @This(){
                 .field_name = field_name,
@@ -2037,19 +2037,19 @@ pub fn VertexShaderInputStructField(
 pub const VERTEX_INPUT_SLOT_GOOLIB_ID = "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_INPUT_STRUCT";
 pub const VERTEX_INPUT_SLOT_GOOLIB_ID_VAL: bool = true;
 
-pub fn SlotPairDef(comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type) type {
+pub fn SlotPairDef(comptime VERTEX_BUFFER_NAMES_ENUM: type) type {
     return struct {
         slot_index: u32,
-        slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+        slot_name: VERTEX_BUFFER_NAMES_ENUM,
     };
 }
 
 pub fn VertexShaderInputStruct(
     comptime NAME: []const u8,
     comptime STRUCT_FIELD_ENUM: type,
-    comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type,
+    comptime VERTEX_BUFFER_NAMES_ENUM: type,
     comptime INCLUDE_LAYOUT: IncludeLayoutInStub,
-    comptime fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_SHADER_SLOT_STRUCT_ENUM),
+    comptime fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_BUFFER_NAMES_ENUM),
     comptime EVAL_QUOTA: comptime_int,
 ) type {
     @setEvalBranchQuota(EVAL_QUOTA);
@@ -2062,10 +2062,10 @@ pub fn VertexShaderInputStruct(
     );
 
     assert_with_reason(
-        Types.type_is_enum(VERTEX_SHADER_SLOT_STRUCT_ENUM),
+        Types.type_is_enum(VERTEX_BUFFER_NAMES_ENUM),
         @src(),
-        "type `VERTEX_SHADER_SLOT_STRUCT_ENUM` must be an enum type, got `{s}`",
-        .{@typeName(VERTEX_SHADER_SLOT_STRUCT_ENUM)},
+        "type `VERTEX_BUFFER_NAMES_ENUM` must be an enum type, got `{s}`",
+        .{@typeName(VERTEX_BUFFER_NAMES_ENUM)},
     );
 
     const _NUM_FIELDS = Types.enum_defined_field_count(STRUCT_FIELD_ENUM);
@@ -2087,7 +2087,7 @@ pub fn VertexShaderInputStruct(
     }
 
     // 2. Track pairs of (integer buffer slot, slot struct enum name) and validate 1-to-1 consistency
-    const SlotPair = SlotPairDef(VERTEX_SHADER_SLOT_STRUCT_ENUM);
+    const SlotPair = SlotPairDef(VERTEX_BUFFER_NAMES_ENUM);
 
     comptime var registered_pairs: [_NUM_FIELDS]SlotPair = undefined;
     comptime var registered_pair_count: usize = 0;
@@ -2146,7 +2146,7 @@ pub fn VertexShaderInputStruct(
     const NUM_ACTIVE_SLOTS = registered_pair_count;
     const active_pairs_const: [NUM_ACTIVE_SLOTS]SlotPair = registered_pairs[0..NUM_ACTIVE_SLOTS].*;
 
-    comptime var active_slot_names_arr: [NUM_ACTIVE_SLOTS]VERTEX_SHADER_SLOT_STRUCT_ENUM = undefined;
+    comptime var active_slot_names_arr: [NUM_ACTIVE_SLOTS]VERTEX_BUFFER_NAMES_ENUM = undefined;
     comptime var active_slot_indices_arr: [NUM_ACTIVE_SLOTS]u32 = undefined;
     for (0..NUM_ACTIVE_SLOTS) |i| {
         active_slot_names_arr[i] = active_pairs_const[i].slot_name;
@@ -2352,7 +2352,7 @@ pub fn VertexShaderInputStruct(
 
         fn build_slot_type(
             comptime target_slot: u32,
-            comptime in_fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_SHADER_SLOT_STRUCT_ENUM),
+            comptime in_fields: []const VertexShaderInputStructField(STRUCT_FIELD_ENUM, VERTEX_BUFFER_NAMES_ENUM),
             comptime in_offsets: [_NUM_FIELDS]usize,
             comptime stride: u32,
         ) type {
@@ -2645,8 +2645,8 @@ pub fn VertexShaderInputStruct(
     return struct {
         pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_INPUT_STRUCT: bool = true;
 
-        pub const VertexShaderSlotStructEnum = VERTEX_SHADER_SLOT_STRUCT_ENUM;
-        pub const SlotEnum = VERTEX_SHADER_SLOT_STRUCT_ENUM;
+        pub const VertexShaderSlotStructEnum = VERTEX_BUFFER_NAMES_ENUM;
+        pub const SlotEnum = VERTEX_BUFFER_NAMES_ENUM;
 
         pub const ENUMS = unique_enums_const;
         pub const NUM_FIELDS = _NUM_FIELDS;
@@ -2662,7 +2662,7 @@ pub fn VertexShaderInputStruct(
 
         /// All (slot_index, slot_name) pairs bound by this shader pipeline
         pub const ACTIVE_SLOT_PAIRS: [NUM_ACTIVE_SLOTS]SlotPair = active_pairs_const;
-        pub const ACTIVE_SLOT_NAMES: [NUM_ACTIVE_SLOTS]VERTEX_SHADER_SLOT_STRUCT_ENUM = active_slot_names_const;
+        pub const ACTIVE_SLOT_NAMES: [NUM_ACTIVE_SLOTS]VERTEX_BUFFER_NAMES_ENUM = active_slot_names_const;
         pub const ACTIVE_SLOT_INDICES: [NUM_ACTIVE_SLOTS]u32 = active_slot_indices_const;
         pub const ACTIVE_SLOT_STRIDES: [NUM_ACTIVE_SLOTS]u32 = slot_strides_const;
         pub const ACTIVE_SLOT_TYPES: [NUM_ACTIVE_SLOTS]type = slot_types_const;
@@ -2675,7 +2675,7 @@ pub fn VertexShaderInputStruct(
         fn resolve_pair_index(comptime slot: anytype) ?usize {
             switch (@typeInfo(@TypeOf(slot))) {
                 .@"enum", .enum_literal => {
-                    const tag: VERTEX_SHADER_SLOT_STRUCT_ENUM = slot;
+                    const tag: VERTEX_BUFFER_NAMES_ENUM = slot;
                     inline for (0..NUM_ACTIVE_SLOTS) |i| {
                         if (ACTIVE_SLOT_NAMES[i] == tag) return i;
                     }
@@ -2699,7 +2699,7 @@ pub fn VertexShaderInputStruct(
         }
 
         /// Resolves the global contract enum tag for a given slot index or validates an enum tag
-        pub fn slot_name(comptime slot: anytype) VERTEX_SHADER_SLOT_STRUCT_ENUM {
+        pub fn slot_name(comptime slot: anytype) VERTEX_BUFFER_NAMES_ENUM {
             const pair_i = resolve_pair_index(slot) orelse @compileError("slot is not defined or active in this vertex shader input contract");
             return ACTIVE_SLOT_NAMES[pair_i];
         }
@@ -2753,16 +2753,18 @@ pub fn VertexShaderInputStruct(
             return attrs;
         }
 
+        pub fn get_sdl_buffer_bindings() SDL3.GPU_BufferBinding {}
+
         pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(HLSL_VERTEX_STUB[0..]);
         }
     };
 }
 
-pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type) type {
+pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_BUFFER_NAMES_ENUM: type) type {
     assert_type_is_vertex_shader_input_struct(INNER, @src());
     return struct {
-        pub const SlotPair = SlotPairDef(VERTEX_SHADER_SLOT_STRUCT_ENUM);
+        pub const SlotPair = SlotPairDef(VERTEX_BUFFER_NAMES_ENUM);
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
         pub const NUM_LOCATIONS = INNER.NUM_LOCATIONS;
         pub const NUM_SLOTS = INNER.NUM_SLOTS;
@@ -2773,6 +2775,7 @@ pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_SHADER_S
 
         /// All (slot_index, slot_name) pairs bound by this shader pipeline
         pub const ACTIVE_SLOT_PAIRS: [ACTIVE_SLOT_COUNT]SlotPair = INNER.ACTIVE_SLOT_PAIRS;
+        pub const ACTIVE_SLOT_NAMES: [ACTIVE_SLOT_COUNT]VERTEX_BUFFER_NAMES_ENUM = INNER.ACTIVE_SLOT_NAMES;
         pub const ACTIVE_SLOT_TYPES: [ACTIVE_SLOT_COUNT]type = INNER.ACTIVE_SLOT_TYPES;
 
         pub fn SlotType(comptime slot: anytype) type {
@@ -3805,7 +3808,17 @@ pub fn FragmentShaderOutputStruct(
 pub fn AnyFragmentShaderOutputStruct(comptime INNER: type) type {
     assert_type_is_fragment_shader_output_struct(INNER, @src());
     return struct {
+        pub const NUM_COLOR_TARGETS: u32 = INNER.COLOR_TARGET_COUNT;
+        pub const HAS_DEPTH_OUTPUT: bool = INNER.HAS_DEPTH_OUTPUT;
+        pub const HAS_STENCIL_OUTPUT: bool = INNER.HAS_STENCIL_OUTPUT;
+        pub const HAS_COVERAGE_OUTPUT: bool = INNER.HAS_COVERAGE_OUTPUT;
+        pub const ACTIVE_TARGET_SLOTS: [NUM_COLOR_TARGETS]u3 = INNER.ACTIVE_TARGET_SLOTS;
+        pub const TARGET_FORMATS: [NUM_COLOR_TARGETS]GPU_VertexElementFormat = INNER.TARGET_FORMATS;
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
+        pub const FIELD: type = INNER.FIELD;
+        pub fn type_for_field_name(comptime field: FIELD) type {
+            return INNER.TYPES[@intFromEnum(field)];
+        }
         pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.write(INNER.HLSL_FRAGMENT_STUB[0..]);
         }

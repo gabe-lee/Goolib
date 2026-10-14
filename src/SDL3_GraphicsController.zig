@@ -550,7 +550,7 @@ pub fn RenderPipelineDefinition(
     comptime VERTEX_BUFFER_NAMES: type,
 ) type {
     return struct {
-        pipeline: PIPLEINE_NAMES,
+        name: PIPLEINE_NAMES,
         vertex: VERTEX_SHADER_NAMES,
         fragment: FRAGMENT_SHADER_NAMES,
         vertex_buffers: []const VERTEX_BUFFER_NAMES,
@@ -903,32 +903,29 @@ pub fn GraphicsController(
     const _VertexShaderDefinition = VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, VERTEX_INPUT_STRUCT_NAMES_ENUM, VERTEX_TO_FRAG_STRUCT_NAMES_ENUM, UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _FragmentShaderDefinition = FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, VERTEX_TO_FRAG_STRUCT_NAMES_ENUM, FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM, UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _RenderPipelineDefinition = RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM, VERTEX_BUFFER_NAMES_ENUM);
-    const _TextureDefinition = TextureDefinition(TEXTURE_NAMES_ENUM);
+    // const _TextureDefinition = TextureDefinition(TEXTURE_NAMES_ENUM);
     const _ShaderAllowedUniform = ShaderAllowedUniform(UNIFORM_NAMES_ENUM);
     const _ShaderAllowedSamplePair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
     const _ShaderAllowedStorageBuffer = ShaderAllowedStorageBuffer(STORAGE_BUFFER_NAMES_ENUM);
     const _ShaderAllowedStorageTexture = ShaderAllowedStorageTexture(TEXTURE_NAMES_ENUM);
-    const _UniformStructDefinition = UniformStructDefinition(UNIFORM_NAMES_ENUM);
+    // const _UniformStructDefinition = UniformStructDefinition(UNIFORM_NAMES_ENUM);
     // VALIDATE SIMPLE ENUMS
     ct_assert_with_reason(Types.type_is_enum(WINDOW_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(WINDOW_NAMES_ENUM), @src(), "type `WINDOW_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(WINDOW_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(VERTEX_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_SHADER_NAMES_ENUM), @src(), "type `VERTEX_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_SHADER_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(FRAGMENT_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FRAGMENT_SHADER_NAMES_ENUM), @src(), "type `FRAGMENT_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FRAGMENT_SHADER_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_enum(RENDER_PIPELINE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(RENDER_PIPELINE_NAMES_ENUM), @src(), "type `RENDER_PIPELINE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(RENDER_PIPELINE_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `UPLOAD_TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(FENCE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FENCE_NAMES_ENUM), @src(), "type `FENCE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FENCE_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_enum(VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_BUFFER_NAMES_ENUM), @src(), "type `GPU_VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_BUFFER_NAMES_ENUM)});
     const _NUM_VERTEX_SHADERS = Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM);
     const _NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
-    const _NUM_RENDER_PIPELINES = Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM);
     // ORDER AND VALIDATE INDEX BUFFERS
     ct_assert_with_reason(Types.type_is_enum(INDEX_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDEX_BUFFER_NAMES), @src(), "type `INDEX_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDEX_BUFFER_NAMES)});
     const _NUM_INDEX_BUFFERS = Types.enum_defined_field_count(INDEX_BUFFER_NAMES);
     const _INDEX_BUFFER_TYPES, const _INDEX_BUFFER_SIZES = comptime make: {
-        comptime var types_: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
-        comptime var sizes_: [_NUM_INDEX_BUFFERS]u32 = undefined;
-        comptime var defined_: [_NUM_INDEX_BUFFERS]bool = @splat(false);
-        inline for (INDEX_BUFFER_DEFINITIONS) |def| {
+        var types_: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
+        var sizes_: [_NUM_INDEX_BUFFERS]u32 = undefined;
+        var defined_: [_NUM_INDEX_BUFFERS]bool = @splat(false);
+        for (INDEX_BUFFER_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined_[idx] == false, @src(), "index buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined_[idx] = true;
@@ -941,24 +938,25 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(INDIRECT_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDIRECT_BUFFER_NAMES), @src(), "type `INDIRECT_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDIRECT_BUFFER_NAMES)});
     const _NUM_INDIRECT_BUFFERS = Types.enum_defined_field_count(INDIRECT_BUFFER_NAMES);
     const _INDIRECT_BUFFER_TYPES, const _INDIRECT_BUFFER_SIZES = comptime make: {
-        comptime var types: [_NUM_INDIRECT_BUFFERS]type = undefined;
-        comptime var sizes: [_NUM_INDIRECT_BUFFERS]u32 = undefined;
-        comptime var defined: [_NUM_INDIRECT_BUFFERS]bool = @splat(false);
-        inline for (INDIRECT_BUFFER_DEFINITIONS) |def| {
+        var types: [_NUM_INDIRECT_BUFFERS]type = undefined;
+        var sizes: [_NUM_INDIRECT_BUFFERS]u32 = undefined;
+        var defined: [_NUM_INDIRECT_BUFFERS]bool = @splat(false);
+        for (INDIRECT_BUFFER_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "indirect draw buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.mode.elem_type();
             sizes[idx] = @sizeOf(def.mode.elem_type());
         }
+        break :make .{ types, sizes };
     };
     // ORDER AND VALIDATE SAMPLERS
     ct_assert_with_reason(Types.type_is_enum(SAMPLER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(SAMPLER_NAMES_ENUM), @src(), "type `SAMPLER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(SAMPLER_NAMES_ENUM)});
     const _NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
     const _SAMPLER_DEFS = comptime make: {
-        comptime var defs: [_NUM_SAMPLERS]GPU_SamplerCreateInfo = undefined;
-        comptime var defined: [_NUM_SAMPLERS]bool = @splat(false);
-        inline for (SAMPLER_DEFINITIONS) |def| {
+        var defs: [_NUM_SAMPLERS]GPU_SamplerCreateInfo = undefined;
+        var defined: [_NUM_SAMPLERS]bool = @splat(false);
+        for (SAMPLER_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "sampler `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -970,9 +968,9 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(TEXTURE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(TEXTURE_NAMES_ENUM), @src(), "type `TEXTURE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(TEXTURE_NAMES_ENUM)});
     const _NUM_TEXTURES = Types.enum_defined_field_count(TEXTURE_NAMES_ENUM);
     const _TEXTURE_DEFS = comptime make: {
-        comptime var defs: [_NUM_TEXTURES]TextureDef = undefined;
-        comptime var defined: [_NUM_TEXTURES]bool = @splat(false);
-        inline for (TEXTURE_DEFINITIONS) |def| {
+        var defs: [_NUM_TEXTURES]TextureDef = undefined;
+        var defined: [_NUM_TEXTURES]bool = @splat(false);
+        for (TEXTURE_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "texture `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -991,12 +989,12 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(UNIFORM_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(UNIFORM_NAMES_ENUM), @src(), "type `UNIFORM_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(UNIFORM_NAMES_ENUM)});
     const _NUM_UNIFORM_STRUCTS = Types.enum_defined_field_count(UNIFORM_NAMES_ENUM);
     const _UNIFORM_TYPES, const _UNIFORM_SIZES, const STRUCT_OF_UNIFORM_STRUCTS = comptime make: {
-        comptime var sizes: [_NUM_UNIFORM_STRUCTS]u32 = undefined;
-        comptime var defined: [_NUM_UNIFORM_STRUCTS]bool = @splat(false);
-        comptime var types: [_NUM_UNIFORM_STRUCTS]type = undefined;
-        comptime var names: [_NUM_UNIFORM_STRUCTS][:0]const u8 = undefined;
+        var sizes: [_NUM_UNIFORM_STRUCTS]u32 = undefined;
+        var defined: [_NUM_UNIFORM_STRUCTS]bool = @splat(false);
+        var types: [_NUM_UNIFORM_STRUCTS]type = undefined;
+        var names: [_NUM_UNIFORM_STRUCTS][:0]const u8 = undefined;
         const attrs: [_NUM_UNIFORM_STRUCTS]std.builtin.Type.StructField.Attributes = @splat(.{});
-        inline for (UNIFORM_STRUCT_DEFINITIONS) |def| {
+        for (UNIFORM_STRUCT_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "uniform `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -1011,9 +1009,9 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(VERTEX_INPUT_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_INPUT_STRUCT_NAMES_ENUM), @src(), "type `VERTEX_INPUT_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_INPUT_STRUCT_NAMES_ENUM)});
     const _NUM_VERTEX_INPUT_STRUCTS = Types.enum_defined_field_count(VERTEX_INPUT_STRUCT_NAMES_ENUM);
     const _VERTEX_INPUT_STRUCT_TYPES = comptime make: {
-        comptime var defined: [_NUM_VERTEX_INPUT_STRUCTS]bool = @splat(false);
-        comptime var types: [_NUM_VERTEX_INPUT_STRUCTS]type = undefined;
-        inline for (VERTEX_INPUT_STRUCT_DEFINITIONS) |def| {
+        var defined: [_NUM_VERTEX_INPUT_STRUCTS]bool = @splat(false);
+        var types: [_NUM_VERTEX_INPUT_STRUCTS]type = undefined;
+        for (VERTEX_INPUT_STRUCT_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "vertex input struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -1024,24 +1022,26 @@ pub fn GraphicsController(
     // VALIDATE VERTEX BUFFERS EXACTLY MATCH FOR ALL VERTEX INPUT STRUCT DEFINITIONS
     ct_assert_with_reason(Types.type_is_enum(VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_BUFFER_NAMES_ENUM), @src(), "type `VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_BUFFER_NAMES_ENUM)});
     const _NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(VERTEX_BUFFER_NAMES_ENUM);
-    const _VERTEX_BUFFER_TYPES = comptime make: {
-        comptime var types: [_NUM_VERTEX_BUFFERS]type = undefined;
-        comptime var defined: [_NUM_VERTEX_BUFFERS]bool = @splat(false);
-        comptime var num_defined: u32 = 0;
-        inline for (_VERTEX_INPUT_STRUCT_TYPES) |vert_input| {
+    const _VERTEX_BUFFER_TYPES, const _VERTEX_BUFFER_SIZES = comptime make: {
+        var types: [_NUM_VERTEX_BUFFERS]type = undefined;
+        var sizes: [_NUM_VERTEX_BUFFERS]u32 = undefined;
+        var defined: [_NUM_VERTEX_BUFFERS]bool = @splat(false);
+        var num_defined: u32 = 0;
+        for (_VERTEX_INPUT_STRUCT_TYPES) |vert_input| {
             const VERT_INPUT = AnyVertexShaderInputStruct(vert_input);
-            inline for (VERT_INPUT.ACTIVE_SLOT_TYPES, VERT_INPUT.ACTIVE_SLOT_PAIRS) |need_type, pair| {
+            for (VERT_INPUT.ACTIVE_SLOT_TYPES, VERT_INPUT.ACTIVE_SLOT_PAIRS) |need_type, pair| {
                 const idx = @intFromEnum(pair.slot_name);
                 if (defined[idx]) {
                     const need_info = @typeInfo(need_type).@"struct";
                     const cached_info = @typeInfo(types[idx]).@"struct";
                     ct_assert_with_reason(need_info.layout == .@"extern" and cached_info.layout == .@"extern", @src(), "vertex buffer `{s}` is not declared as `extern` on all vertex input struct definitions", .{@tagName(pair.slot_name)});
                     ct_assert_with_reason(need_info.fields.len == cached_info.fields.len, @src(), "mismatch bewteen the number of fields on the struct types for the vertex buffer `{s}`: need {d} fields, cached {d} fields", .{ @tagName(pair.slot_name), need_info.fields.len, cached_info.fields.len });
-                    next_cached: inline for (cached_info.fields) |cached_field| {
-                        inline for (need_info.fields) |need_field| {
+                    next_cached: for (cached_info.fields) |cached_field| {
+                        for (need_info.fields) |need_field| {
                             if (std.mem.eql(u8, need_field.name, cached_field.name)) {
                                 ct_assert_with_reason(need_field.type == cached_field.type, @src(), "the type for field `{s}` on vertex buffer `{s}` does not match: cached = `{s}`, need = `{s}`", .{ cached_field.name, @tagName(pair.slot_name), @typeName(cached_field.type), @typeName(need_field.name) });
                                 ct_assert_with_reason(@offsetOf(need_type, cached_field.name) == @offsetOf(types[idx], cached_field.name), @src(), "the field `{s}` on vertex buffer `{s}` has mismatching offsets when calculated from two different vertex input structs: cached = `{d}`, need = `{d}`", .{ cached_field.name, @tagName(pair.slot_name), @offsetOf(types[idx], cached_field.name), @offsetOf(need_type, cached_field.name) });
+                                continue :next_cached;
                             }
                         }
                         ct_assert_unreachable(@src(), "cached struct for vertex buffer `{s}` has field `{s}`, but another vertex input struct did not define this field for this vertex buffer", .{ @tagName(pair.slot_name), cached_field.name });
@@ -1049,6 +1049,7 @@ pub fn GraphicsController(
                 } else {
                     defined[idx] = true;
                     types[idx] = need_type;
+                    sizes[idx] = @sizeOf(need_type);
                     num_defined += 1;
                     ct_assert_with_reason(@typeInfo(need_type).@"struct".layout == .@"extern", @src(), "vertex buffer `{s}` is not declared as `extern`", .{@tagName(pair.slot_name)});
                 }
@@ -1060,15 +1061,15 @@ pub fn GraphicsController(
                 ct_assert_unreachable(@src(), "vertex buffer `{s}` is not used by any vertex input struct, and therefore is not used in any render pipeline", .{@tagName(e)});
             }
         }
-        break :make types;
+        break :make .{ types, sizes };
     };
     // ORDER AND VALIDATE VERTEX TO FRAG STRUCTS
     ct_assert_with_reason(Types.type_is_enum(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM), @src(), "type `VERTEX_TO_FRAG_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM)});
     const _NUM_VERTEX_TO_FRAG_STRUCTS = Types.enum_defined_field_count(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM);
     const _VERTEX_TO_FRAG_STRUCT_TYPES = comptime make: {
-        comptime var defined: [_NUM_VERTEX_TO_FRAG_STRUCTS]bool = @splat(false);
-        comptime var types: [_NUM_VERTEX_TO_FRAG_STRUCTS]type = undefined;
-        inline for (VERTEX_TO_FRAG_STRUCT_DEFINITIONS) |def| {
+        var defined: [_NUM_VERTEX_TO_FRAG_STRUCTS]bool = @splat(false);
+        var types: [_NUM_VERTEX_TO_FRAG_STRUCTS]type = undefined;
+        for (VERTEX_TO_FRAG_STRUCT_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "vertex-to-frag struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -1080,9 +1081,9 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM), @src(), "type `FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM)});
     const _NUM_FRAGMENT_OUTPUT_STRUCTS = Types.enum_defined_field_count(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM);
     const _FRAGMENT_OUTPUT_STRUCT_TYPES = comptime make: {
-        comptime var defined: [_NUM_FRAGMENT_OUTPUT_STRUCTS]bool = @splat(false);
-        comptime var types: [_NUM_FRAGMENT_OUTPUT_STRUCTS]type = undefined;
-        inline for (FRAGMENT_OUTPUT_STRUCT_DEFINITIONS) |def| {
+        var defined: [_NUM_FRAGMENT_OUTPUT_STRUCTS]bool = @splat(false);
+        var types: [_NUM_FRAGMENT_OUTPUT_STRUCTS]type = undefined;
+        for (FRAGMENT_OUTPUT_STRUCT_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "fragment output struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -1091,14 +1092,14 @@ pub fn GraphicsController(
         break :make types;
     };
     // ORDER AND VALIDATE STORAGE BUFFERS
-    ct_assert_with_reason(Types.type_is_enum(STORAGE_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STORAGE_BUFFER_NAMES_ENUM), @src(), "type `GPU_STORAGE_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(STORAGE_BUFFER_NAMES_ENUM)});
+    ct_assert_with_reason(Types.type_is_enum(STORAGE_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STORAGE_BUFFER_NAMES_ENUM), @src(), "type `STORAGE_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(STORAGE_BUFFER_NAMES_ENUM)});
     const _NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(STORAGE_BUFFER_NAMES_ENUM);
     const _STORAGE_BUFFER_TYPES, const _STORAGE_BUFFER_SIZES, const _STORAGE_BUFFER_USAGES = comptime make: {
-        comptime var types: [_NUM_STORAGE_BUFFERS]type = undefined;
-        comptime var sizes: [_NUM_STORAGE_BUFFERS]u32 = undefined;
-        comptime var usages: [_NUM_STORAGE_BUFFERS]StorageUsage = undefined;
-        comptime var defined: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
-        inline for (STORAGE_BUFFER_DEFINITIONS) |def| {
+        var types: [_NUM_STORAGE_BUFFERS]type = undefined;
+        var sizes: [_NUM_STORAGE_BUFFERS]u32 = undefined;
+        var usages: [_NUM_STORAGE_BUFFERS]StorageUsage = undefined;
+        var defined: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
+        for (STORAGE_BUFFER_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
             ct_assert_with_reason(defined[idx] == false, @src(), "storage buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
@@ -1107,6 +1108,20 @@ pub fn GraphicsController(
             usages[idx] = def.usage;
         }
         break :make .{ types, sizes, usages };
+    };
+    // ORDER RENDER PIPELINES
+    ct_assert_with_reason(Types.type_is_enum(RENDER_PIPELINE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(RENDER_PIPELINE_NAMES_ENUM), @src(), "type `RENDER_PIPELINE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(RENDER_PIPELINE_NAMES_ENUM)});
+    const _NUM_RENDER_PIPELINES = Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM);
+    const _RENDER_PIPELINE_DEFS = comptime make: {
+        var defined: [_NUM_RENDER_PIPELINES]bool = @splat(false);
+        var defs: [_NUM_RENDER_PIPELINES]_RenderPipelineDefinition = undefined;
+        for (RENDER_PIPELINE_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "render pipeline `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            defs[idx] = def;
+        }
+        break :make defs;
     };
     // VALIDATE RENDER PIPELINES STARTING HERE
     // VARIBLE PACKAGE TO PASS TO COMPTIME SUBROUTINES FOR CONVENIENCE
@@ -1255,11 +1270,11 @@ pub fn GraphicsController(
     };
     // COMPTIME VALIDATION / ORGANIZATION OF VERTEX SHADER BINDINGS
     const _VERTEX_SHADER_DEFS, const _VERTEX_SHADER_UNIQUE_ENUM_STARTS = comptime make: {
-        comptime var defined: [_NUM_VERTEX_SHADERS]bool = @splat(false);
-        comptime var defs: [_NUM_VERTEX_SHADERS]_VertexShaderDefinition = undefined;
-        comptime var total_unique_enum_sets_len: u32 = 0;
-        comptime var unique_enum_starts: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
-        inline for (VERTEX_SHADER_DEFINITIONS[0..]) |def| {
+        var defined: [_NUM_VERTEX_SHADERS]bool = @splat(false);
+        var defs: [_NUM_VERTEX_SHADERS]_VertexShaderDefinition = undefined;
+        var total_unique_enum_sets_len: u32 = 0;
+        var unique_enum_starts: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
+        for (VERTEX_SHADER_DEFINITIONS[0..]) |def| {
             const idx = @intFromEnum(def.vertex_shader);
             ct_assert_with_reason(defined[idx] == false, @src(), "for vertex shader `{s}` was defined twice", .{@tagName(def.vertex_shader)});
             defined[idx] = true;
@@ -1303,9 +1318,9 @@ pub fn GraphicsController(
             const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
             vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
             const MAX_ENUMS = vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))];
-            comptime var unique_enums: [MAX_ENUMS]type = undefined;
+            var unique_enums: [MAX_ENUMS]type = undefined;
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
-            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
             SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
             for (def.resources_to_link) |resource| {
                 switch (resource) {
@@ -1327,15 +1342,15 @@ pub fn GraphicsController(
         break :make .{ defs, unique_enum_starts };
     };
     const _VERTEX_SHADER_UNIQUE_ENUMS = comptime make: {
-        comptime var all_unique_vertex_enums: [_VERTEX_SHADER_UNIQUE_ENUM_STARTS[_NUM_VERTEX_SHADERS]]type = undefined;
-        inline for (_VERTEX_SHADER_DEFS[0..], 0..) |def, idx| {
+        var all_unique_vertex_enums: [_VERTEX_SHADER_UNIQUE_ENUM_STARTS[_NUM_VERTEX_SHADERS]]type = undefined;
+        for (_VERTEX_SHADER_DEFS[0..], 0..) |def, idx| {
             const start = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx];
             const end = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
             const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
             const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
-            comptime var unique_enums = all_unique_vertex_enums[start..end];
+            var unique_enums = all_unique_vertex_enums[start..end];
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
-            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
             SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
             for (def.resources_to_link) |resource| {
                 switch (resource) {
@@ -1355,11 +1370,11 @@ pub fn GraphicsController(
     };
     // COMPTIME VALIDATION / ORGANIZATION OF FRAGMENT SHADER BINDINGS
     const _FRAGMENT_SHADER_DEFS, const _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS = comptime make: {
-        comptime var defined: [_NUM_FRAGMENT_SHADERS]bool = @splat(false);
-        comptime var defs: [_NUM_FRAGMENT_SHADERS]_FragmentShaderDefinition = undefined;
-        comptime var total_unique_enum_sets_len: u32 = 0;
-        comptime var unique_enum_starts: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
-        inline for (FRAGMENT_SHADER_DEFINITIONS[0..]) |def| {
+        var defined: [_NUM_FRAGMENT_SHADERS]bool = @splat(false);
+        var defs: [_NUM_FRAGMENT_SHADERS]_FragmentShaderDefinition = undefined;
+        var total_unique_enum_sets_len: u32 = 0;
+        var unique_enum_starts: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
+        for (FRAGMENT_SHADER_DEFINITIONS[0..]) |def| {
             const idx = @intFromEnum(def.fragment_shader);
             ct_assert_with_reason(defined[idx] == false, @src(), "fragment shader `{s}` was defined twice", .{@tagName(def.fragment_shader)});
             defined[idx] = true;
@@ -1403,9 +1418,9 @@ pub fn GraphicsController(
             const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
             vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
             const MAX_ENUMS = vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))];
-            comptime var unique_enums: [MAX_ENUMS]type = undefined;
+            var unique_enums: [MAX_ENUMS]type = undefined;
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
-            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
             SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
             for (def.resources_to_link) |resource| {
                 switch (resource) {
@@ -1427,15 +1442,15 @@ pub fn GraphicsController(
         break :make .{ defs, unique_enum_starts };
     };
     const _FRAGMENT_SHADER_UNIQUE_ENUMS = comptime make: {
-        comptime var all_unique_fragment_enums: [_FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[_NUM_FRAGMENT_SHADERS]]type = undefined;
-        inline for (_FRAGMENT_SHADER_DEFS[0..], 0..) |def, idx| {
+        var all_unique_fragment_enums: [_FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[_NUM_FRAGMENT_SHADERS]]type = undefined;
+        for (_FRAGMENT_SHADER_DEFS[0..], 0..) |def, idx| {
             const start = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx];
             const end = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
             const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
             const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
-            comptime var unique_enums = all_unique_fragment_enums[start..end];
+            var unique_enums = all_unique_fragment_enums[start..end];
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
-            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
             SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
             for (def.resources_to_link) |resource| {
                 switch (resource) {
@@ -1744,207 +1759,80 @@ pub fn GraphicsController(
     const all_allowed_sample_pairs_flat_vert_const = all_allowed_sample_pairs_flat_vert;
     const all_allowed_sample_pairs_flat_frag_const = all_allowed_sample_pairs_flat_frag;
     // VALIDATE RENDER PIPELINES
-    //CHECKPOINT fix the render pass validations after here
-    comptime var total_num_vertex_buffers_to_bind: u32 = 0;
-    comptime var total_num_field_mappings: u32 = 0;
-    comptime var vertex_buffers_to_bind_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
-    comptime var vertex_attribute_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
-    comptime var longest_set_of_vertex_buffers: u32 = 0;
-    // FIRST PASS ROUGH VALIDATION AND COUNTS
-    for (0.._NUM_RENDER_PIPELINES) |pipe_idx| {
-        comptime var vertex_buffer_count_this_pipeline: u32 = 0;
-        comptime var vertex_buffers_for_this_pipeline: [_NUM_VERT_BUFFERS]bool = @splat(false);
-        const pipe_name: RENDER_PIPELINE_NAMES_ENUM = @enumFromInt(@as(Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), @intCast(pipe_idx)));
-        const pipe_def = ordered_pipeline_definitions_const[pipe_idx];
-        const vert_idx = @intFromEnum(pipe_def.vertex);
-        const frag_idx = @intFromEnum(pipe_def.fragment);
-        const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
-        const frag_def = _FRAGMENT_SHADER_DEFS[frag_idx];
-        const vert_struct_in_idx = @intFromEnum(vert_def.input_type);
-        const frag_struct_out_idx = @intFromEnum(frag_def.output_type);
-        ct_assert_with_reason(vert_def.output_type == frag_def.input_type, @src(), "for render pipeline `{s}` the vertex shader output type `{s}` does not match the fragment shader input type `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), @tagName(pipe_def.fragment) });
-        ct_assert_with_reason(pipe_def.vertex_buffers.len == _VERTEX_INPUT_STRUCT_TYPES[vert_struct_in_idx].num_locations, @src(), "for render pipeline `{s}` the vertex shader has {d} input loacations, but {d} vertex field mappings", .{ @tagName(pipe_name), _VERTEX_INPUT_STRUCT_TYPES[vert_struct_in_idx].num_locations, pipe_def.vertex_buffers.len });
-        ct_assert_with_reason(pipe_def.target_info.num_color_targets == _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].num_locations, @src(), "for render pipeline `{s}` the fragment shader has {d} color targets, but `target_info.num_color_targets` = {d}", .{ @tagName(pipe_name), _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].num_locations, pipe_def.target_info.num_color_targets });
-        if (VALIDATION.color_texture_non_color_format != .IGNORE and pipe_def.target_info.num_color_targets > 0) {
-            ct_assert_with_reason(pipe_def.target_info.color_target_descriptions != null, @src(), "for render pipeline `{s}` `target_info.num_color_targets == {d}` but `target_info.color_target_descriptions == null`", .{ @tagName(pipe_name), pipe_def.target_info.num_color_targets });
-            inline for (pipe_def.target_info.color_target_descriptions.?[0..pipe_def.target_info.num_color_targets], 0..) |target, t| {
-                ct_assert_with_reason(!target.format.is_depth_format(), @src(), "for render pipeline `{s}` color target {d}, the texture format is not a COLOR format, got `{s}`", .{ @tagName(pipe_name), @tagName(target.format) });
-                ct_assert_with_reason(target.blend_state.none_invalid_if_option_enabled(), @src(), "for render pipeline `{s}` color target {d}, `blend_state` options are enabled, but have one or more `.INVALID` modes or a blank color write mask", .{ @tagName(pipe_name), t });
-            }
-        }
-        ct_assert_with_reason(pipe_def.target_info.has_depth_stencil_target == _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].has_depth_target, @src(), "for render pipeline `{s}` the depth buffer enable setting `{any}` does not match the fragment shader `{s}` depth target state `{any}`", .{ @tagName(pipe_name), pipe_def.target_info.has_depth_stencil_target, @tagName(pipe_def.fragment), _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].has_depth_target });
-        if (pipe_def.target_info.has_depth_stencil_target) {
-            ct_assert_with_reason(pipe_def.target_info.depth_stencil_format.is_depth_format(), @src(), "for render pipeline `{s}`, `target_info.has_depth_stencil_target == true` but the `target_info.depth_stencil_format` is is not a depth format, got format `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.target_info.depth_stencil_format) });
-            ct_assert_with_reason(!pipe_def.depth_stencil_options.enable_depth_test or pipe_def.depth_stencil_options.compare_op != .INVALID, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_depth_test == true` while `depth_stencil_options.compare_op == .INVALID`", .{@tagName(pipe_name)});
-            ct_assert_with_reason(!pipe_def.depth_stencil_options.enable_stencil_test or (pipe_def.depth_stencil_options.back_stencil_state.none_invalid() and pipe_def.depth_stencil_options.front_stencil_state.none_invalid()), @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_stencil_test == true` while either `depth_stencil_options.front_stencil_state` or `depth_stencil_options.back_stencil_state` has `.INVALID` entries", .{@tagName(pipe_name)});
-            if (VALIDATION.depth_texture_non_stencil_format != .IGNORE and pipe_def.depth_stencil_options.enable_stencil_test) {
-                ct_assert_with_reason(pipe_def.target_info.depth_stencil_format.has_depth_stencil(), @src(), "for render pipeline `{s}`, `depth_stencil_options.enable_stencil_test == true` but the `target_info.depth_stencil_format` is does not have a stencil, got format `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.target_info.depth_stencil_format) });
-            }
-            if (VALIDATION.depth_stencil_zero_bits != .IGNORE and pipe_def.depth_stencil_options.enable_stencil_test) {
-                ct_assert_with_reason(pipe_def.depth_stencil_options.compare_mask != 0 and pipe_def.depth_stencil_options.write_mask != 0, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_stencil_test == true` while `depth_stencil_options.write_mask` or `depth_stencil_options.compare_mask` equal zero (in effect no depth stencil will be compared or written)", .{@tagName(pipe_name)});
-            }
-        }
-        vertex_buffers_to_bind_start_locs[pipe_idx] = total_num_vertex_buffers_to_bind;
-        vertex_attribute_start_locs[pipe_idx] = total_num_field_mappings;
-        inline for (pipe_def.vertex_buffers) |field_map| {
-            const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
-            if (vertex_buffers_for_this_pipeline[vert_buf_idx] == false) {
-                vertex_buffer_count_this_pipeline += 1;
-                vertex_buffers_for_this_pipeline[vert_buf_idx] = true;
-            }
-            total_num_field_mappings += 1;
-        }
-        longest_set_of_vertex_buffers = @max(longest_set_of_vertex_buffers, vertex_buffer_count_this_pipeline);
-        total_num_vertex_buffers_to_bind += vertex_buffer_count_this_pipeline;
-    }
-    vertex_buffers_to_bind_start_locs[_NUM_RENDER_PIPELINES] = total_num_vertex_buffers_to_bind;
-    vertex_attribute_start_locs[_NUM_RENDER_PIPELINES] = total_num_field_mappings;
-    comptime var vertex_buffer_names_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]VERTEX_BUFFER_NAMES_ENUM = undefined;
-    comptime var vertex_buffers_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]SDL3.GPU_VertexBufferDescription = undefined;
-    comptime var vertex_attributes_to_bind_per_render_pipeline: [total_num_field_mappings]SDL3.GPU_VertexAttribute = undefined;
-    // SECOND PASS FULL VALIDATION
-    inline for (0.._NUM_RENDER_PIPELINES) |pipe_idx| {
-        comptime var slots_used: [_NUM_VERT_BUFFERS]u32 = undefined;
-        comptime var buffers_used: [_NUM_VERT_BUFFERS]Types.enum_tag_type(VERTEX_BUFFER_NAMES_ENUM) = undefined;
-        comptime var rates_used: [_NUM_VERT_BUFFERS]SDL3.GPU_VertexInputRate = undefined;
-        comptime var num_slots_used: u32 = 0;
-        comptime var vertex_buffers_for_this_pipeline: [_NUM_VERT_BUFFERS]bool = @splat(false);
-        comptime var vertex_buffer_slots_for_this_pipeline: [_NUM_VERT_BUFFERS]u32 = @splat(0);
-        comptime var vertex_buffer_rates_for_this_pipeline: [_NUM_VERT_BUFFERS]SDL3.GPU_VertexInputRate = @splat(.VERTEX);
-        const pipe_name: RENDER_PIPELINE_NAMES_ENUM = @enumFromInt(@as(Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), @intCast(pipe_idx)));
-        const pipe_def = ordered_pipeline_definitions_const[pipe_idx];
-        const vert_idx = @intFromEnum(pipe_def.vertex);
-        const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
-        const vert_struct_in: ShaderStructDescription = @field(STRUCT_OF_SHADER_STRUCT_DEFINITIONS, @tagName(vert_def.input_type));
-        const vert_struct_quick_info = _VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)];
-        comptime var locations_used: [vert_struct_quick_info.num_locations]bool = @splat(false);
-        comptime var next_slot_to_check_for_use: u32 = 0;
-        inline for (pipe_def.vertex_buffers) |field_map| {
-            const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
-            const vert_buf_info: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, @tagName(field_map.vertex_buffer));
-            if (vertex_buffers_for_this_pipeline[vert_buf_idx] == true) {
-                ct_assert_with_reason(vertex_buffer_rates_for_this_pipeline[vert_buf_idx] == field_map.vertex_field_input_rate, @src(), "in render pipeline `{s}`, vertex buffer `{s}` had both `.VERTEX` and `.INSTANCE` input rates specified: a vertex buffer can only be bound at one input rate, if you need 2 fields with different rates, they must be on separate vertex buffers", .{ @tagName(pipe_name), @tagName(field_map.vertex_buffer) });
-            } else {
-                vertex_buffers_for_this_pipeline[vert_buf_idx] = true;
-                vertex_buffer_rates_for_this_pipeline[vert_buf_idx] = field_map.vertex_field_input_rate;
-            }
-            // //BUG no more auto/manual separation, its all auto, figure out how to reconcile this part of the code
-            // VERIFY does commenting out thi code fix the problem without introducing new issues?
-            // switch (field_map.vertex_buffer_bind_slot) {
-            //     .AUTO => {},
-            //     .MANUAL => |new_slot| switch (vertex_buffer_slots_for_this_pipeline[vert_buf_idx]) {
-            //         .AUTO => {
-            //             vertex_buffer_slots_for_this_pipeline[vert_buf_idx] = u32.register_num(new_slot);
-            //             if (Utils.mem_search_implicit(@ptrCast(&slots_used), 0, @intCast(slots_used_len), new_slot)) |found_used_slot_idx| {
-            //                 ct_assert_with_reason(vert_buf_idx == buffers_used[found_used_slot_idx], @src(), "in render pipeline `{s}`, vertex buffer `{s}` was bound to slot {d}, but that slot was already bound to another vertex buffer (`{s}`)", .{ @tagName(pipe_name), @tagName(field_map.vertex_buffer), new_slot, @tagName(@as(GPU_VERTEX_BUFFER_NAMES_ENUM, @enumFromInt(buffers_used[found_used_slot_idx]))) });
-            //             } else {
-            //                 if (new_slot == next_slot_to_check_for_use) {
-            //                     next_slot_to_check_for_use += 1;
-            //                 }
-            //                 max_slot_used = @max(max_slot_used, new_slot);
-            //                 slots_used[slots_used_len] = new_slot;
-            //                 buffers_used[slots_used_len] = vert_buf_idx;
-            //                 rates_used[slots_used_len] = field_map.vertex_field_input_rate;
-            //                 slots_used_len += 1;
-            //             }
-            //         },
-            //         .MANUAL => |old_slot| {
-            //             ct_assert_with_reason(new_slot == old_slot, @src(), "in render pipeline `{s}`, vertex buffer `{s}` was bound to both slots {d} and {d}: only one slot is allowed per vertex buffer per render pipeline", .{ @tagName(pipe_name), @tagName(field_map.vertex_buffer), new_slot, old_slot });
-            //         },
-            //     },
-            // }
-            ct_assert_with_reason(@hasDecl(vert_buf_info.fields_info, field_map.vertex_buffer_field_name), @src(), "in render pipeline `{s}`, vertex buffer `{s}` does not have field `{s}` (from `RenderPipelineVertexFieldMap.vertex_buffer_field_name`), available fields are: {any}", .{ @tagName(pipe_name), @tagName(field_map.vertex_buffer), field_map.vertex_buffer_field_name, @typeInfo(vert_buf_info.fields_info).@"struct".decls });
-            ct_assert_with_reason(@hasDecl(vert_struct_in.fields_info, field_map.shader_struct_field_name), @src(), "in render pipeline `{s}`, vertex shader input struct `{s}` does not have field `{s}` (from `RenderPipelineVertexFieldMap.shader_struct_field_name`), available fields are: {any}", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), field_map.shader_struct_field_name, @typeInfo(vert_struct_in.fields_info).@"struct".decls });
-            const vert_struct_in_field_info: ShaderStructFieldInfo = @field(vert_struct_in.fields_info, field_map.shader_struct_field_name);
-            const vert_buf_out_field_info: VertexBufferFieldInfo = @field(vert_buf_info.fields_info, field_map.vertex_buffer_field_name);
-            ct_assert_with_reason(locations_used[vert_struct_in_field_info.location] == false, @src(), "in render pipeline `{s}`, vertex shader input struct `{s}` field `{s}` (location {d}) was mapped more than once", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), field_map.shader_struct_field_name, vert_struct_in_field_info.location });
-            locations_used[vert_struct_in_field_info.location] = true;
-            if (VALIDATION.mismatched_gpu_formats != .IGNORE) {
-                ct_assert_with_reason(vert_struct_in_field_info.gpu_format == vert_buf_out_field_info.gpu_format, @src(), "in render pipeline `{s}`, vertex shader input struct `{s}` field `{s}` (location {d}) gpu format `{s}` was mapped from vertex buffer `{s}` field `{s}` gpu format `{s}`: gpu formats MUST match", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), field_map.shader_struct_field_name, vert_struct_in_field_info.location, @tagName(vert_struct_in_field_info.gpu_format), @tagName(field_map.vertex_buffer), field_map.vertex_buffer_field_name, @tagName(vert_buf_out_field_info.gpu_format) });
-            }
-            if (VALIDATION.mismatched_cpu_types != .IGNORE) {
-                ct_assert_with_reason(vert_struct_in_field_info.cpu_type == vert_buf_out_field_info.field_type, @src(), "in render pipeline `{s}`, vertex shader input struct `{s}` field `{s}` (location {d}) cpu type `{s}` was mapped from vertex buffer `{s}` field `{s}` field type `{s}`: zig types MUST match", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), field_map.shader_struct_field_name, vert_struct_in_field_info.location, @typeName(vert_struct_in_field_info.cpu_type), @tagName(field_map.vertex_buffer), field_map.vertex_buffer_field_name, @typeName(vert_buf_out_field_info.field_type) });
-            }
-        }
-        // PROVISION 'AUTO' BUFFER SLOTS
-        inline for (0.._NUM_VERT_BUFFERS) |vb| {
-            if (vertex_buffers_for_this_pipeline[vb] == true) {
-                if (vertex_buffer_slots_for_this_pipeline[vb] == .AUTO) {
-                    comptime var s: u32 = 0;
-                    inline while (s < num_slots_used) {
-                        if (slots_used[s] == next_slot_to_check_for_use) {
-                            next_slot_to_check_for_use += 1;
-                            s = 0;
-                        } else {
-                            s += 1;
-                        }
-                    }
-                    max_slot_used = @max(max_slot_used, next_slot_to_check_for_use);
-                    slots_used[num_slots_used] = next_slot_to_check_for_use;
-                    vertex_buffer_slots_for_this_pipeline[vb] = u32.register_num(next_slot_to_check_for_use);
-                    rates_used[num_slots_used] = vertex_buffer_rates_for_this_pipeline[vb];
-                    buffers_used[num_slots_used] = vb;
-                    num_slots_used += 1;
-                    next_slot_to_check_for_use += 1;
+    const _VERTEX_BUFFER_NAMES_FOR_RENDER_PIPELINE, const _VERTEX_BUFFERS_TO_BIND_FOR_RENDER_PIPELINE, const _VERTEX_ATTRS_TO_BIND_FOR_RENDER_PIPELINE, const _VERTEX_BUFFERS_TO_BIND_START_LOCS, const _VERTEX_ATTRS_TO_BIND_START_LOCS, const _LONGEST_SET_OF_VERTEX_BUFFERS = comptime make: {
+        var total_num_vertex_buffers_to_bind: u32 = 0;
+        var total_num_vert_atributes_across_all_pipes: u32 = 0;
+        var vertex_buffers_to_bind_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
+        var vertex_attribute_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
+        var longest_set_of_vertex_buffers: u32 = 0;
+        // FIRST PASS ROUGH VALIDATION AND COUNTS
+        for (_RENDER_PIPELINE_DEFS, 0..) |pipe_def, pipe_idx| {
+            var vertex_buffer_count_this_pipeline: u32 = 0;
+            var vertex_buffers_for_this_pipeline: [_NUM_VERTEX_BUFFERS]bool = @splat(false);
+            const pipe_name = pipe_def.name;
+            const vert_idx = @intFromEnum(pipe_def.vertex);
+            const frag_idx = @intFromEnum(pipe_def.fragment);
+            const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
+            const frag_def = _FRAGMENT_SHADER_DEFS[frag_idx];
+            // const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            // const VERT_TO_FRAG = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(vert_def.output_type)]);
+            const FRAG_OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(frag_def.output_type)]);
+            ct_assert_with_reason(vert_def.output_type == frag_def.input_type, @src(), "for render pipeline `{s}` the vertex shader output type `{s}` does not match the fragment shader input type `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), @tagName(pipe_def.fragment) });
+            ct_assert_with_reason(pipe_def.target_info.num_color_targets == FRAG_OUT.NUM_COLOR_TARGETS, @src(), "for render pipeline `{s}` the fragment shader has {d} color targets, but `target_info.num_color_targets` = {d}", .{ @tagName(pipe_name), FRAG_OUT.NUM_COLOR_TARGETS, pipe_def.target_info.num_color_targets });
+            if (pipe_def.target_info.num_color_targets > 0) {
+                ct_assert_with_reason(pipe_def.target_info.color_target_descriptions != null, @src(), "for render pipeline `{s}` `target_info.num_color_targets == {d}` but `target_info.color_target_descriptions == null`", .{ @tagName(pipe_name), pipe_def.target_info.num_color_targets });
+                for (pipe_def.target_info.color_target_descriptions.?[0..pipe_def.target_info.num_color_targets], 0..) |target, t| {
+                    ct_assert_with_reason(!target.format.is_depth_format(), @src(), "for render pipeline `{s}` color target {d}, the texture format is not a COLOR format, got `{s}`", .{ @tagName(pipe_name), @tagName(target.format) });
+                    ct_assert_with_reason(target.blend_state.none_invalid_if_option_enabled(), @src(), "for render pipeline `{s}` color target {d}, `blend_state` options are enabled, but have one or more `.INVALID` modes or a blank color write mask", .{ @tagName(pipe_name), t });
                 }
             }
+            ct_assert_with_reason(pipe_def.target_info.has_depth_stencil_target == FRAG_OUT.HAS_DEPTH_OUTPUT, @src(), "for render pipeline `{s}` the depth buffer enable setting `{any}` does not match the fragment shader `{s}` depth target state `{any}`", .{ @tagName(pipe_name), pipe_def.target_info.has_depth_stencil_target, @tagName(pipe_def.fragment), FRAG_OUT.HAS_DEPTH_OUTPUT });
+            if (pipe_def.target_info.has_depth_stencil_target) {
+                ct_assert_with_reason(pipe_def.target_info.depth_stencil_format.is_depth_format(), @src(), "for render pipeline `{s}`, `target_info.has_depth_stencil_target == true` but the `target_info.depth_stencil_format` is is not a depth format, got format `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.target_info.depth_stencil_format) });
+                ct_assert_with_reason(!pipe_def.depth_stencil_options.enable_depth_test or pipe_def.depth_stencil_options.compare_op != .INVALID, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_depth_test == true` while `depth_stencil_options.compare_op == .INVALID`", .{@tagName(pipe_name)});
+                ct_assert_with_reason(!pipe_def.depth_stencil_options.enable_stencil_test or (pipe_def.depth_stencil_options.back_stencil_state.none_invalid() and pipe_def.depth_stencil_options.front_stencil_state.none_invalid()), @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_stencil_test == true` while either `depth_stencil_options.front_stencil_state` or `depth_stencil_options.back_stencil_state` has `.INVALID` entries", .{@tagName(pipe_name)});
+                if (pipe_def.depth_stencil_options.enable_stencil_test) {
+                    ct_assert_with_reason(pipe_def.target_info.depth_stencil_format.has_depth_stencil(), @src(), "for render pipeline `{s}`, `depth_stencil_options.enable_stencil_test == true` but the `target_info.depth_stencil_format` is does not have a stencil, got format `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.target_info.depth_stencil_format) });
+                }
+                if (pipe_def.depth_stencil_options.enable_stencil_test) {
+                    ct_assert_with_reason(pipe_def.depth_stencil_options.compare_mask != 0 and pipe_def.depth_stencil_options.write_mask != 0, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_stencil_test == true` while `depth_stencil_options.write_mask` or `depth_stencil_options.compare_mask` equal zero (in effect no depth stencil will be compared or written)", .{@tagName(pipe_name)});
+                }
+            }
+            vertex_buffers_to_bind_start_locs[pipe_idx] = total_num_vertex_buffers_to_bind;
+            vertex_attribute_start_locs[pipe_idx] = total_num_vert_atributes_across_all_pipes;
+            for (pipe_def.vertex_buffers) |vert_buffer_name| {
+                const vert_buf_idx = @intFromEnum(vert_buffer_name);
+                if (vertex_buffers_for_this_pipeline[vert_buf_idx] == false) {
+                    vertex_buffer_count_this_pipeline += 1;
+                    vertex_buffers_for_this_pipeline[vert_buf_idx] = true;
+                }
+                total_num_vert_atributes_across_all_pipes += 1;
+            }
+            longest_set_of_vertex_buffers = @max(longest_set_of_vertex_buffers, vertex_buffer_count_this_pipeline);
+            total_num_vertex_buffers_to_bind += vertex_buffer_count_this_pipeline;
         }
-        if (VALIDATION.vertex_buffer_slot_gaps != .IGNORE) {
-            ct_assert_with_reason(max_slot_used + 1 == num_slots_used, @src(), "in render pipeline `{s}`, the max vertex buffer slot used is {d}, but the number of vertex buffer slots used is {d} (a gap exists somewhere): vertex buffer slots must start from 0 and increase with no gaps", .{ @tagName(pipe_name), max_slot_used, num_slots_used });
+        vertex_buffers_to_bind_start_locs[_NUM_RENDER_PIPELINES] = total_num_vertex_buffers_to_bind;
+        vertex_attribute_start_locs[_NUM_RENDER_PIPELINES] = total_num_vert_atributes_across_all_pipes;
+        var vertex_buffer_names_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]VERTEX_BUFFER_NAMES_ENUM = undefined;
+        var vertex_buffers_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]SDL3.GPU_VertexBufferDescription = undefined;
+        var vertex_attributes_to_bind_per_render_pipeline: [total_num_vert_atributes_across_all_pipes]SDL3.GPU_VertexAttribute = undefined;
+        // SECOND PASS FILL RUNTIME BUFFERS
+        for (_RENDER_PIPELINE_DEFS, 0..) |pipe_def, pipe_idx| {
+            const vert_idx = @intFromEnum(pipe_def.vertex);
+            const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
+            const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const bufs_start = vertex_buffers_to_bind_start_locs[pipe_idx];
+            const bufs_end = vertex_buffers_to_bind_start_locs[pipe_idx + 1];
+            const attrs_start = vertex_attribute_start_locs[pipe_idx];
+            const attrs_end = vertex_attribute_start_locs[pipe_idx + 1];
+            const V_IN_ATTRS = VERT_IN.get_sdl_vertex_attributes();
+            @memcpy(vertex_attributes_to_bind_per_render_pipeline[attrs_start..attrs_end], V_IN_ATTRS[0..]);
+            const V_IN_BUFS = VERT_IN.get_sdl_vertex_buffer_descriptions();
+            @memcpy(vertex_buffers_to_bind_per_render_pipeline[bufs_start..bufs_end], V_IN_BUFS[0..]);
+            @memcpy(vertex_buffer_names_to_bind_per_render_pipeline[bufs_start..bufs_end], VERT_IN.ACTIVE_SLOT_NAMES[0..]);
         }
-        // COMPILE VERTEX BUFFER BINDINGS TO FINAL ARRAY
-        inline for (0..num_slots_used) |s| {
-            const ss: u32 = @intCast(s);
-            const buffer_idx = buffers_used[s];
-            const buffer_name = @as(VERTEX_BUFFER_NAMES_ENUM, @enumFromInt(buffers_used[s]));
-            const bind = SDL3.GPU_VertexBufferDescription{
-                .input_rate = rates_used[s],
-                .slot = slots_used[s],
-                .stride = @sizeOf(ordered_vertex_buffer_descriptions_const[buffer_idx].element_type),
-            };
-            vertex_buffer_names_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss] = buffer_name;
-            vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss] = bind;
-        }
-        Sort.insertion_sort_with_func_and_matching_buffers(
-            SDL3.GPU_VertexBufferDescription,
-            vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx]..vertex_buffers_to_bind_start_locs[pipe_idx + 1]],
-            vert_def_slot_greater,
-            .{vertex_buffer_names_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx]..vertex_buffers_to_bind_start_locs[pipe_idx + 1]]},
-        );
-        switch (VALIDATION.vertex_buffer_slot_gaps) {
-            .IGNORE => {},
-            .PANIC => for (0..num_slots_used) |s| {
-                const ss: u32 = @intCast(s);
-                ct_assert_with_reason(vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot == ss, @src(), "for render pipleine `{s}`, vertex buffer slots are not in order: index {d} = slot {d}", .{ @tagName(pipe_name), ss, vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot });
-            },
-            .WARN => for (0..num_slots_used) |s| {
-                const ss: u32 = @intCast(s);
-                Assert.warn_with_reason(vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot == ss, @src(), "for render pipleine `{s}`, vertex buffer slots are not in order: index {d} = slot {d}", .{ @tagName(pipe_name), ss, vertex_buffers_to_bind_per_render_pipeline[vertex_buffers_to_bind_start_locs[pipe_idx] + ss].slot });
-            },
-        }
-        //FIXME complete overhaul of VERTEX ATTRIBUTE BINDINGS: SDL3 has specific requirements/expectation, force the GraphicController
-        // to drive the HSLS layout instead of just hoping they work.
-        // COMPILE VERTEX ATTRIBUTE BINDINGS TO FINAL ARRAY
-        inline for (pipe_def.vertex_buffers, 0..) |field_map, f| {
-            const ff: u32 = @intCast(f);
-            const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
-            const vert_buf_info: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, @tagName(field_map.vertex_buffer));
-            const vert_struct_in_field_info: ShaderStructFieldInfo = @field(vert_struct_in.fields_info, field_map.shader_struct_field_name);
-            const vert_buf_out_field_info: VertexBufferFieldInfo = @field(vert_buf_info.fields_info, field_map.vertex_buffer_field_name);
-            vertex_attributes_to_bind_per_render_pipeline[vertex_attribute_start_locs[pipe_idx] + ff] = SDL3.GPU_VertexAttribute{
-                .buffer_slot = vertex_buffer_slots_for_this_pipeline[vert_buf_idx].MANUAL,
-                .format = vert_buf_out_field_info.gpu_format,
-                .location = vert_struct_in_field_info.location,
-                .offset = vert_buf_out_field_info.offset,
-            };
-        }
-    }
-    const vertex_buffer_names_to_bind_per_render_pipeline_const = vertex_buffer_names_to_bind_per_render_pipeline;
-    const vertex_buffers_to_bind_per_render_pipeline_const = vertex_buffers_to_bind_per_render_pipeline;
-    const vertex_attributes_to_bind_per_render_pipeline_const = vertex_attributes_to_bind_per_render_pipeline;
-    const vertex_buffers_to_bind_start_locs_const = vertex_buffers_to_bind_start_locs;
-    const vertex_attribute_start_locs_const = vertex_attribute_start_locs;
-    const longest_set_of_vertex_buffers_const = longest_set_of_vertex_buffers;
+        break :make .{ vertex_buffer_names_to_bind_per_render_pipeline, vertex_buffers_to_bind_per_render_pipeline, vertex_attributes_to_bind_per_render_pipeline, vertex_buffers_to_bind_start_locs, vertex_attribute_start_locs, longest_set_of_vertex_buffers };
+    };
     return struct {
         const Controller = @This();
 
@@ -2302,12 +2190,12 @@ pub fn GraphicsController(
             }
         };
 
-        pub const VertexBufferBinding = struct {
+        pub const VertexBufferBindingOffset = struct {
             buffer: VertexBufferName,
             data_offset: u32,
 
-            pub fn vertex_buffer_binding(buffer: VertexBufferName, offset: u32) VertexBufferBinding {
-                return VertexBufferBinding{
+            pub fn vertex_buffer_binding(buffer: VertexBufferName, offset: u32) VertexBufferBindingOffset {
+                return VertexBufferBindingOffset{
                     .buffer = buffer,
                     .data_offset = offset,
                 };
@@ -4154,7 +4042,7 @@ pub fn GraphicsController(
             };
 
             /// Notably this does not bind index buffers, since there is no prescribed index buffer for any specific pipeline
-            pub fn bind_all_resources_and_push_all_uniforms(self: RenderPassWithPipeline, default_vertex_buffer_offset: u32, specific_vertex_buffer_offsets: []const VertexBufferBinding) void {
+            pub fn bind_all_resources_and_push_all_uniforms(self: RenderPassWithPipeline, default_vertex_buffer_offset: u32, specific_vertex_buffer_offsets: []const VertexBufferBindingOffset) void {
                 _INTERNAL.assert_valid(self, @src());
                 self.push_all_uniform_data();
                 self.bind_all_vertex_buffers(default_vertex_buffer_offset, specific_vertex_buffer_offsets);
@@ -4171,14 +4059,14 @@ pub fn GraphicsController(
                 for (allowed_vert_uniforms) |uniform| {
                     const uni_idx = @intFromEnum(uniform.uniform);
                     var ptr: [*]const u8 = @ptrCast(&self.controller.uniforms);
-                    const uni_info = INTERNAL.UNIFORM_OFFSETS_AND_SIZES[uni_idx];
+                    const uni_info = INTERNAL.UNIFORM_TYPES[uni_idx];
                     ptr += uni_info.offset;
                     self.command.push_vertex_uniform_data(uniform.register, @ptrCast(ptr), uni_info.size);
                 }
                 for (allowed_frag_uniforms) |uniform| {
                     const uni_idx = @intFromEnum(uniform.uniform);
                     var ptr: [*]const u8 = @ptrCast(&self.controller.uniforms);
-                    const uni_info = INTERNAL.UNIFORM_OFFSETS_AND_SIZES[uni_idx];
+                    const uni_info = INTERNAL.UNIFORM_TYPES[uni_idx];
                     ptr += uni_info.offset;
                     self.command.push_fragment_uniform_data(uniform.register, @ptrCast(ptr), uni_info.size);
                 }
@@ -4199,7 +4087,7 @@ pub fn GraphicsController(
                 self.command.push_fragment_uniform_data(register, ptr, len);
             }
 
-            pub fn bind_all_vertex_buffers(self: RenderPassWithPipeline, default_offset: u32, specific_offsets: []const VertexBufferBinding) void {
+            pub fn bind_all_vertex_buffers(self: RenderPassWithPipeline, default_offset: u32, specific_offsets: []const VertexBufferBindingOffset) void {
                 _INTERNAL.assert_valid(self, @src());
                 assert_with_reason(num_cast(specific_offsets.len, u32) <= INTERNAL.LONGEST_VERTEX_BUFFER_SET, @src(), "length of `specific_offsets` ({d}) is longer than the longest recorded set of allowed vertex buffers ({d})", .{ specific_offsets.len, INTERNAL.LONGEST_VERTEX_BUFFER_SET });
                 const all_vert_buffer_defs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(self.pipeline);
@@ -4242,7 +4130,7 @@ pub fn GraphicsController(
                 }
             }
 
-            pub fn bind_specific_vertex_buffers(self: RenderPassWithPipeline, bindings: []const VertexBufferBinding) void {
+            pub fn bind_specific_vertex_buffers(self: RenderPassWithPipeline, bindings: []const VertexBufferBindingOffset) void {
                 _INTERNAL.assert_valid(self, @src());
                 const all_vert_defs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(self.pipeline);
                 var sdl_bindings: [INTERNAL.LONGEST_VERTEX_BUFFER_SET]SDL3.GPU_BufferBinding = undefined;
@@ -4465,7 +4353,7 @@ pub fn GraphicsController(
             pub const NUM_DOWNLOAD_TRANSFER_BUFFERS = Types.enum_defined_field_count(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM);
             pub const NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(VERTEX_BUFFER_NAMES_ENUM);
             pub const NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
-            pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
+            pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(VERTEX_INPUT_STRUCT_NAMES_ENUM);
             pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(STORAGE_BUFFER_NAMES_ENUM);
             pub const NUM_FENCES = Types.enum_defined_field_count(FENCE_NAMES_ENUM);
             pub const NUM_INDEX_BUFFERS = Types.enum_defined_field_count(INDEX_BUFFER_NAMES);
@@ -4474,14 +4362,18 @@ pub fn GraphicsController(
             pub const NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
             pub const CREATE_OPTIONS = GPU_OPTIONS;
 
-            pub const UNIFORM_OFFSETS_AND_SIZES = _UNIFORM_TYPES;
+            pub const VERTEX_SHADER_UNIQUE_ENUMS = _VERTEX_SHADER_UNIQUE_ENUMS;
+            pub const FRAGMENT_SHADER_UNIQUE_ENUMS = _FRAGMENT_SHADER_UNIQUE_ENUMS;
+
+            pub const UNIFORM_TYPES = _UNIFORM_TYPES;
+            pub const UNIFORM_SIZES = _UNIFORM_SIZES;
 
             pub const TEXTURE_DEFS = _TEXTURE_DEFS;
             pub const SAMPLER_DEFS = _SAMPLER_DEFS;
             pub const STORAGE_BUFFER_DEFS = _STORAGE_BUFFER_TYPES;
             pub const STORAGE_BUFFER_ELEM_SIZES = _STORAGE_BUFFER_SIZES;
 
-            pub const LONGEST_VERTEX_BUFFER_SET = longest_set_of_vertex_buffers_const;
+            pub const LONGEST_VERTEX_BUFFER_SET = _LONGEST_SET_OF_VERTEX_BUFFERS;
             pub const LONGEST_STORAGE_BUFFER_SET_VERT = longest_storage_buffer_set_vert_const;
             pub const LONGEST_STORAGE_BUFFER_SET_FRAG = longest_storage_buffer_set_frag_const;
             pub const LONGEST_STORAGE_TEXTURE_SET_VERT = longest_storage_texture_set_vert_const;
@@ -4489,7 +4381,7 @@ pub fn GraphicsController(
             pub const LONGEST_SAMPLE_PAIR_SET_VERT = longest_sample_pair_set_vert_const;
             pub const LONGEST_SAMPLE_PAIR_SET_FRAG = longest_sample_pair_set_frag_const;
 
-            pub const PIPELINE_DEFS = ordered_pipeline_definitions_const;
+            pub const PIPELINE_DEFS = _RENDER_PIPELINE_DEFS;
             pub inline fn get_render_pipeline_info(pipeline: RenderPipelineName) _RenderPipelineDefinition {
                 return PIPELINE_DEFS[@intFromEnum(pipeline)];
             }
@@ -4650,13 +4542,13 @@ pub fn GraphicsController(
                 return null;
             }
 
-            pub const ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT = vertex_buffer_names_to_bind_per_render_pipeline_const;
-            pub const ALLOWED_VERTEX_BUFFER_DEFS_FOR_PIPELINE_FLAT = vertex_buffers_to_bind_per_render_pipeline_const;
-            pub const VERTEX_BUFFER_NAMES_DEFS_START_LOCS = vertex_buffers_to_bind_start_locs_const;
-            pub const ALLOWED_VERTEX_ATTRIBUTES_FOR_PIPELINE_FLAT = vertex_attributes_to_bind_per_render_pipeline_const;
-            pub const VERTEX_ATTRIBUTE_START_LOCS = vertex_attribute_start_locs_const;
-            pub const VERTEX_BUFFER_DEFS = ordered_vertex_buffer_descriptions_const;
-            pub const VERTEX_BUFFER_ELEM_SIZES = ordered_vertex_buffer_elem_sizes_const;
+            pub const ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT = _VERTEX_BUFFER_NAMES_FOR_RENDER_PIPELINE;
+            pub const ALLOWED_VERTEX_BUFFER_DEFS_FOR_PIPELINE_FLAT = _VERTEX_BUFFERS_TO_BIND_FOR_RENDER_PIPELINE;
+            pub const VERTEX_BUFFER_NAMES_DEFS_START_LOCS = _VERTEX_BUFFERS_TO_BIND_START_LOCS;
+            pub const ALLOWED_VERTEX_ATTRIBUTES_FOR_PIPELINE_FLAT = _VERTEX_ATTRS_TO_BIND_FOR_RENDER_PIPELINE;
+            pub const VERTEX_ATTRIBUTE_START_LOCS = _VERTEX_ATTRS_TO_BIND_START_LOCS;
+            pub const VERTEX_BUFFER_DEFS = _VERTEX_BUFFER_TYPES;
+            pub const VERTEX_BUFFER_ELEM_SIZES = _VERTEX_BUFFER_SIZES;
             pub inline fn allowed_vertex_buffer_names_for_pipeline(pipeline: RenderPipelineName) []const VertexBufferName {
                 const idx = @intFromEnum(pipeline);
                 return ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT[VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx]..VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx + 1]];
@@ -4689,6 +4581,8 @@ pub fn GraphicsController(
 
             const INDEX_BUFFER_IDX_TYPES = _INDEX_BUFFER_TYPES;
             const INDEX_BUFFER_IDX_SIZES = _INDEX_BUFFER_SIZES;
+            const INDIRECT_BUFFER_TYPES = _INDIRECT_BUFFER_TYPES;
+            const INDIRECT_BUFFER_SIZES = _INDIRECT_BUFFER_SIZES;
         };
 
         pub const WindowName = WINDOW_NAMES_ENUM;
@@ -4698,7 +4592,7 @@ pub fn GraphicsController(
         pub const DownloadBufferName = DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM;
         pub const SamplerName = SAMPLER_NAMES_ENUM;
         pub const VertexBufferName = VERTEX_BUFFER_NAMES_ENUM;
-        pub const VertexStructName = GPU_SHADER_STRUCT_NAMES_ENUM;
+        pub const VertexStructName = VERTEX_INPUT_STRUCT_NAMES_ENUM;
         pub const StorageBufferName = STORAGE_BUFFER_NAMES_ENUM;
         pub const UniformName = UNIFORM_NAMES_ENUM;
         pub const VertexShaderName = VERTEX_SHADER_NAMES_ENUM;
