@@ -105,13 +105,15 @@ pub const GPU_CopyPass = SDL3.GPU_CopyPass;
 pub const GPU_ColorTargetInfo = SDL3.GPU_ColorTargetInfo;
 
 const ShaderUtils = SDL3.ShaderUtils;
-const StorageStructField = ShaderUtils.StorageStructField;
-const StorageStruct = ShaderUtils.StorageStruct;
-const VertexShaderInputStruct = ShaderUtils.VertexShaderInputStruct;
-const VertexShaderInputStructField = ShaderUtils.VertexShaderInputStructField;
-const VertexToFragmentStruct = ShaderUtils.VertexToFragmentStruct;
-const VertexToFragmentField = ShaderUtils.VertexToFragmentField;
-const GPUType = ShaderUtils.GPUType;
+pub const UniformOrStorageStruct = ShaderUtils.UniformOrStorageStruct;
+pub const AnyUniformOrStorageStruct = ShaderUtils.AnyUniformOrStorageStruct;
+pub const VertexShaderInputStruct = ShaderUtils.VertexShaderInputStruct;
+pub const AnyVertexShaderInputStruct = ShaderUtils.AnyVertexShaderInputStruct;
+pub const VertexToFragmentStruct = ShaderUtils.VertexToFragmentStruct;
+pub const AnyVertexToFragmentStruct = ShaderUtils.AnyVertexToFragmentStruct;
+pub const FragmentShaderOutputStruct = ShaderUtils.FragmentShaderOutputStruct;
+pub const AnyFragmentShaderOutputStruct = ShaderUtils.AnyFragmentShaderOutputStruct;
+pub const GPUType = ShaderUtils.GPUType;
 const ErrorBehavior = Common.ErrorBehavior;
 
 const ct_assert_with_reason = Assert.assert_with_reason;
@@ -215,6 +217,30 @@ pub const BufferGrowMode = enum(u8) {
 pub const DefaultCustomKind = enum(u8) {
     DEFAULT,
     CUSTOM,
+};
+
+pub const IndirectDrawMode = enum(u8) {
+    NORMAL_INDIRECT,
+    INDEXED_INDIRECT,
+
+    pub fn elem_type(comptime self: IndirectDrawMode) type {
+        return switch (self) {
+            .NORMAL_INDIRECT => SDL3.GPU_IndirectDrawCommand,
+            .INDEXED_INDIRECT => SDL3.GPU_IndexedIndirectDrawCommand,
+        };
+    }
+    pub fn slice_type(comptime self: IndirectDrawMode) type {
+        return switch (self) {
+            .NORMAL_INDIRECT => []SDL3.GPU_IndirectDrawCommand,
+            .INDEXED_INDIRECT => []SDL3.GPU_IndexedIndirectDrawCommand,
+        };
+    }
+    pub fn const_slice_type(comptime self: IndirectDrawMode) type {
+        return switch (self) {
+            .NORMAL_INDIRECT => []const SDL3.GPU_IndirectDrawCommand,
+            .INDEXED_INDIRECT => []const SDL3.GPU_IndexedIndirectDrawCommand,
+        };
+    }
 };
 
 pub const SamplerInitSettings = union(DefaultCustomKind) {
@@ -501,30 +527,8 @@ pub fn FragmentShaderDefinition(
     return struct {
         fragment_shader: FRAGMENT_SHADER_NAMES_ENUM,
         /// The input struct type name for the shader
-        ///
-        /// The main purpose of this is to match vertex shader `output_type`
-        /// to a fragment shader `input_type` or a vertex shader
-        /// `input_type` to the various fields of the bound vertex buffers
-        ///
-        /// If you use the GraphicsController to automatically
-        /// generate shader code stubs, it will use the name of
-        /// this type as the name of the shader type, and if
-        /// it has a `write_shader_stream_struct(...)` method,
-        /// it will call that method when writing the stub to
-        /// fill in the fields.
         input_type: VERTEX_TO_FRAG_STRUCT_NAMES_ENUM,
-        /// The input struct type name for the shader
-        ///
-        /// The main purpose is to match vertex shader `output_type`
-        /// to a fragment shader `input_type` or a fragment shader
-        /// `output_type` to the pixel formats of the color target textures
-        ///
-        /// If you use the GraphicsController to automatically
-        /// generate shader code stubs, it will use the name of
-        /// this type as the name of the shader type, and if
-        /// it has a `write_shader_stream_struct(...)` method,
-        /// it will call that method when writing the stub to
-        /// fill in the fields.
+        /// The fragment output struct/layout for the fragment shader
         output_type: FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM,
         resources_to_link: []const ShaderResource(UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM),
     };
@@ -539,12 +543,6 @@ pub const ShaderStage = enum(u8) {
     }
 };
 
-pub const ShaderStructUsage = enum(u8) {
-    VERTEX_INPUT,
-    VERTEX_IN_FRAGMENT_OUT,
-    FRAGMENT_OUT,
-};
-
 pub fn RenderPipelineDefinition(
     comptime PIPLEINE_NAMES: type,
     comptime VERTEX_SHADER_NAMES: type,
@@ -555,7 +553,7 @@ pub fn RenderPipelineDefinition(
         pipeline: PIPLEINE_NAMES,
         vertex: VERTEX_SHADER_NAMES,
         fragment: FRAGMENT_SHADER_NAMES,
-        vertex_field_maps: []const RenderPipelineVertexFieldMap(VERTEX_BUFFER_NAMES),
+        vertex_buffers: []const VERTEX_BUFFER_NAMES,
         primitive_type: SDL3.GPU_PrimitiveType = .TRIANGLE_LIST,
         rasterizer_options: SDL3.GPU_RasterizerState = .{},
         multisample_options: SDL3.GPU_MultisampleState = .{},
@@ -563,87 +561,6 @@ pub fn RenderPipelineDefinition(
         target_info: SDL3.GPU_GraphicsPipelineTargetInfo = .{},
     };
 }
-
-pub fn RenderPipelineVertexFieldMap(comptime VERTEX_BUFFER_NAMES: type) type {
-    return struct {
-        const Self = @This();
-        /// The vertex buffer to take data from
-        vertex_buffer: VERTEX_BUFFER_NAMES,
-        /// the field of the vertex buffer to take data from
-        ///
-        /// this MUST match one of the tag names on the `vertex_buffer`'s associated
-        /// `VertexBufferDescription.fields` enum type, and the `VertexBufferFieldInfo`
-        /// data must match the shader struct `ShaderStructFieldInfo`
-        vertex_buffer_field_name: []const u8,
-        /// Whether this field is supplied per-vertex or per-instance.
-        ///
-        /// This MUST match the `vertex_field_input_rate` on all other field maps
-        /// that reference the same `vertex_buffer_bind_slot`
-        vertex_field_input_rate: SDL3.GPU_VertexInputRate,
-        /// the field of the shader struct to send data to
-        ///
-        /// this MUST match one of the tag names on the render pipeline's vertex shader input struct's associated
-        /// `ShaderStructDescription.fields` enum type, and the `ShaderStructFieldInfo`
-        /// data must match the vertex buffer `VertexBufferFieldInfo`
-        shader_struct_field_name: []const u8,
-    };
-}
-
-/// A description of a vertex buffer, its element type, and the fields on its element type
-///
-/// Analogous to `SDL3.GPU_VertexBufferDescription` but with more descriptive info
-/// and the ability to assert correctness for use with `GraphicsController`
-pub const VertexBufferDescription = struct {
-    /// MUST be the type the vertex buffer holds in each element position.
-    ///
-    /// This can be ANY non-opaque type as long as it is properly sized and aligned
-    /// for the needed field types and offsets
-    element_type: type,
-    /// MUST be an enum type describing the name of each field on `type`
-    fields: type,
-    /// MUST be a struct type with a `pub const <FIELD NAME>: VertexBufferFieldInfo = .{.type = <FIELD TYPE>, .offset = <FIELD OFFSET>, .format = <FIELD SDL3 GPU FORMAT>};` declaration
-    /// for EACH of the field names described by `fields`
-    fields_info: type,
-
-    pub fn assert_valid(comptime desc: VertexBufferDescription, comptime name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
-        const INT_SIZE: u16 = @sizeOf(desc.element_type);
-        const INT_SIZE_32: u32 = @intCast(INT_SIZE);
-        const INT = std.meta.Int(.unsigned, INT_SIZE);
-        comptime var bytes_taken: INT = 0;
-        ct_assert_with_reason(Types.type_is_enum(desc.fields) and Types.all_enum_values_start_from_zero_with_no_gaps(desc.fields), src, "vertex buffer `{s}` type of `fields` must be an enum type with all tag values from 0 to max with no gaps, got type `{s}`", .{ name, @typeName(desc.fields) });
-        const EINFO = @typeInfo(desc.fields).@"enum";
-        inline for (EINFO.fields) |field| {
-            ct_assert_with_reason(@hasDecl(desc.fields_info, field.name) and @TypeOf(@field(desc.fields_info, field.name)) == VertexBufferFieldInfo, src, "vertex buffer `{s}` `fields_info` MUST have a declaration of `pub const {s}: VertexBufferFieldInfo = .{...}`, but it was missing or the wrong type", .{ name, field.name });
-            const info: VertexBufferFieldInfo = @field(desc.fields_info, field.name);
-            ct_assert_with_reason(std.mem.isAligned(@intCast(info.offset), @alignOf(info.field_type)), src, "vertex buffer `{s}` field `{s}` has an offset that is not aligned to its type alignment ({d} not aligned to {d})", .{ name, field.name, info.offset, @alignOf(info.field_type) });
-            ct_assert_with_reason(@sizeOf(info.field_type) + info.offset <= INT_SIZE_32, src, "vertex buffer `{s}` field `{s}` has a size and offset that extends beyond the size of the buffer element type", .{ name, field.name });
-            const field_bytes = Utils.first_n_bytes_set_inline(INT, @sizeOf(info.field_type)) << @intCast(info.offset);
-            const after_or = bytes_taken | field_bytes;
-            const after_xor = bytes_taken ^ field_bytes;
-            ct_assert_with_reason(after_or == after_xor, src, "vertex buffer `{s}` field `{s}` has a size and offset that overlaps with another field from byte {d} to byte {d}", .{ name, @ctz(bytes_taken & field_bytes), INT_SIZE - @clz(bytes_taken & field_bytes) });
-            ct_assert_with_reason(info.gpu_format != .INVALID, src, "vertex buffer `{s}` field `{s}` has an `.INVALID` gpu format", .{ name, field.name });
-            ct_assert_with_reason(info.gpu_format.size() == @sizeOf(info.field_type), src, "vertex buffer `{s}` field `{s}` has a gpu format (`{s}` = {d}) that is not the same size as its cpu type (`{s}` = {d})", .{ name, field.name, @tagName(info.gpu_format), info.gpu_format.size(), @typeName(info.field_type), @sizeOf(info.field_type) });
-            bytes_taken = after_or;
-        }
-    }
-
-    pub fn get_info_for_field(comptime desc: VertexBufferDescription, comptime field: desc.fields) VertexBufferFieldInfo {
-        return @field(desc.fields_info, @tagName(field));
-    }
-};
-
-pub const VertexBufferFieldInfo = struct {
-    /// The concrete zig type that this field holds. This is what the user
-    /// will read/write on the application side
-    field_type: type,
-    /// The offset from the beginning of the vertex buffer element/struct where the `cpu_type`
-    /// can be read/written
-    offset: u32,
-    /// The SDL3 GPU type format that most closely represents the `cpu_type`
-    ///
-    /// MUST have the same size as `cpu_type`
-    gpu_format: SDL3.GPU_VertexElementFormat,
-};
 
 pub const NumLocationsAndDepthTarget = struct {
     /// for `.VERTEX_IN` and `.VERTEX_OUT_FRAG_IN` shader structs, this is the number of
@@ -663,153 +580,79 @@ pub const UniformOffsetAndSize = struct {
     size: u32 = 0,
 };
 
-/// A description of a shader input/output struct
-///
-/// This is largely used for validation during comptime,
-/// but if `struct_type` implements `SDL3_ShaderContract.StreamStructWriterInterface`,
-/// it will be used to generate shader code stubs when requested
-pub const ShaderStructDescription = struct {
-    /// A representation of the type that the vertex shader will take as input.
-    ///
-    /// The application side does not directly read/write to this (it is fed data
-    /// from bound vertex buffers or the GPU itself), but is used for comptime validation
-    /// in some scenarios.
-    ///
-    /// If this type implements `SDL3_ShaderContract.StreamStructWriterInterface`,
-    /// it will be used to generate shader code stubs when requested
-    struct_type: type,
-    /// At what stage this shader struct is used. Changes the way validation occurs.
-    struct_usage: ShaderStructUsage,
-    /// MUST be an enum type describing the name of each *USER SUPPLIED* field on the vertex struct/input
-    /// on the GPU side. Do not include fields from GLSL builtins or HLSL SystemValue semantics, etc.
-    fields: type,
-    /// MUST be a struct type with a `pub const <FIELD NAME>: ShaderStructFieldInfo = .{.cpu_type = <CPU TYPE>, .location = <FIELD LOCATION>, .format = <FIELD SDL3 GPU FORMAT>};` declaration
-    /// for EACH of the field names described by `fields`
-    fields_info: type,
+pub fn VertexInputStructDefinition(comptime VERTEX_INPUT_STRUCT_NAMES_ENUM: type) type {
+    return struct {
+        name: VERTEX_INPUT_STRUCT_NAMES_ENUM,
+        type: type,
 
-    pub fn assert_valid_and_get_quick_info(comptime desc: ShaderStructDescription, comptime name: []const u8, comptime src: ?std.builtin.SourceLocation) NumLocationsAndDepthTarget {
-        ct_assert_with_reason(Types.type_is_enum(desc.fields) and Types.all_enum_values_start_from_zero_with_no_gaps(desc.fields), src, "shader struct `{s}` type of `fields` must be an enum type with all tag values from 0 to max with no gaps, got type `{s}`", .{ name, @typeName(desc.fields) });
-        const EINFO = @typeInfo(desc.fields).@"enum";
-        comptime var locations_init: [EINFO.fields.len]bool = @splat(false);
-        comptime var depth_was_init: bool = false;
-        comptime var out: NumLocationsAndDepthTarget = .{};
-        inline for (EINFO.fields) |field| {
-            ct_assert_with_reason(@hasDecl(desc.fields_info, field.name) and @TypeOf(@field(desc.fields_info, field.name)) == ShaderStructFieldInfo, src, "shader struct `{s}` `fields_info` MUST have a declaration of `pub const {s}: ShaderStructFieldInfo = .{...}`, but it was missing or the wrong type", .{ name, field.name });
-            const info: ShaderStructFieldInfo = @field(desc.fields_info, field.name);
-            ct_assert_with_reason(info.gpu_format != .INVALID, src, "shader struct `{s}` field `{s}` has an `.INVALID` gpu format", .{ name, field.name });
-            ct_assert_with_reason(info.gpu_format.size() == @sizeOf(info.cpu_type), src, "shader struct `{s}` field `{s}` has a gpu format size (`{s}` = {d}) that is not the same size as its cpu type (`{s}` = {d})", .{ name, field.name, @tagName(info.gpu_format), info.gpu_format.size(), @typeName(info.cpu_type), @sizeOf(info.cpu_type) });
-            switch (info.location_kind) {
-                .USER_INPUT_OUTPUT => {
-                    ct_assert_with_reason(desc.struct_usage != .FRAGMENT_OUT, src, "shader struct `{s}` has usage mode `.FRAGMENT_OUT`, but field `{s}` has a `.USER_INPUT_OUTPUT` location. Only `.COLOR_TARGET` or `.DEPTH_TARGET` locations are allowed for `.FRAGMENT_OUT` structs (but you can write non-color data to one of the color targets if needed)", .{ name, field.name });
-                    ct_assert_with_reason(info.location < EINFO.fields.len, src, "shader struct `{s}` field `{s}` has a location greater than or equal to the number of fields on the struct ({d} >= {d}): All locations must start from 0 and increase with no gaps", .{ name, field.name, info.location, EINFO.fields.len });
-                    ct_assert_with_reason(locations_init[info.location] == false, src, "shader struct `{s}` field `{s}` has a duplicate location {d}", .{ name, field.name, info.location });
-                    locations_init[info.location] = true;
-                    out.num_locations += 1;
-                },
-                .COLOR_TARGET, .DEPTH_TARGET => {
-                    ct_assert_with_reason(desc.struct_usage == .FRAGMENT_OUT, src, "shader struct `{s}` has usage mode `.{s}`, but field `{s}` has a `.{s}` location. Only `.USER_INPUT_OUTPUT` locations are allowed for `.{s}` structs", .{ name, @tagName(desc.struct_usage), field.name, @tagName(info.location_kind), @tagName(desc.struct_usage) });
-                    switch (info.location_kind) {
-                        .COLOR_TARGET => {
-                            ct_assert_with_reason(info.location < EINFO.fields.len, src, "shader struct `{s}` field `{s}` has a color target greater than or equal to the number of fields on the struct ({d} >= {d}): All color targets must start from 0 and increase with no gaps", .{ name, field.name, info.location, EINFO.fields.len });
-                            ct_assert_with_reason(info.location < 8, src, "shader struct `{s}` field `{s}` has a color target greater than or equal to 8: only 8 simultaneous color targets are supported (locations 0-7)", .{ name, field.name });
-                            ct_assert_with_reason(locations_init[info.location] == false, src, "shader struct `{s}` field `{s}` has a duplicate color target {d}", .{ name, field.name, info.location });
-                            locations_init[info.location] = true;
-                            out.num_locations += 1;
-                        },
-                        .DEPTH_TARGET => {
-                            ct_assert_with_reason(depth_was_init == false, src, "shader struct `{s}` field `{s}` has a duplicate depth target field: only one depth target is supported", .{ name, field.name });
-                            ct_assert_with_reason(locations_init[EINFO.fields.len - 1] == false, src, "shader struct `{s}` field `{s}` has a gap somewhere in its color target locations. All color targets must start at 0 and increase with no gaps.", .{ name, field.name });
-                            depth_was_init = true;
-                            locations_init[EINFO.fields.len - 1] = true;
-                            out.has_depth_target = true;
-                        },
-                    }
-                },
-            }
+        pub fn vertex_input_struct_def(comptime name: VERTEX_INPUT_STRUCT_NAMES_ENUM, comptime t: type) @This() {
+            ShaderUtils.assert_type_is_vertex_shader_input_struct(t, @src());
+            return @This(){
+                .name = name,
+                .type = t,
+            };
         }
-        return out;
-    }
+    };
+}
 
-    pub fn get_info_for_field(comptime desc: ShaderStructDescription, comptime field: desc.fields) ShaderStructFieldInfo {
-        return @field(desc.fields_info, @tagName(field));
-    }
+pub fn VertexToFragmentStructDefinition(comptime VERTEX_TO_FRAG_STRUCT_NAMES_ENUM: type) type {
+    return struct {
+        name: VERTEX_TO_FRAG_STRUCT_NAMES_ENUM,
+        type: type,
 
-    pub fn get_type_and_format_for_location(comptime desc: ShaderStructDescription, comptime location: u32) ?TypeAndFormat {
-        const FIELDS_INFO = @typeInfo(desc.fields).@"enum";
-        inline for (FIELDS_INFO.fields) |field| {
-            const info: ShaderStructFieldInfo = @field(desc.fields_info, field.name);
-            if (info.location == location) {
-                return TypeAndFormat{
-                    .cpu_type = info.cpu_type,
-                    .gpu_format = info.gpu_format,
-                    .kind = info.location_kind,
-                };
-            }
+        pub fn vertex_to_frag_struct_def(comptime name: VERTEX_TO_FRAG_STRUCT_NAMES_ENUM, comptime t: type) @This() {
+            ShaderUtils.assert_type_is_vertex_to_frag_struct(t, @src());
+            return @This(){
+                .name = name,
+                .type = t,
+            };
         }
-        return null;
-    }
-};
+    };
+}
 
-pub const ShaderStructFieldInfo = struct {
-    /// This is the type that is being sent from the
-    /// application to the GPU, regardless of what
-    /// the GPU will interpret it as. This is used for
-    /// validation only (matches the `VertexBufferFieldInfo.type`
-    /// that supplies it)
-    cpu_type: type,
-    /// The vertex location data will be sent to.
-    ///
-    /// If `location_kind == .USER_INPUT_OUTPUT` this MUST be a user provided location, eg.
-    /// `layout(location = #)` (GLSL) or `TEXCOORD#` (HLSL)
-    ///
-    /// If `location_kind == .COLOR_TARGET`, this is a number from 0-7 inclusive
-    /// indicating which color target the field writes to (only for fragment
-    /// shader outputs).
-    ///
-    /// If `location_kind == .DEPTH_TARGET`, this location will be ignored,
-    /// indicating the field will write to the depth buffer.
-    location: u32,
-    /// The kind of the location indicated by `location`
-    ///
-    /// If `location_kind == .USER_INPUT_OUTPUT` location must be a user provided location, eg.
-    /// `layout(location = #)` (GLSL) or `TEXCOORD#` (HLSL)
-    ///
-    /// If `location_kind == .COLOR_TARGET`, location must be a number from 0-7 inclusive
-    /// indicating which color target the field writes to (only for fragment
-    /// shader outputs).
-    ///
-    /// If `location_kind == .DEPTH_TARGET`, location will be ignored,
-    /// indicating the field will write to the depth buffer.
-    location_kind: FieldLocationKind = .USER_INPUT_OUTPUT,
-    /// The SDL3 GPU type format that most closely represents the `cpu_type`
-    ///
-    /// MUST have the same size as `cpu_type`
-    gpu_format: SDL3.GPU_VertexElementFormat,
-};
+pub fn FragmentOutputStructDefinition(comptime FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM: type) type {
+    return struct {
+        name: FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM,
+        type: type,
 
-pub const TypeAndFormat = struct {
-    cpu_type: type,
-    gpu_format: SDL3.GPU_VertexElementFormat,
-    kind: FieldLocationKind,
+        pub fn shader_output_struct_def(comptime name: FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM, comptime t: type) @This() {
+            ShaderUtils.assert_type_is_fragment_shader_output_struct(t, @src());
+            return @This(){
+                .name = name,
+                .type = t,
+            };
+        }
+    };
+}
 
-    pub fn equals(comptime self: TypeAndFormat, comptime other: TypeAndFormat) bool {
-        return self.cpu_type == other.cpu_type and self.gpu_format == other.gpu_format and self.kind == other.kind;
-    }
-};
+pub fn UniformStructDefinition(comptime UNIFORM_STRUCT_NAMES_ENUM: type) type {
+    return struct {
+        name: UNIFORM_STRUCT_NAMES_ENUM,
+        type: type,
+
+        pub fn uniform_struct_def(comptime name: UNIFORM_STRUCT_NAMES_ENUM, comptime t: type) @This() {
+            ShaderUtils.assert_type_is_uniform_or_storage_struct(t, @src());
+            return @This(){
+                .name = name,
+                .type = t,
+            };
+        }
+    };
+}
 
 pub fn TextureDefinition(comptime TEXTURE_NAMES_ENUM: type) type {
     return struct {
         const Self = @This();
-        texture: TEXTURE_NAMES_ENUM,
+        name: TEXTURE_NAMES_ENUM,
         shape: SDL3.GPU_TextureType = ._2D,
         pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
         mipmap_levels: u32 = 0,
         sample_count: SDL3.GPU_SampleCount = ._1,
         usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.from_flag(.SAMPLE),
 
-        pub fn define_texture(name: TEXTURE_NAMES_ENUM, shape: GPU_TextureType, format: GPU_TextureFormat, mipmap_levels: u32, sample_count: SDL3.GPU_SampleCount, usage: GPU_TextureUsageFlags) Self {
+        pub fn texture_def(name: TEXTURE_NAMES_ENUM, shape: GPU_TextureType, format: GPU_TextureFormat, mipmap_levels: u32, sample_count: SDL3.GPU_SampleCount, usage: GPU_TextureUsageFlags) Self {
             return Self{
-                .texture = name,
+                .name = name,
                 .pixel_format = format,
                 .mipmap_levels = mipmap_levels,
                 .sample_count = sample_count,
@@ -819,6 +662,14 @@ pub fn TextureDefinition(comptime TEXTURE_NAMES_ENUM: type) type {
         }
     };
 }
+
+const TextureDef = struct {
+    shape: SDL3.GPU_TextureType = ._2D,
+    pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
+    mipmap_levels: u32 = 0,
+    sample_count: SDL3.GPU_SampleCount = ._1,
+    usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.from_flag(.SAMPLE),
+};
 
 pub fn SamplerDefinition(comptime SAMPLER_NAMES_ENUM: type) type {
     return struct {
@@ -862,20 +713,22 @@ pub fn SamplerDefinition(comptime SAMPLER_NAMES_ENUM: type) type {
 pub fn StorageBufferDefinition(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
     return struct {
         name: STORAGE_BUFFER_NAMES_ENUM,
-        element_type: type,
+        elem_type: type,
         usage: StorageUsage,
+
+        pub fn storage_buffer_def(comptime name: STORAGE_BUFFER_NAMES_ENUM, comptime elem_type: type, comptime usage: StorageUsage) @This() {
+            return @This(){
+                .name = name,
+                .elem_type = elem_type,
+                .usage = usage,
+            };
+        }
     };
 }
 
-pub const StorageDef = struct {
+const StorageDef = struct {
     element_type: type,
     usage: StorageUsage,
-};
-
-pub const FieldLocationKind = enum(u8) {
-    USER_INPUT_OUTPUT,
-    COLOR_TARGET,
-    DEPTH_TARGET,
 };
 
 pub const ValidationSettings = struct {
@@ -901,8 +754,15 @@ pub const ExtraControllerSettings = struct {
 
 pub fn IndexBufferDef(comptime INDEX_BUFFER_NAMES_ENUM: type) type {
     return struct {
-        buffer: INDEX_BUFFER_NAMES_ENUM,
+        name: INDEX_BUFFER_NAMES_ENUM,
         index_size: SDL3.GPU_IndexTypeSize,
+    };
+}
+
+pub fn IndirectDrawBufferDef(comptime INDIRECT_BUFFER_NAMES_ENUM: type) type {
+    return struct {
+        name: INDIRECT_BUFFER_NAMES_ENUM,
+        mode: IndirectDrawMode,
     };
 }
 
@@ -940,6 +800,10 @@ pub fn GraphicsController(
     comptime INDEX_BUFFER_DEFINITIONS: [Types.enum_defined_field_count(INDEX_BUFFER_NAMES)]IndexBufferDef(INDEX_BUFFER_NAMES),
     /// An enum with names for each indirect draw buffer
     comptime INDIRECT_BUFFER_NAMES: type,
+    /// A list of all indirect draw call buffer definitions
+    ///
+    /// Each name in `INDIRECT_BUFFER_NAMES` must be represented exactly once
+    comptime INDIRECT_BUFFER_DEFINITIONS: [Types.enum_defined_field_count(INDIRECT_BUFFER_NAMES)]IndirectDrawBufferDef(INDIRECT_BUFFER_NAMES),
     /// An enum with tag names for each unique `UPLOAD` transfer buffer used in application
     ///
     /// Upload transfer buffers are used to move data from the Application to the GPU
@@ -951,182 +815,36 @@ pub fn GraphicsController(
     /// An enum with tag names for each unique vertex buffer used in application
     ///
     /// These are the data buffers holding one or more vertex attributes, and more than
-    /// one vertex buffer can feed a single vertex shader struct/input, if desired
-    comptime GPU_VERTEX_BUFFER_NAMES_ENUM: type,
-    /// An struct filled with declarations in the format:
-    /// ```zig
-    /// pub const <BUFFER NAME> = VertexBufferDescription{
-    ///     .element_type = <ELEMENT TYPE>,
-    ///     .fields = enum {
-    ///         <FIELD NAMES ...>,
-    ///     },
-    ///     .fields_info = struct {
-    ///         pub const <FIELD NAME> = VertexBufferFieldInfo{<INFO>};
-    ///     },
-    /// };
-    /// ```
-    /// ### Example
-    /// ```zig
-    /// pub const VertBufferNames = enum {
-    ///     VertPosition,
-    ///     VertColorAndRotation,
-    /// };
+    /// one vertex buffer can feed a single vertex shader struct/input, if desired. The
+    /// actual vertx buffer element types are automatically generated/validated at compile time
+    /// based on the various defined `VertexInputStructDefinition`
+    comptime VERTEX_BUFFER_NAMES_ENUM: type,
+    /// An enum with tag names for each unique vertex input struct used in the application
+    comptime VERTEX_INPUT_STRUCT_NAMES_ENUM: type,
+    /// A list of all `VertexInputStructDefinition` used in the application
     ///
-    /// pub const VertBufferDescriptions = struct { // <----- THIS
-    ///     pub const VertPosition =  VertexBufferDescription{
-    ///         .element_type = Vec3(f32),
-    ///         .fields = enum {
-    ///             pos,
-    ///         },
-    ///         .fields_info = struct{
-    ///             pub const pos = FieldInfo{
-    ///                 .field_type = Vec3(f32),
-    ///                 .offset = 0,
-    ///                 .gpu_format = .F32_x3,
-    ///             };
-    ///         },
-    ///     };
-    ///     pub const VertColorAndRotation = VertexBufferDescription{
-    ///         .element_type = [8]u8, // opaque array of 8 bytes
-    ///         .fields = enum{
-    ///             color,
-    ///             rotation,
-    ///         },
-    ///         .fields_info = struct{
-    ///             pub const color = FieldInfo{
-    ///                 .field_type = u32,
-    ///                 .offset = 0,
-    ///                 .gpu_format = .U32_x1,
-    ///             };
-    ///             pub const rotation = FieldInfo{
-    ///                 .field_type = f32,
-    ///                 .offset = 4,
-    ///                 .gpu_format = .F32_x1,
-    ///             };
-    ///         },
-    ///     };
-    /// };
-    /// ```
-    comptime STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS: type,
-    /// An enum with tag names for each unique shader struct used in the application
+    /// Every name in `VERTEX_INPUT_STRUCT_NAMES_ENUM` must be represented exactly once
+    comptime VERTEX_INPUT_STRUCT_DEFINITIONS: [Types.enum_defined_field_count(VERTEX_INPUT_STRUCT_NAMES_ENUM)]VertexInputStructDefinition(VERTEX_INPUT_STRUCT_NAMES_ENUM),
+    /// An enum with tag names for each unique vertex-to-fragment shader struct used in the application
+    /// (GPU side only, but used for validation and shader templating)
+    comptime VERTEX_TO_FRAG_STRUCT_NAMES_ENUM: type,
+    /// A list of all `VertexToFragmentStructDefinition` used in the application
     ///
-    /// These are the actual object models passed to the shaders as input/output parameters,
-    /// and in the case of vertex structs, they can be fed data from more than one vertex buffer, if
-    /// desired
+    /// Every name in `VERTEX_TO_FRAG_STRUCT_NAMES_ENUM` must be represented exactly once
+    comptime VERTEX_TO_FRAG_STRUCT_DEFINITIONS: [Types.enum_defined_field_count(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM)]VertexToFragmentStructDefinition(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM),
+    /// An enum with tag names for each unique fragment shader output struct used in the application
+    /// (GPU oside only, but used for shader templating and validation)
+    comptime FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM: type,
+    /// A list of all `FragmentOutputStructDefinition` used in the application
     ///
-    /// Each tag name must exactly match a declaration name in `STRUCT_OF_SHADER_STRUCT_DEFINITIONS`
-    ///
-    /// ### Example
-    /// ```zig
-    /// pub const ShaderStructNames = enum { // <----- THIS
-    ///     VertexIn,
-    ///     VertexOutFragIn,
-    ///     FragOut
-    /// };
-    /// pub const ShaderStructs = struct {
-    ///     pub const VertexIn = ShaderStructDescription{
-    ///         .struct_type = struct {pos: Vec3(f32), color: u32 }, // this struct could be defined elsewhere
-    ///         .fields = enum { // this enum could be defined elsewhere
-    ///             pos,
-    ///             color,
-    ///         },
-    ///         .fields_info = struct {  // this struct could be defined elsewhere
-    ///             pub const pos = ShaderStructFieldInfo{
-    ///                 .cpu_type = Vec3(f32),
-    ///                 .location = 0,
-    ///                 .gpu_format = .F32_x3,
-    ///             };
-    ///             pub const color = ShaderStructFieldInfo{
-    ///                 .cpu_type = u32,
-    ///                 .location = 1,
-    ///                 .gpu_format = .U32_x1,
-    ///             };
-    ///         };
-    ///     };
-    ///     pub const VertexOutFragIn = ShaderStructDescription{
-    ///         .struct_type = struct{pos: Vec4(f32), color: Vec4(f32)}, // this struct could be defined elsewhere
-    ///         .fields = enum { // this enum could be defined elsewhere
-    ///             color,
-    ///             // position is provided by a builtin/system-value-semantic
-    ///         },
-    ///         .fields_info = struct { // this struct could be defined elsewhere
-    ///             pub const color = ShaderStructFieldInfo{
-    ///                 .cpu_type = Vec4(f32),
-    ///                 .location = 0,
-    ///                 .gpu_format = .F32_x4,
-    ///             };
-    ///         };
-    ///     };
-    ///     pub const FragOut = ShaderStructDescription{
-    ///         .struct_type = struct{color: Vec4(f32), depth: f32}, // this struct could be defined elsewhere
-    ///         .fields = enum {}, // all outputs sent to builtins/system-value-semantics in this case
-    ///         .fields_info = struct {}; // all outputs sent to builtins/system-value-semantics in this case
-    ///     };
-    /// };
-    /// ```
-    comptime GPU_SHADER_STRUCT_NAMES_ENUM: type,
-    /// This should have each unique shader struct concrete type and fields enum as a
-    /// `pub const <STRUCT NAME> = ShaderStructDescription{...};` declaration
-    ///
-    /// Each declaration name must exactly match a tag name in `GPU_SHADER_STRUCT_NAMES_ENUM`
-    ///
-    /// ### Example
-    /// ```zig
-    /// pub const ShaderStructNames = enum {
-    ///     VertexIn,
-    ///     VertexOutFragIn,
-    ///     FragOut
-    /// };
-    /// pub const ShaderStructs = struct { // <----- THIS
-    ///     pub const VertexIn = ShaderStructDescription{
-    ///         .struct_type = struct {pos: Vec3(f32), color: u32 }, // this struct could be defined elsewhere
-    ///         .fields = enum { // this enum could be defined elsewhere
-    ///             pos,
-    ///             color,
-    ///         },
-    ///         .fields_info = struct {  // this struct could be defined elsewhere
-    ///             pub const pos = ShaderStructFieldInfo{
-    ///                 .cpu_type = Vec3(f32),
-    ///                 .location = 0,
-    ///                 .gpu_format = .F32_x3,
-    ///             };
-    ///             pub const color = ShaderStructFieldInfo{
-    ///                 .cpu_type = u32,
-    ///                 .location = 1,
-    ///                 .gpu_format = .U32_x1,
-    ///             };
-    ///         };
-    ///     };
-    ///     pub const VertexOutFragIn = ShaderStructDescription{
-    ///         .struct_type = struct{pos: Vec4(f32), color: Vec4(f32)}, // this struct could be defined elsewhere
-    ///         .fields = enum { // this enum could be defined elsewhere
-    ///             color,
-    ///             // position is provided by a builtin/system-value-semantic
-    ///         },
-    ///         .fields_info = struct { // this struct could be defined elsewhere
-    ///             pub const color = ShaderStructFieldInfo{
-    ///                 .cpu_type = Vec4(f32),
-    ///                 .location = 0,
-    ///                 .gpu_format = .F32_x4,
-    ///             };
-    ///         };
-    ///     };
-    ///     pub const FragOut = ShaderStructDescription{
-    ///         .struct_type = struct{color: Vec4(f32), depth: f32}, // this struct could be defined elsewhere
-    ///         .fields = enum {}, // all outputs sent to builtins/system-value-semantics in this case
-    ///         .fields_info = struct {}; // all outputs sent to builtins/system-value-semantics in this case
-    ///     };
-    /// };
-    /// ```
-    comptime STRUCT_OF_SHADER_STRUCT_DEFINITIONS: type,
+    /// Every name in `FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM` must be represented exactly once
+    comptime FRAGMENT_OUTPUT_STRUCT_DEFINITIONS: [Types.enum_defined_field_count(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM)]FragmentOutputStructDefinition(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM),
     /// An enum with tag names for each unique uniform struct used in application
-    comptime GPU_UNIFORM_NAMES_ENUM: type,
-    /// This should have each unique uniform as an individial field
+    comptime UNIFORM_NAMES_ENUM: type,
+    /// A list of all `UniformStructDefinition` used in the application
     ///
-    /// Uniforms with the same struct type but different data should be separate fields.
-    ///
-    /// Each field name must exactly match a tag name in `UNIFORM_NAMES_ENUM`
-    comptime STRUCT_OF_UNIFORM_STRUCTS: type,
+    /// Every name in `UNIFORM_NAMES_ENUM` must be represented exactly once
+    comptime UNIFORM_STRUCT_DEFINITIONS: [Types.enum_defined_field_count(UNIFORM_NAMES_ENUM)]UniformStructDefinition(UNIFORM_NAMES_ENUM),
     /// An enum with tag names for each unique texture *sampler* used in application
     comptime SAMPLER_NAMES_ENUM: type,
     /// A list of all sampler definitions
@@ -1134,11 +852,11 @@ pub fn GraphicsController(
     /// Each name in `SAMPLER_NAMES_ENUM` must be represented exactly once
     comptime SAMPLER_DEFINITIONS: [Types.enum_defined_field_count(SAMPLER_NAMES_ENUM)]SamplerDefinition(SAMPLER_NAMES_ENUM),
     /// An enum with tag names for each unique gpu storage buffer used in application
-    comptime GPU_STORAGE_BUFFER_NAMES_ENUM: type,
+    comptime STORAGE_BUFFER_NAMES_ENUM: type,
     /// This is a list of descriptions of storage buffer element types
     ///
     /// Each name in `GPU_STORAGE_BUFFER_NAMES_ENUM` must be represented exactly once
-    comptime GPU_STORAGE_BUFFER_DEFINITIONS: [Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM)]StorageBufferDefinition(GPU_STORAGE_BUFFER_NAMES_ENUM),
+    comptime STORAGE_BUFFER_DEFINITIONS: [Types.enum_defined_field_count(STORAGE_BUFFER_NAMES_ENUM)]StorageBufferDefinition(STORAGE_BUFFER_NAMES_ENUM),
     /// An enum with tag names for each unique texture used in application
     comptime TEXTURE_NAMES_ENUM: type,
     /// A list of all texture definitions for each of the named textures
@@ -1148,9 +866,10 @@ pub fn GraphicsController(
     /// A list of all the resource bindings for each vertex shader in the application
     comptime VERTEX_SHADER_DEFINITIONS: [Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM)]VertexShaderDefinition(
         VERTEX_SHADER_NAMES_ENUM,
-        GPU_SHADER_STRUCT_NAMES_ENUM,
-        GPU_UNIFORM_NAMES_ENUM,
-        GPU_STORAGE_BUFFER_NAMES_ENUM,
+        VERTEX_INPUT_STRUCT_NAMES_ENUM,
+        VERTEX_TO_FRAG_STRUCT_NAMES_ENUM,
+        UNIFORM_NAMES_ENUM,
+        STORAGE_BUFFER_NAMES_ENUM,
         TEXTURE_NAMES_ENUM,
         SAMPLER_NAMES_ENUM,
     ),
@@ -1159,9 +878,10 @@ pub fn GraphicsController(
     /// A list of all the resource bindings for each fragment shader in the application
     comptime FRAGMENT_SHADER_DEFINITIONS: [Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM)]FragmentShaderDefinition(
         FRAGMENT_SHADER_NAMES_ENUM,
-        GPU_SHADER_STRUCT_NAMES_ENUM,
-        GPU_UNIFORM_NAMES_ENUM,
-        GPU_STORAGE_BUFFER_NAMES_ENUM,
+        VERTEX_TO_FRAG_STRUCT_NAMES_ENUM,
+        FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM,
+        UNIFORM_NAMES_ENUM,
+        STORAGE_BUFFER_NAMES_ENUM,
         TEXTURE_NAMES_ENUM,
         SAMPLER_NAMES_ENUM,
     ),
@@ -1172,20 +892,23 @@ pub fn GraphicsController(
         RENDER_PIPELINE_NAMES_ENUM,
         VERTEX_SHADER_NAMES_ENUM,
         FRAGMENT_SHADER_NAMES_ENUM,
-        GPU_VERTEX_BUFFER_NAMES_ENUM,
+        VERTEX_BUFFER_NAMES_ENUM,
     ),
     /// Additional settings for optional validation steps
     comptime VALIDATION: ValidationSettings,
+    comptime EVAL_QUOTA: comptime_int,
 ) type {
+    @setEvalBranchQuota(EVAL_QUOTA);
     // CONVENIENCE CONSTS
-    const _VertexShaderDefinition = VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
-    const _FragmentShaderDefinition = FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, GPU_SHADER_STRUCT_NAMES_ENUM, GPU_UNIFORM_NAMES_ENUM, GPU_STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
-    const _RenderPipelineDefinition = RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM, GPU_VERTEX_BUFFER_NAMES_ENUM);
+    const _VertexShaderDefinition = VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM, VERTEX_INPUT_STRUCT_NAMES_ENUM, VERTEX_TO_FRAG_STRUCT_NAMES_ENUM, UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
+    const _FragmentShaderDefinition = FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM, VERTEX_TO_FRAG_STRUCT_NAMES_ENUM, FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM, UNIFORM_NAMES_ENUM, STORAGE_BUFFER_NAMES_ENUM, TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
+    const _RenderPipelineDefinition = RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM, VERTEX_SHADER_NAMES_ENUM, FRAGMENT_SHADER_NAMES_ENUM, VERTEX_BUFFER_NAMES_ENUM);
     const _TextureDefinition = TextureDefinition(TEXTURE_NAMES_ENUM);
-    const _ShaderAllowedUniform = ShaderAllowedUniform(GPU_UNIFORM_NAMES_ENUM);
+    const _ShaderAllowedUniform = ShaderAllowedUniform(UNIFORM_NAMES_ENUM);
     const _ShaderAllowedSamplePair = ShaderAllowedSamplePair(TEXTURE_NAMES_ENUM, SAMPLER_NAMES_ENUM);
-    const _ShaderAllowedStorageBuffer = ShaderAllowedStorageBuffer(GPU_STORAGE_BUFFER_NAMES_ENUM);
+    const _ShaderAllowedStorageBuffer = ShaderAllowedStorageBuffer(STORAGE_BUFFER_NAMES_ENUM);
     const _ShaderAllowedStorageTexture = ShaderAllowedStorageTexture(TEXTURE_NAMES_ENUM);
+    const _UniformStructDefinition = UniformStructDefinition(UNIFORM_NAMES_ENUM);
     // VALIDATE SIMPLE ENUMS
     ct_assert_with_reason(Types.type_is_enum(WINDOW_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(WINDOW_NAMES_ENUM), @src(), "type `WINDOW_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(WINDOW_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(VERTEX_SHADER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_SHADER_NAMES_ENUM), @src(), "type `VERTEX_SHADER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_SHADER_NAMES_ENUM)});
@@ -1194,123 +917,198 @@ pub fn GraphicsController(
     ct_assert_with_reason(Types.type_is_enum(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `UPLOAD_TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM), @src(), "type `DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM)});
     ct_assert_with_reason(Types.type_is_enum(FENCE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FENCE_NAMES_ENUM), @src(), "type `FENCE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FENCE_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_enum(INDIRECT_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDIRECT_BUFFER_NAMES), @src(), "type `INDIRECT_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDIRECT_BUFFER_NAMES)});
+    ct_assert_with_reason(Types.type_is_enum(VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_BUFFER_NAMES_ENUM), @src(), "type `GPU_VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_BUFFER_NAMES_ENUM)});
     const _NUM_VERTEX_SHADERS = Types.enum_defined_field_count(VERTEX_SHADER_NAMES_ENUM);
     const _NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
     const _NUM_RENDER_PIPELINES = Types.enum_defined_field_count(RENDER_PIPELINE_NAMES_ENUM);
     // ORDER AND VALIDATE INDEX BUFFERS
     ct_assert_with_reason(Types.type_is_enum(INDEX_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDEX_BUFFER_NAMES), @src(), "type `INDEX_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDEX_BUFFER_NAMES)});
     const _NUM_INDEX_BUFFERS = Types.enum_defined_field_count(INDEX_BUFFER_NAMES);
-    comptime var ordered_index_buffer_types: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
-    comptime var ordered_index_buffer_sizes: [_NUM_INDEX_BUFFERS]u32 = undefined;
-    comptime var index_buffers_defined: [_NUM_INDEX_BUFFERS]bool = @splat(false);
-    inline for (INDEX_BUFFER_DEFINITIONS) |index_def| {
-        const index_idx = @intFromEnum(index_def.buffer);
-        ct_assert_with_reason(index_buffers_defined[index_idx] == false, @src(), "index buffer `{s}` was defined more than once", .{@tagName(index_def.buffer)});
-        index_buffers_defined[index_idx] = true;
-        ordered_index_buffer_types[index_idx] = index_def.index_size;
-        ordered_index_buffer_sizes[index_idx] = index_def.index_size.size();
-    }
-    const ordered_index_buffer_types_const = ordered_index_buffer_types;
-    const ordered_index_buffer_sizes_const = ordered_index_buffer_sizes;
+    const _INDEX_BUFFER_TYPES, const _INDEX_BUFFER_SIZES = comptime make: {
+        comptime var types_: [_NUM_INDEX_BUFFERS]SDL3.GPU_IndexTypeSize = undefined;
+        comptime var sizes_: [_NUM_INDEX_BUFFERS]u32 = undefined;
+        comptime var defined_: [_NUM_INDEX_BUFFERS]bool = @splat(false);
+        inline for (INDEX_BUFFER_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined_[idx] == false, @src(), "index buffer `{s}` was defined more than once", .{@tagName(def.name)});
+            defined_[idx] = true;
+            types_[idx] = def.index_size;
+            sizes_[idx] = def.index_size.size();
+        }
+        break :make .{ types_, sizes_ };
+    };
+    // ORDER AND VALIDATE INDIRECT DRAW BUFFERS
+    ct_assert_with_reason(Types.type_is_enum(INDIRECT_BUFFER_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(INDIRECT_BUFFER_NAMES), @src(), "type `INDIRECT_BUFFER_NAMES` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(INDIRECT_BUFFER_NAMES)});
+    const _NUM_INDIRECT_BUFFERS = Types.enum_defined_field_count(INDIRECT_BUFFER_NAMES);
+    const _INDIRECT_BUFFER_TYPES, const _INDIRECT_BUFFER_SIZES = comptime make: {
+        comptime var types: [_NUM_INDIRECT_BUFFERS]type = undefined;
+        comptime var sizes: [_NUM_INDIRECT_BUFFERS]u32 = undefined;
+        comptime var defined: [_NUM_INDIRECT_BUFFERS]bool = @splat(false);
+        inline for (INDIRECT_BUFFER_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "indirect draw buffer `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            types[idx] = def.mode.elem_type();
+            sizes[idx] = @sizeOf(def.mode.elem_type());
+        }
+    };
     // ORDER AND VALIDATE SAMPLERS
     ct_assert_with_reason(Types.type_is_enum(SAMPLER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(SAMPLER_NAMES_ENUM), @src(), "type `SAMPLER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(SAMPLER_NAMES_ENUM)});
     const _NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
-    comptime var ordered_sampler_definitions: [_NUM_SAMPLERS]GPU_SamplerCreateInfo = undefined;
-    comptime var samplers_defined: [_NUM_SAMPLERS]bool = @splat(false);
-    inline for (SAMPLER_DEFINITIONS) |sample_def| {
-        const samp_idx = @intFromEnum(sample_def.name);
-        ct_assert_with_reason(samplers_defined[samp_idx] == false, @src(), "sampler `{s}` was defined more than once", .{@tagName(sample_def.name)});
-        samplers_defined[samp_idx] = true;
-        ordered_sampler_definitions[samp_idx] = sample_def.sdl_info(.{});
-    }
-    const ordered_sampler_definitions_const = ordered_sampler_definitions;
+    const _SAMPLER_DEFS = comptime make: {
+        comptime var defs: [_NUM_SAMPLERS]GPU_SamplerCreateInfo = undefined;
+        comptime var defined: [_NUM_SAMPLERS]bool = @splat(false);
+        inline for (SAMPLER_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "sampler `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            defs[idx] = def.sdl_info(.{});
+        }
+        break :make defs;
+    };
     // ORDER AND VALIDATE TEXTURES
     ct_assert_with_reason(Types.type_is_enum(TEXTURE_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(TEXTURE_NAMES_ENUM), @src(), "type `TEXTURE_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(TEXTURE_NAMES_ENUM)});
     const _NUM_TEXTURES = Types.enum_defined_field_count(TEXTURE_NAMES_ENUM);
-    comptime var ordered_texture_definitions: [_NUM_TEXTURES]_TextureDefinition = undefined;
-    comptime var textures_defined: [_NUM_TEXTURES]bool = @splat(false);
-    inline for (TEXTURE_DEFINITIONS) |texture_def| {
-        const tex_id = @intFromEnum(texture_def.texture);
-        ct_assert_with_reason(textures_defined[tex_id] == false, @src(), "texture `{s}` was defined more than once", .{@tagName(texture_def.texture)});
-        textures_defined[tex_id] = true;
-        ct_assert_with_reason(texture_def.pixel_format != .INVALID, @src(), "texture `{s}` had an `.INVALID` pixel format", .{@tagName(texture_def.texture)});
-        ordered_texture_definitions[tex_id] = texture_def;
-    }
-    const ordered_texture_definitions_const = ordered_texture_definitions;
-    // ORDER AND VALIDATE VERTEX BUFFERS
-    ct_assert_with_reason(Types.type_is_enum(GPU_VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_VERTEX_BUFFER_NAMES_ENUM), @src(), "type `GPU_VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_VERTEX_BUFFER_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_struct_with_all_decls_same_type(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, VertexBufferDescription), @src(), "type `STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS` must be a struct type that holds all `GPU_VERTEX_BUFFER_NAMES_ENUM` names as const declarations of type `ShaderStructDescription`, got type `{s}`", .{@typeName(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS)});
-    ct_assert_with_reason(Types.all_enum_names_match_an_object_decl_name(GPU_VERTEX_BUFFER_NAMES_ENUM, STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS), @src(), "each tag in `GPU_VERTEX_BUFFER_NAMES_ENUM` must have a matching pub const declaration with the same name in `STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS`", .{});
-    const _NUM_VERT_BUFFERS = Types.enum_defined_field_count(GPU_VERTEX_BUFFER_NAMES_ENUM);
-    comptime var ordered_vertex_buffer_descriptions: [_NUM_VERT_BUFFERS]VertexBufferDescription = undefined;
-    comptime var ordered_vertex_buffer_elem_sizes: [_NUM_VERT_BUFFERS]u32 = undefined;
-    inline for (@typeInfo(GPU_VERTEX_BUFFER_NAMES_ENUM).@"enum".fields) |vert_buffer| {
-        const desc: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, vert_buffer.name);
-        desc.assert_valid(vert_buffer.name, @src());
-        ordered_vertex_buffer_descriptions[vert_buffer.value] = desc;
-        ordered_vertex_buffer_elem_sizes[vert_buffer.value] = @sizeOf(desc.element_type);
-    }
-    const ordered_vertex_buffer_descriptions_const = ordered_vertex_buffer_descriptions;
-    const ordered_vertex_buffer_elem_sizes_const = ordered_vertex_buffer_elem_sizes;
-    // ORDER AND VALIDATE SHADER STRUCTS
-    ct_assert_with_reason(Types.type_is_enum(GPU_SHADER_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_SHADER_STRUCT_NAMES_ENUM), @src(), "type `GPU_SHADER_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_SHADER_STRUCT_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_struct_with_all_decls_same_type(STRUCT_OF_SHADER_STRUCT_DEFINITIONS, ShaderStructDescription), @src(), "type `STRUCT_OF_SHADER_STRUCT_DEFINITIONS` must be a struct type that holds all `GPU_SHADER_STRUCT_NAMES_ENUM` names as const declarations of type `ShaderStructDescription`, got type `{s}`", .{@typeName(STRUCT_OF_SHADER_STRUCT_DEFINITIONS)});
-    ct_assert_with_reason(Types.all_enum_names_match_an_object_decl_name(GPU_SHADER_STRUCT_NAMES_ENUM, STRUCT_OF_SHADER_STRUCT_DEFINITIONS), @src(), "each tag in `GPU_SHADER_STRUCT_NAMES_ENUM` must have a matching pub const declaration with the same name in `STRUCT_OF_SHADER_STRUCT_DEFINITIONS`", .{});
-    const _NUM_SHADER_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
-    comptime var ordered_shader_struct_locations_quick_info: [_NUM_SHADER_STRUCTS]NumLocationsAndDepthTarget = @splat(.{});
-    inline for (@typeInfo(GPU_SHADER_STRUCT_NAMES_ENUM).@"enum".fields) |shader_struct| {
-        const desc: ShaderStructDescription = @field(STRUCT_OF_SHADER_STRUCT_DEFINITIONS, shader_struct.name);
-        const quick_info = desc.assert_valid_and_get_quick_info(shader_struct.name, @src());
-        ordered_shader_struct_locations_quick_info[shader_struct.value] = quick_info;
-    }
-    const ordered_shader_struct_locations_quick_info_const = ordered_shader_struct_locations_quick_info;
+    const _TEXTURE_DEFS = comptime make: {
+        comptime var defs: [_NUM_TEXTURES]TextureDef = undefined;
+        comptime var defined: [_NUM_TEXTURES]bool = @splat(false);
+        inline for (TEXTURE_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "texture `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            ct_assert_with_reason(def.pixel_format != .INVALID, @src(), "texture `{s}` had an `.INVALID` pixel format", .{@tagName(def.name)});
+            defs[idx] = TextureDef{
+                .shape = def.shape,
+                .sample_count = def.sample_count,
+                .usage = def.usage,
+                .mipmap_levels = def.mipmap_levels,
+                .pixel_format = def.pixel_format,
+            };
+        }
+        break :make defs;
+    };
     // ORDER AND VALIDATE UNIFORMS
-    ct_assert_with_reason(Types.type_is_enum(GPU_UNIFORM_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_UNIFORM_NAMES_ENUM), @src(), "type `GPU_UNIFORM_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_UNIFORM_NAMES_ENUM)});
-    ct_assert_with_reason(Types.type_is_struct(STRUCT_OF_UNIFORM_STRUCTS), @src(), "type `STRUCT_OF_UNIFORM_STRUCTS` must be a struct type that holds all unique instances of the needed uniform structs as fields, got type `{s}`", .{@typeName(STRUCT_OF_UNIFORM_STRUCTS)});
-    ct_assert_with_reason(Types.all_enum_names_match_all_object_field_names(GPU_UNIFORM_NAMES_ENUM, STRUCT_OF_UNIFORM_STRUCTS), @src(), "`GPU_UNIFORM_NAMES_ENUM` must have the same number of tags as the number of fields in `STRUCT_OF_UNIFORM_STRUCTS`, and each enum tag NAME in `GPU_UNIFORM_NAMES_ENUM` must EXACTLY match a field in `STRUCT_OF_UNIFORM_STRUCTS`", .{});
-    const _NUM_UNIFORM_STRUCTS = Types.enum_defined_field_count(GPU_UNIFORM_NAMES_ENUM);
-    comptime var ordered_uniform_offsets_and_sizes: [_NUM_UNIFORM_STRUCTS]UniformOffsetAndSize = @splat(.{});
-    inline for (@typeInfo(GPU_UNIFORM_NAMES_ENUM).@"enum".fields) |uni_name| {
-        const offset = @offsetOf(STRUCT_OF_UNIFORM_STRUCTS, uni_name.name);
-        const uni_type = @FieldType(STRUCT_OF_UNIFORM_STRUCTS, uni_name.name);
-        // ShaderUtils.as
-        const size = @sizeOf(uni_type);
-        ordered_uniform_offsets_and_sizes[uni_name.value] = UniformOffsetAndSize{
-            .offset = offset,
-            .size = size,
-        };
-    }
-    const ordered_uniform_offsets_and_sizes_const = ordered_uniform_offsets_and_sizes;
+    ct_assert_with_reason(Types.type_is_enum(UNIFORM_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(UNIFORM_NAMES_ENUM), @src(), "type `UNIFORM_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(UNIFORM_NAMES_ENUM)});
+    const _NUM_UNIFORM_STRUCTS = Types.enum_defined_field_count(UNIFORM_NAMES_ENUM);
+    const _UNIFORM_TYPES, const _UNIFORM_SIZES, const STRUCT_OF_UNIFORM_STRUCTS = comptime make: {
+        comptime var sizes: [_NUM_UNIFORM_STRUCTS]u32 = undefined;
+        comptime var defined: [_NUM_UNIFORM_STRUCTS]bool = @splat(false);
+        comptime var types: [_NUM_UNIFORM_STRUCTS]type = undefined;
+        comptime var names: [_NUM_UNIFORM_STRUCTS][:0]const u8 = undefined;
+        const attrs: [_NUM_UNIFORM_STRUCTS]std.builtin.Type.StructField.Attributes = @splat(.{});
+        inline for (UNIFORM_STRUCT_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "uniform `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            sizes[idx] = @sizeOf(def.type);
+            types[idx] = def.type;
+            names[idx] = @tagName(def.name);
+        }
+        const AllUniformsWrapper = @Struct(.auto, null, names[0..], types[0..], attrs[0..]);
+        break :make .{ types, sizes, AllUniformsWrapper };
+    };
+    // ORDER AND VALIDATE VERTEX INPUT STRUCTS
+    ct_assert_with_reason(Types.type_is_enum(VERTEX_INPUT_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_INPUT_STRUCT_NAMES_ENUM), @src(), "type `VERTEX_INPUT_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_INPUT_STRUCT_NAMES_ENUM)});
+    const _NUM_VERTEX_INPUT_STRUCTS = Types.enum_defined_field_count(VERTEX_INPUT_STRUCT_NAMES_ENUM);
+    const _VERTEX_INPUT_STRUCT_TYPES = comptime make: {
+        comptime var defined: [_NUM_VERTEX_INPUT_STRUCTS]bool = @splat(false);
+        comptime var types: [_NUM_VERTEX_INPUT_STRUCTS]type = undefined;
+        inline for (VERTEX_INPUT_STRUCT_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "vertex input struct `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            types[idx] = def.type;
+        }
+        break :make types;
+    };
+    // VALIDATE VERTEX BUFFERS EXACTLY MATCH FOR ALL VERTEX INPUT STRUCT DEFINITIONS
+    ct_assert_with_reason(Types.type_is_enum(VERTEX_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_BUFFER_NAMES_ENUM), @src(), "type `VERTEX_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_BUFFER_NAMES_ENUM)});
+    const _NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(VERTEX_BUFFER_NAMES_ENUM);
+    const _VERTEX_BUFFER_TYPES = comptime make: {
+        comptime var types: [_NUM_VERTEX_BUFFERS]type = undefined;
+        comptime var defined: [_NUM_VERTEX_BUFFERS]bool = @splat(false);
+        comptime var num_defined: u32 = 0;
+        inline for (_VERTEX_INPUT_STRUCT_TYPES) |vert_input| {
+            const VERT_INPUT = AnyVertexShaderInputStruct(vert_input);
+            inline for (VERT_INPUT.ACTIVE_SLOT_TYPES, VERT_INPUT.ACTIVE_SLOT_PAIRS) |need_type, pair| {
+                const idx = @intFromEnum(pair.slot_name);
+                if (defined[idx]) {
+                    const need_info = @typeInfo(need_type).@"struct";
+                    const cached_info = @typeInfo(types[idx]).@"struct";
+                    ct_assert_with_reason(need_info.layout == .@"extern" and cached_info.layout == .@"extern", @src(), "vertex buffer `{s}` is not declared as `extern` on all vertex input struct definitions", .{@tagName(pair.slot_name)});
+                    ct_assert_with_reason(need_info.fields.len == cached_info.fields.len, @src(), "mismatch bewteen the number of fields on the struct types for the vertex buffer `{s}`: need {d} fields, cached {d} fields", .{ @tagName(pair.slot_name), need_info.fields.len, cached_info.fields.len });
+                    next_cached: inline for (cached_info.fields) |cached_field| {
+                        inline for (need_info.fields) |need_field| {
+                            if (std.mem.eql(u8, need_field.name, cached_field.name)) {
+                                ct_assert_with_reason(need_field.type == cached_field.type, @src(), "the type for field `{s}` on vertex buffer `{s}` does not match: cached = `{s}`, need = `{s}`", .{ cached_field.name, @tagName(pair.slot_name), @typeName(cached_field.type), @typeName(need_field.name) });
+                                ct_assert_with_reason(@offsetOf(need_type, cached_field.name) == @offsetOf(types[idx], cached_field.name), @src(), "the field `{s}` on vertex buffer `{s}` has mismatching offsets when calculated from two different vertex input structs: cached = `{d}`, need = `{d}`", .{ cached_field.name, @tagName(pair.slot_name), @offsetOf(types[idx], cached_field.name), @offsetOf(need_type, cached_field.name) });
+                            }
+                        }
+                        ct_assert_unreachable(@src(), "cached struct for vertex buffer `{s}` has field `{s}`, but another vertex input struct did not define this field for this vertex buffer", .{ @tagName(pair.slot_name), cached_field.name });
+                    }
+                } else {
+                    defined[idx] = true;
+                    types[idx] = need_type;
+                    num_defined += 1;
+                    ct_assert_with_reason(@typeInfo(need_type).@"struct".layout == .@"extern", @src(), "vertex buffer `{s}` is not declared as `extern`", .{@tagName(pair.slot_name)});
+                }
+            }
+        }
+        for (0.._NUM_VERTEX_BUFFERS) |buf_idx| {
+            if (!defined[buf_idx]) {
+                const e: VERTEX_BUFFER_NAMES_ENUM = num_cast(buf_idx, VERTEX_BUFFER_NAMES_ENUM);
+                ct_assert_unreachable(@src(), "vertex buffer `{s}` is not used by any vertex input struct, and therefore is not used in any render pipeline", .{@tagName(e)});
+            }
+        }
+        break :make types;
+    };
+    // ORDER AND VALIDATE VERTEX TO FRAG STRUCTS
+    ct_assert_with_reason(Types.type_is_enum(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM), @src(), "type `VERTEX_TO_FRAG_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM)});
+    const _NUM_VERTEX_TO_FRAG_STRUCTS = Types.enum_defined_field_count(VERTEX_TO_FRAG_STRUCT_NAMES_ENUM);
+    const _VERTEX_TO_FRAG_STRUCT_TYPES = comptime make: {
+        comptime var defined: [_NUM_VERTEX_TO_FRAG_STRUCTS]bool = @splat(false);
+        comptime var types: [_NUM_VERTEX_TO_FRAG_STRUCTS]type = undefined;
+        inline for (VERTEX_TO_FRAG_STRUCT_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "vertex-to-frag struct `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            types[idx] = def.type;
+        }
+        break :make types;
+    };
+    // ORDER AND VALIDATE VERTEX TO FRAG STRUCTS
+    ct_assert_with_reason(Types.type_is_enum(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM), @src(), "type `FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM)});
+    const _NUM_FRAGMENT_OUTPUT_STRUCTS = Types.enum_defined_field_count(FRAGMENT_OUTPUT_STRUCT_NAMES_ENUM);
+    const _FRAGMENT_OUTPUT_STRUCT_TYPES = comptime make: {
+        comptime var defined: [_NUM_FRAGMENT_OUTPUT_STRUCTS]bool = @splat(false);
+        comptime var types: [_NUM_FRAGMENT_OUTPUT_STRUCTS]type = undefined;
+        inline for (FRAGMENT_OUTPUT_STRUCT_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "fragment output struct `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            types[idx] = def.type;
+        }
+        break :make types;
+    };
     // ORDER AND VALIDATE STORAGE BUFFERS
-    ct_assert_with_reason(Types.type_is_enum(GPU_STORAGE_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(GPU_STORAGE_BUFFER_NAMES_ENUM), @src(), "type `GPU_STORAGE_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(GPU_STORAGE_BUFFER_NAMES_ENUM)});
-    const _NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM);
-    comptime var ordered_storage_buffer_defs: [_NUM_STORAGE_BUFFERS]StorageDef = undefined;
-    comptime var ordered_storage_buffer_elem_sizes: [_NUM_STORAGE_BUFFERS]u32 = undefined;
-    comptime var storage_buffers_init: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
-    inline for (GPU_STORAGE_BUFFER_DEFINITIONS[0..]) |def| {
-        const def_idx = @intFromEnum(def.name);
-        ct_assert_with_reason(storage_buffers_init[def_idx] == false, @src(), "storage buffer `{s}` was defined more than once", .{@tagName(def.name)});
-        storage_buffers_init[def_idx] = true;
-        ordered_storage_buffer_defs[def_idx] = StorageDef{
-            .element_type = def.element_type,
-            .usage = def.usage,
-        };
-        ordered_storage_buffer_elem_sizes[def_idx] = @sizeOf(def.element_type);
-    }
-    const ordered_storage_buffer_defs_const = ordered_storage_buffer_defs;
-    const ordered_storage_buffer_elem_sizes_const = ordered_storage_buffer_elem_sizes;
-    // VALIDATE SHADER REGISTERS STARTING HERE
-    // ORGANISE PIPELINE TO SHADERS MAP
-    comptime var ordered_pipeline_definitions: [_NUM_RENDER_PIPELINES]_RenderPipelineDefinition = undefined;
-    comptime var pipeline_definitions_mapped: [_NUM_RENDER_PIPELINES]bool = @splat(false);
-    inline for (RENDER_PIPELINE_DEFINITIONS) |def| {
-        const pipe_idx = @intFromEnum(def.pipeline);
-        ct_assert_with_reason(pipeline_definitions_mapped[pipe_idx] == false, @src(), "render pipeline `{s}` was already mapped to its shaders once, attmepted a second time", .{@tagName(def.pipeline)});
-        pipeline_definitions_mapped[pipe_idx] = true;
-        ordered_pipeline_definitions[pipe_idx] = def;
-    }
-    const ordered_pipeline_definitions_const = ordered_pipeline_definitions;
+    ct_assert_with_reason(Types.type_is_enum(STORAGE_BUFFER_NAMES_ENUM) and Types.all_enum_values_start_from_zero_with_no_gaps(STORAGE_BUFFER_NAMES_ENUM), @src(), "type `GPU_STORAGE_BUFFER_NAMES_ENUM` MUST be an enum type with tag values starting at zero and no gaps between 0 and the max tag value, got type `{s}`", .{@typeName(STORAGE_BUFFER_NAMES_ENUM)});
+    const _NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(STORAGE_BUFFER_NAMES_ENUM);
+    const _STORAGE_BUFFER_TYPES, const _STORAGE_BUFFER_SIZES, const _STORAGE_BUFFER_USAGES = comptime make: {
+        comptime var types: [_NUM_STORAGE_BUFFERS]type = undefined;
+        comptime var sizes: [_NUM_STORAGE_BUFFERS]u32 = undefined;
+        comptime var usages: [_NUM_STORAGE_BUFFERS]StorageUsage = undefined;
+        comptime var defined: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
+        inline for (STORAGE_BUFFER_DEFINITIONS) |def| {
+            const idx = @intFromEnum(def.name);
+            ct_assert_with_reason(defined[idx] == false, @src(), "storage buffer `{s}` was defined more than once", .{@tagName(def.name)});
+            defined[idx] = true;
+            types[idx] = def.elem_type;
+            sizes[idx] = @sizeOf(def.elem_type);
+            usages[idx] = def.usage;
+        }
+        break :make .{ types, sizes, usages };
+    };
+    // VALIDATE RENDER PIPELINES STARTING HERE
     // VARIBLE PACKAGE TO PASS TO COMPTIME SUBROUTINES FOR CONVENIENCE
     const VARS = struct {
         const SELF_VARS = @This();
@@ -1333,18 +1131,18 @@ pub fn GraphicsController(
         sample_pairs_allowed_in_vertex_shaders_len: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
         sample_pairs_allowed_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS][_NUM_TEXTURES][_NUM_SAMPLERS]AllowedResourceGpuCpu = @splat(@splat(@splat(AllowedResourceGpuCpu{}))),
         sample_pairs_allowed_in_fragment_shaders_len: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
-        enum_types_in_vertex_shaders: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
-        enum_types_in_fragment_shaders: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
+        max_enum_types_in_vertex_shaders: [_NUM_VERTEX_SHADERS]u32 = @splat(0),
+        max_enum_types_in_fragment_shaders: [_NUM_FRAGMENT_SHADERS]u32 = @splat(0),
     };
     comptime var vars = VARS{};
     // COMPTIME SUB-ROUTINES ONLY NEEDED FOR THIS BLOCK
     const SUB_ROUTINE = struct {
         const SELF_SUB_ROUTINE = @This();
-        fn process_uniform_linkage(
+        fn process_uniform_def(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
-            comptime uniform_name: GPU_UNIFORM_NAMES_ENUM,
+            comptime uniform_name: UNIFORM_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
             const uni_idx = @intFromEnum(uniform_name);
@@ -1354,20 +1152,24 @@ pub fn GraphicsController(
                     v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed = true;
                     v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_vertex_shaders_len[shader_idx];
                     v.uniforms_allowed_in_vertex_shaders_len[shader_idx] += 1;
+                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                    v.max_enum_types_in_vertex_shaders[shader_idx] += @intCast(UNI_TYPE.ENUMS.len);
                 },
                 .FRAGMENT => {
                     ct_assert_with_reason(v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(uniform_name), shader_name });
                     v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed = true;
                     v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_fragment_shaders_len[shader_idx];
                     v.uniforms_allowed_in_fragment_shaders_len[shader_idx] += 1;
+                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                    v.max_enum_types_in_fragment_shaders[shader_idx] += @intCast(UNI_TYPE.ENUMS.len);
                 },
             }
         }
-        fn process_storage_buffer_linkage(
+        fn process_storage_buffer_def(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
-            comptime buffer_name: GPU_STORAGE_BUFFER_NAMES_ENUM,
+            comptime buffer_name: STORAGE_BUFFER_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
             const buf_idx = @intFromEnum(buffer_name);
@@ -1378,6 +1180,8 @@ pub fn GraphicsController(
                 v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].cpu_register = v.storage_buffers_allowed_in_vertex_shaders_len[shader_idx];
                 v.next_storage_gpu_register_in_vertex_shaders[shader_idx] += 1;
                 v.storage_buffers_allowed_in_vertex_shaders_len[shader_idx] += 1;
+                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buffer_name)]);
+                v.max_enum_types_in_vertex_shaders[shader_idx] += @intCast(STORE_TYPE.ENUMS.len);
             } else {
                 ct_assert_with_reason(v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(buffer_name), shader_name });
                 v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed = true;
@@ -1385,9 +1189,11 @@ pub fn GraphicsController(
                 v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].cpu_register = v.storage_buffers_allowed_in_fragment_shaders_len[shader_idx];
                 v.next_storage_gpu_register_in_fragment_shaders[shader_idx] += 1;
                 v.storage_buffers_allowed_in_fragment_shaders_len[shader_idx] += 1;
+                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buffer_name)]);
+                v.max_enum_types_in_fragment_shaders[shader_idx] += @intCast(STORE_TYPE.ENUMS.len);
             }
         }
-        fn process_storage_texture_linkage(
+        fn process_storage_texture_def(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
@@ -1411,7 +1217,7 @@ pub fn GraphicsController(
                 v.storage_textures_allowed_in_fragment_shaders_len[shader_idx] += 1;
             }
         }
-        fn process_sample_pair_linkage(
+        fn process_sample_pair_def(
             comptime v: *VARS,
             comptime shader_idx: u32,
             comptime shader_name: []const u8,
@@ -1437,97 +1243,216 @@ pub fn GraphicsController(
                 v.sample_pairs_allowed_in_fragment_shaders_len[shader_idx] += 1;
             }
         }
+        fn combine_unique_enums(comptime LIST: []type, comptime LEN: *u32, comptime ADD: []const type) void {
+            next_to_add: inline for (ADD) |add_enum_type| {
+                inline for (LIST[0..LEN.*]) |unique_enum| {
+                    if (add_enum_type == unique_enum) continue :next_to_add;
+                }
+                LIST[LEN.*] = add_enum_type;
+                LEN.* += 1;
+            }
+        }
     };
     // COMPTIME VALIDATION / ORGANIZATION OF VERTEX SHADER BINDINGS
-    comptime var vertex_linkages_defined: [_NUM_VERTEX_SHADERS]bool = @splat(false);
-    comptime var ordered_vertex_shader_definitions: [_NUM_VERTEX_SHADERS]_VertexShaderDefinition = undefined;
-    inline for (VERTEX_SHADER_DEFINITIONS[0..]) |linkage| {
-        const vert_idx = @intFromEnum(linkage.vertex_shader);
-        ct_assert_with_reason(vertex_linkages_defined[vert_idx] == false, @src(), "linkage for vertex shader `{s}` was defined twice", .{@tagName(linkage.vertex_shader)});
-        vertex_linkages_defined[vert_idx] = true;
-        ordered_vertex_shader_definitions[vert_idx] = linkage;
-        // LOG REGISTERS FOR VARIOUS RESOURCES
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .UNIFORM_BUFFER => |uniform_name| {
-                    SUB_ROUTINE.process_uniform_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), uniform_name, .VERTEX);
-                },
-                else => {},
+    const _VERTEX_SHADER_DEFS, const _VERTEX_SHADER_UNIQUE_ENUM_STARTS = comptime make: {
+        comptime var defined: [_NUM_VERTEX_SHADERS]bool = @splat(false);
+        comptime var defs: [_NUM_VERTEX_SHADERS]_VertexShaderDefinition = undefined;
+        comptime var total_unique_enum_sets_len: u32 = 0;
+        comptime var unique_enum_starts: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
+        inline for (VERTEX_SHADER_DEFINITIONS[0..]) |def| {
+            const idx = @intFromEnum(def.vertex_shader);
+            ct_assert_with_reason(defined[idx] == false, @src(), "for vertex shader `{s}` was defined twice", .{@tagName(def.vertex_shader)});
+            defined[idx] = true;
+            defs[idx] = def;
+            // LOG REGISTERS FOR VARIOUS RESOURCES
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        SUB_ROUTINE.process_uniform_def(&vars, @intCast(idx), @tagName(def.vertex_shader), uniform_name, .VERTEX);
+                    },
+                    else => {},
+                }
+            }
+            // NOTABLY, PROCESS STORAGE RESOURCES IN THE ORDER: SAMPLERS -> TEXTURES -> BUFFERS, TO CORRECTLY PROVISION GPU REGISTER SLOTS
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .SAMPLED_TEXTURE => |tex_samp_pair| {
+                        SUB_ROUTINE.process_sample_pair_def(&vars, @intCast(idx), @tagName(def.vertex_shader), tex_samp_pair.tex_name, tex_samp_pair.samp_name, .VERTEX);
+                    },
+                    else => {},
+                }
+            }
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .STORAGE_TEXTURE => |tex_name| {
+                        SUB_ROUTINE.process_storage_texture_def(&vars, @intCast(idx), @tagName(def.vertex_shader), tex_name, .VERTEX);
+                    },
+                    else => {},
+                }
+            }
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .STORAGE_BUFFER => |buf_name| {
+                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
+                        SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.vertex_shader), buf_name, .VERTEX);
+                    },
+                    else => {},
+                }
+            }
+            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
+            const MAX_ENUMS = vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))];
+            comptime var unique_enums: [MAX_ENUMS]type = undefined;
+            @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
+            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
+                    },
+                    .STORAGE_BUFFER => |buf_name| {
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
+                    },
+                    else => {},
+                }
+            }
+            unique_enum_starts[idx] = total_unique_enum_sets_len;
+            total_unique_enum_sets_len += unique_enums_len;
+        }
+        unique_enum_starts[_NUM_VERTEX_SHADERS] = total_unique_enum_sets_len;
+        break :make .{ defs, unique_enum_starts };
+    };
+    const _VERTEX_SHADER_UNIQUE_ENUMS = comptime make: {
+        comptime var all_unique_vertex_enums: [_VERTEX_SHADER_UNIQUE_ENUM_STARTS[_NUM_VERTEX_SHADERS]]type = undefined;
+        inline for (_VERTEX_SHADER_DEFS[0..], 0..) |def, idx| {
+            const start = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx];
+            const end = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
+            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            comptime var unique_enums = all_unique_vertex_enums[start..end];
+            @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
+            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
+                    },
+                    .STORAGE_BUFFER => |buf_name| {
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
+                    },
+                    else => {},
+                }
             }
         }
-        // NOTABLY, PROCESS STORAGE RESOURCES IN THE ORDER: SAMPLERS -> TEXTURES -> BUFFERS, TO CORRECTLY PROVISION GPU REGISTER SLOTS
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .SAMPLED_TEXTURE => |tex_samp_pair| {
-                    SUB_ROUTINE.process_sample_pair_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), tex_samp_pair.tex_name, tex_samp_pair.samp_name, .VERTEX);
-                },
-                else => {},
-            }
-        }
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .STORAGE_TEXTURE => |tex_name| {
-                    SUB_ROUTINE.process_storage_texture_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), tex_name, .VERTEX);
-                },
-                else => {},
-            }
-        }
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .STORAGE_BUFFER => |buf_name| {
-                    ct_assert_with_reason(ordered_storage_buffer_defs_const[@intFromEnum(buf_name)].usage.has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(linkage.vertex_shader) });
-                    SUB_ROUTINE.process_storage_buffer_linkage(&vars, @intCast(vert_idx), @tagName(linkage.vertex_shader), buf_name, .VERTEX);
-                },
-                else => {},
-            }
-        }
-    }
-    const ordered_vertex_shader_definitions_const = ordered_vertex_shader_definitions;
+        break :make all_unique_vertex_enums;
+    };
     // COMPTIME VALIDATION / ORGANIZATION OF FRAGMENT SHADER BINDINGS
-    comptime var fragment_linkages_defined: [_NUM_FRAGMENT_SHADERS]bool = @splat(false);
-    comptime var ordered_fragment_shader_definitions: [_NUM_FRAGMENT_SHADERS]_FragmentShaderDefinition = undefined;
-    inline for (FRAGMENT_SHADER_DEFINITIONS[0..]) |linkage| {
-        const frag_idx = @intFromEnum(linkage.fragment_shader);
-        ct_assert_with_reason(fragment_linkages_defined[frag_idx] == false, @src(), "linkage for fragment shader `{s}` was defined twice", .{@tagName(linkage.fragment_shader)});
-        fragment_linkages_defined[frag_idx] = true;
-        ordered_fragment_shader_definitions[frag_idx] = linkage;
-        // LOG REGISTERS FOR VARIOUS RESOURCES
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .UNIFORM_BUFFER => |uniform_name| {
-                    SUB_ROUTINE.process_uniform_linkage(&vars, @intCast(frag_idx), @tagName(linkage.fragment_shader), uniform_name, .FRAGMENT);
-                },
-                else => {},
+    const _FRAGMENT_SHADER_DEFS, const _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS = comptime make: {
+        comptime var defined: [_NUM_FRAGMENT_SHADERS]bool = @splat(false);
+        comptime var defs: [_NUM_FRAGMENT_SHADERS]_FragmentShaderDefinition = undefined;
+        comptime var total_unique_enum_sets_len: u32 = 0;
+        comptime var unique_enum_starts: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
+        inline for (FRAGMENT_SHADER_DEFINITIONS[0..]) |def| {
+            const idx = @intFromEnum(def.fragment_shader);
+            ct_assert_with_reason(defined[idx] == false, @src(), "fragment shader `{s}` was defined twice", .{@tagName(def.fragment_shader)});
+            defined[idx] = true;
+            defs[idx] = def;
+            // LOG REGISTERS FOR VARIOUS RESOURCES
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        SUB_ROUTINE.process_uniform_def(&vars, @intCast(idx), @tagName(def.fragment_shader), uniform_name, .FRAGMENT);
+                    },
+                    else => {},
+                }
+            }
+            // NOTABLY, PROCESS STORAGE RESOURCES IN THE ORDER: SAMPLERS -> TEXTURES -> BUFFERS, TO CORRECTLY PROVISION GPU REGISTER SLOTS
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .SAMPLED_TEXTURE => |tex_samp_pair| {
+                        SUB_ROUTINE.process_sample_pair_def(&vars, @intCast(idx), @tagName(def.fragment_shader), tex_samp_pair.tex_name, tex_samp_pair.samp_name, .FRAGMENT);
+                    },
+                    else => {},
+                }
+            }
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .STORAGE_TEXTURE => |tex_name| {
+                        SUB_ROUTINE.process_storage_texture_def(&vars, @intCast(idx), @tagName(def.fragment_shader), tex_name, .FRAGMENT);
+                    },
+                    else => {},
+                }
+            }
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .STORAGE_BUFFER => |buf_name| {
+                        ct_assert_with_reason(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)].usage.has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.fragment_shader) });
+                        SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.fragment_shader), buf_name, .FRAGMENT);
+                    },
+                    else => {},
+                }
+            }
+            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
+            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
+            const MAX_ENUMS = vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))];
+            comptime var unique_enums: [MAX_ENUMS]type = undefined;
+            @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
+            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
+                    },
+                    .STORAGE_BUFFER => |buf_name| {
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
+                    },
+                    else => {},
+                }
+            }
+            unique_enum_starts[idx] = total_unique_enum_sets_len;
+            total_unique_enum_sets_len += unique_enums_len;
+        }
+        unique_enum_starts[_NUM_FRAGMENT_SHADERS] = total_unique_enum_sets_len;
+        break :make .{ defs, unique_enum_starts };
+    };
+    const _FRAGMENT_SHADER_UNIQUE_ENUMS = comptime make: {
+        comptime var all_unique_fragment_enums: [_FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[_NUM_FRAGMENT_SHADERS]]type = undefined;
+        inline for (_FRAGMENT_SHADER_DEFS[0..], 0..) |def, idx| {
+            const start = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx];
+            const end = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
+            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
+            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            comptime var unique_enums = all_unique_fragment_enums[start..end];
+            @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
+            comptime var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
+            SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, OUT.ENUMS[0..]);
+            for (def.resources_to_link) |resource| {
+                switch (resource) {
+                    .UNIFORM_BUFFER => |uniform_name| {
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
+                    },
+                    .STORAGE_BUFFER => |buf_name| {
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
+                    },
+                    else => {},
+                }
             }
         }
-        // NOTABLY, PROCESS STORAGE RESOURCES IN THE ORDER: SAMPLERS -> TEXTURES -> BUFFERS, TO CORRECTLY PROVISION GPU REGISTER SLOTS
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .SAMPLED_TEXTURE => |tex_samp_pair| {
-                    SUB_ROUTINE.process_sample_pair_linkage(&vars, @intCast(frag_idx), @tagName(linkage.fragment_shader), tex_samp_pair.tex_name, tex_samp_pair.samp_name, .FRAGMENT);
-                },
-                else => {},
-            }
-        }
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .STORAGE_TEXTURE => |tex_name| {
-                    SUB_ROUTINE.process_storage_texture_linkage(&vars, @intCast(frag_idx), @tagName(linkage.fragment_shader), tex_name, .FRAGMENT);
-                },
-                else => {},
-            }
-        }
-        for (linkage.resources_to_link) |resource| {
-            switch (resource) {
-                .STORAGE_BUFFER => |buf_name| {
-                    ct_assert_with_reason(ordered_storage_buffer_defs_const[@intFromEnum(buf_name)].usage.has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(linkage.fragment_shader) });
-                    SUB_ROUTINE.process_storage_buffer_linkage(&vars, @intCast(frag_idx), @tagName(linkage.fragment_shader), buf_name, .FRAGMENT);
-                },
-                else => {},
-            }
-        }
-    }
-    const ordered_fragment_shader_definitions_const = ordered_fragment_shader_definitions;
+        break :make all_unique_fragment_enums;
+    };
     // COMPILE A CONDENSED LIST OF ALLOWED UNIFORMS
     comptime var total_num_allowed_uniforms_vert: u32 = 0;
     comptime var total_num_allowed_uniforms_frag: u32 = 0;
@@ -1560,7 +1485,7 @@ pub fn GraphicsController(
         for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_vertex_shaders[v][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .uniform = @enumFromInt(@as(Types.enum_tag_type(GPU_UNIFORM_NAMES_ENUM), @intCast(u))),
+                    .uniform = @enumFromInt(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u))),
                     .register = vars.uniforms_allowed_in_vertex_shaders[v][u].register,
                 };
                 all_allowed_uniforms_flat_vert[idx] = allowed;
@@ -1576,7 +1501,7 @@ pub fn GraphicsController(
         for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_fragment_shaders[f][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .uniform = @enumFromInt(@as(Types.enum_tag_type(GPU_UNIFORM_NAMES_ENUM), @intCast(u))),
+                    .uniform = @enumFromInt(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u))),
                     .register = vars.uniforms_allowed_in_fragment_shaders[f][u].register,
                 };
                 all_allowed_uniforms_flat_frag[idx] = allowed;
@@ -1629,7 +1554,7 @@ pub fn GraphicsController(
         for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_vertex_shaders[v][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@as(Types.enum_tag_type(GPU_STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
+                    .buffer = @enumFromInt(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
                     .cpu_register = vars.storage_buffers_allowed_in_vertex_shaders[v][sb].cpu_register,
                     .gpu_register = vars.storage_buffers_allowed_in_vertex_shaders[v][sb].gpu_register,
                 };
@@ -1646,7 +1571,7 @@ pub fn GraphicsController(
         for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_fragment_shaders[f][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@as(Types.enum_tag_type(GPU_STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
+                    .buffer = @enumFromInt(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
                     .cpu_register = vars.storage_buffers_allowed_in_fragment_shaders[f][sb].cpu_register,
                     .gpu_register = vars.storage_buffers_allowed_in_fragment_shaders[f][sb].gpu_register,
                 };
@@ -1818,14 +1743,8 @@ pub fn GraphicsController(
     const sample_pair_starts_frag_const = sample_pair_starts_frag;
     const all_allowed_sample_pairs_flat_vert_const = all_allowed_sample_pairs_flat_vert;
     const all_allowed_sample_pairs_flat_frag_const = all_allowed_sample_pairs_flat_frag;
-    // COUNT THE TOTAL NUMBER OF AUXILIARY TYPES TO TRACK FOR ALL GPU SHADER PROGRAMS
-    comptime var max_num_shader_enum_types: u32 = 0;
-    comptime var num_enum_types_in_vertex_shaders: [_NUM_VERTEX_SHADERS]u32  = @splat(0);
-    comptime var num_enum_types_in_fragment_shaders: [_NUM_VERTEX_SHADERS]u32  = @splat(0);
-    for (0.._NUM_VERTEX_SHADERS) |v| {
-        for ()
-    }
     // VALIDATE RENDER PIPELINES
+    //CHECKPOINT fix the render pass validations after here
     comptime var total_num_vertex_buffers_to_bind: u32 = 0;
     comptime var total_num_field_mappings: u32 = 0;
     comptime var vertex_buffers_to_bind_start_locs: [_NUM_RENDER_PIPELINES + 1]u32 = undefined;
@@ -1839,13 +1758,13 @@ pub fn GraphicsController(
         const pipe_def = ordered_pipeline_definitions_const[pipe_idx];
         const vert_idx = @intFromEnum(pipe_def.vertex);
         const frag_idx = @intFromEnum(pipe_def.fragment);
-        const vert_def = ordered_vertex_shader_definitions_const[vert_idx];
-        const frag_def = ordered_fragment_shader_definitions_const[frag_idx];
+        const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
+        const frag_def = _FRAGMENT_SHADER_DEFS[frag_idx];
         const vert_struct_in_idx = @intFromEnum(vert_def.input_type);
         const frag_struct_out_idx = @intFromEnum(frag_def.output_type);
         ct_assert_with_reason(vert_def.output_type == frag_def.input_type, @src(), "for render pipeline `{s}` the vertex shader output type `{s}` does not match the fragment shader input type `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), @tagName(pipe_def.fragment) });
-        ct_assert_with_reason(pipe_def.vertex_field_maps.len == ordered_shader_struct_locations_quick_info_const[vert_struct_in_idx].num_locations, @src(), "for render pipeline `{s}` the vertex shader has {d} input loacations, but {d} vertex field mappings", .{ @tagName(pipe_name), ordered_shader_struct_locations_quick_info_const[vert_struct_in_idx].num_locations, pipe_def.vertex_field_maps.len });
-        ct_assert_with_reason(pipe_def.target_info.num_color_targets == ordered_shader_struct_locations_quick_info_const[frag_struct_out_idx].num_locations, @src(), "for render pipeline `{s}` the fragment shader has {d} color targets, but `target_info.num_color_targets` = {d}", .{ @tagName(pipe_name), ordered_shader_struct_locations_quick_info_const[frag_struct_out_idx].num_locations, pipe_def.target_info.num_color_targets });
+        ct_assert_with_reason(pipe_def.vertex_buffers.len == _VERTEX_INPUT_STRUCT_TYPES[vert_struct_in_idx].num_locations, @src(), "for render pipeline `{s}` the vertex shader has {d} input loacations, but {d} vertex field mappings", .{ @tagName(pipe_name), _VERTEX_INPUT_STRUCT_TYPES[vert_struct_in_idx].num_locations, pipe_def.vertex_buffers.len });
+        ct_assert_with_reason(pipe_def.target_info.num_color_targets == _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].num_locations, @src(), "for render pipeline `{s}` the fragment shader has {d} color targets, but `target_info.num_color_targets` = {d}", .{ @tagName(pipe_name), _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].num_locations, pipe_def.target_info.num_color_targets });
         if (VALIDATION.color_texture_non_color_format != .IGNORE and pipe_def.target_info.num_color_targets > 0) {
             ct_assert_with_reason(pipe_def.target_info.color_target_descriptions != null, @src(), "for render pipeline `{s}` `target_info.num_color_targets == {d}` but `target_info.color_target_descriptions == null`", .{ @tagName(pipe_name), pipe_def.target_info.num_color_targets });
             inline for (pipe_def.target_info.color_target_descriptions.?[0..pipe_def.target_info.num_color_targets], 0..) |target, t| {
@@ -1853,7 +1772,7 @@ pub fn GraphicsController(
                 ct_assert_with_reason(target.blend_state.none_invalid_if_option_enabled(), @src(), "for render pipeline `{s}` color target {d}, `blend_state` options are enabled, but have one or more `.INVALID` modes or a blank color write mask", .{ @tagName(pipe_name), t });
             }
         }
-        ct_assert_with_reason(pipe_def.target_info.has_depth_stencil_target == ordered_shader_struct_locations_quick_info_const[frag_struct_out_idx].has_depth_target, @src(), "for render pipeline `{s}` the depth buffer enable setting `{any}` does not match the fragment shader `{s}` depth target state `{any}`", .{ @tagName(pipe_name), pipe_def.target_info.has_depth_stencil_target, @tagName(pipe_def.fragment), ordered_shader_struct_locations_quick_info_const[frag_struct_out_idx].has_depth_target });
+        ct_assert_with_reason(pipe_def.target_info.has_depth_stencil_target == _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].has_depth_target, @src(), "for render pipeline `{s}` the depth buffer enable setting `{any}` does not match the fragment shader `{s}` depth target state `{any}`", .{ @tagName(pipe_name), pipe_def.target_info.has_depth_stencil_target, @tagName(pipe_def.fragment), _VERTEX_INPUT_STRUCT_TYPES[frag_struct_out_idx].has_depth_target });
         if (pipe_def.target_info.has_depth_stencil_target) {
             ct_assert_with_reason(pipe_def.target_info.depth_stencil_format.is_depth_format(), @src(), "for render pipeline `{s}`, `target_info.has_depth_stencil_target == true` but the `target_info.depth_stencil_format` is is not a depth format, got format `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.target_info.depth_stencil_format) });
             ct_assert_with_reason(!pipe_def.depth_stencil_options.enable_depth_test or pipe_def.depth_stencil_options.compare_op != .INVALID, @src(), "for render pipeline `{s}` the depth buffer is enabled as a render target, but options `depth_stencil_options.enable_depth_test == true` while `depth_stencil_options.compare_op == .INVALID`", .{@tagName(pipe_name)});
@@ -1867,7 +1786,7 @@ pub fn GraphicsController(
         }
         vertex_buffers_to_bind_start_locs[pipe_idx] = total_num_vertex_buffers_to_bind;
         vertex_attribute_start_locs[pipe_idx] = total_num_field_mappings;
-        inline for (pipe_def.vertex_field_maps) |field_map| {
+        inline for (pipe_def.vertex_buffers) |field_map| {
             const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
             if (vertex_buffers_for_this_pipeline[vert_buf_idx] == false) {
                 vertex_buffer_count_this_pipeline += 1;
@@ -1880,13 +1799,13 @@ pub fn GraphicsController(
     }
     vertex_buffers_to_bind_start_locs[_NUM_RENDER_PIPELINES] = total_num_vertex_buffers_to_bind;
     vertex_attribute_start_locs[_NUM_RENDER_PIPELINES] = total_num_field_mappings;
-    comptime var vertex_buffer_names_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]GPU_VERTEX_BUFFER_NAMES_ENUM = undefined;
+    comptime var vertex_buffer_names_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]VERTEX_BUFFER_NAMES_ENUM = undefined;
     comptime var vertex_buffers_to_bind_per_render_pipeline: [total_num_vertex_buffers_to_bind]SDL3.GPU_VertexBufferDescription = undefined;
     comptime var vertex_attributes_to_bind_per_render_pipeline: [total_num_field_mappings]SDL3.GPU_VertexAttribute = undefined;
     // SECOND PASS FULL VALIDATION
     inline for (0.._NUM_RENDER_PIPELINES) |pipe_idx| {
         comptime var slots_used: [_NUM_VERT_BUFFERS]u32 = undefined;
-        comptime var buffers_used: [_NUM_VERT_BUFFERS]Types.enum_tag_type(GPU_VERTEX_BUFFER_NAMES_ENUM) = undefined;
+        comptime var buffers_used: [_NUM_VERT_BUFFERS]Types.enum_tag_type(VERTEX_BUFFER_NAMES_ENUM) = undefined;
         comptime var rates_used: [_NUM_VERT_BUFFERS]SDL3.GPU_VertexInputRate = undefined;
         comptime var num_slots_used: u32 = 0;
         comptime var vertex_buffers_for_this_pipeline: [_NUM_VERT_BUFFERS]bool = @splat(false);
@@ -1895,12 +1814,12 @@ pub fn GraphicsController(
         const pipe_name: RENDER_PIPELINE_NAMES_ENUM = @enumFromInt(@as(Types.enum_tag_type(RENDER_PIPELINE_NAMES_ENUM), @intCast(pipe_idx)));
         const pipe_def = ordered_pipeline_definitions_const[pipe_idx];
         const vert_idx = @intFromEnum(pipe_def.vertex);
-        const vert_def = ordered_vertex_shader_definitions_const[vert_idx];
+        const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
         const vert_struct_in: ShaderStructDescription = @field(STRUCT_OF_SHADER_STRUCT_DEFINITIONS, @tagName(vert_def.input_type));
-        const vert_struct_quick_info = ordered_shader_struct_locations_quick_info_const[@intFromEnum(vert_def.input_type)];
+        const vert_struct_quick_info = _VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)];
         comptime var locations_used: [vert_struct_quick_info.num_locations]bool = @splat(false);
         comptime var next_slot_to_check_for_use: u32 = 0;
-        inline for (pipe_def.vertex_field_maps) |field_map| {
+        inline for (pipe_def.vertex_buffers) |field_map| {
             const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
             const vert_buf_info: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, @tagName(field_map.vertex_buffer));
             if (vertex_buffers_for_this_pipeline[vert_buf_idx] == true) {
@@ -1977,7 +1896,7 @@ pub fn GraphicsController(
         inline for (0..num_slots_used) |s| {
             const ss: u32 = @intCast(s);
             const buffer_idx = buffers_used[s];
-            const buffer_name = @as(GPU_VERTEX_BUFFER_NAMES_ENUM, @enumFromInt(buffers_used[s]));
+            const buffer_name = @as(VERTEX_BUFFER_NAMES_ENUM, @enumFromInt(buffers_used[s]));
             const bind = SDL3.GPU_VertexBufferDescription{
                 .input_rate = rates_used[s],
                 .slot = slots_used[s],
@@ -2006,7 +1925,7 @@ pub fn GraphicsController(
         //FIXME complete overhaul of VERTEX ATTRIBUTE BINDINGS: SDL3 has specific requirements/expectation, force the GraphicController
         // to drive the HSLS layout instead of just hoping they work.
         // COMPILE VERTEX ATTRIBUTE BINDINGS TO FINAL ARRAY
-        inline for (pipe_def.vertex_field_maps, 0..) |field_map, f| {
+        inline for (pipe_def.vertex_buffers, 0..) |field_map, f| {
             const ff: u32 = @intCast(f);
             const vert_buf_idx = @intFromEnum(field_map.vertex_buffer);
             const vert_buf_info: VertexBufferDescription = @field(STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS, @tagName(field_map.vertex_buffer));
@@ -4544,10 +4463,10 @@ pub fn GraphicsController(
             pub const NUM_TEXTURES = Types.enum_defined_field_count(TEXTURE_NAMES_ENUM);
             pub const NUM_UPLOAD_TRANSFER_BUFFERS = Types.enum_defined_field_count(UPLOAD_TRANSFER_BUFFER_NAMES_ENUM);
             pub const NUM_DOWNLOAD_TRANSFER_BUFFERS = Types.enum_defined_field_count(DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM);
-            pub const NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(GPU_VERTEX_BUFFER_NAMES_ENUM);
+            pub const NUM_VERTEX_BUFFERS = Types.enum_defined_field_count(VERTEX_BUFFER_NAMES_ENUM);
             pub const NUM_SAMPLERS = Types.enum_defined_field_count(SAMPLER_NAMES_ENUM);
             pub const NUM_VERTEX_STRUCTS = Types.enum_defined_field_count(GPU_SHADER_STRUCT_NAMES_ENUM);
-            pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(GPU_STORAGE_BUFFER_NAMES_ENUM);
+            pub const NUM_STORAGE_BUFFERS = Types.enum_defined_field_count(STORAGE_BUFFER_NAMES_ENUM);
             pub const NUM_FENCES = Types.enum_defined_field_count(FENCE_NAMES_ENUM);
             pub const NUM_INDEX_BUFFERS = Types.enum_defined_field_count(INDEX_BUFFER_NAMES);
             pub const NUM_INDIRECT_BUFFERS = Types.enum_defined_field_count(INDIRECT_BUFFER_NAMES);
@@ -4555,12 +4474,12 @@ pub fn GraphicsController(
             pub const NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
             pub const CREATE_OPTIONS = GPU_OPTIONS;
 
-            pub const UNIFORM_OFFSETS_AND_SIZES = ordered_uniform_offsets_and_sizes_const;
+            pub const UNIFORM_OFFSETS_AND_SIZES = _UNIFORM_TYPES;
 
-            pub const TEXTURE_DEFS = ordered_texture_definitions_const;
-            pub const SAMPLER_DEFS = ordered_sampler_definitions_const;
-            pub const STORAGE_BUFFER_DEFS = ordered_storage_buffer_defs_const;
-            pub const STORAGE_BUFFER_ELEM_SIZES = ordered_storage_buffer_elem_sizes_const;
+            pub const TEXTURE_DEFS = _TEXTURE_DEFS;
+            pub const SAMPLER_DEFS = _SAMPLER_DEFS;
+            pub const STORAGE_BUFFER_DEFS = _STORAGE_BUFFER_TYPES;
+            pub const STORAGE_BUFFER_ELEM_SIZES = _STORAGE_BUFFER_SIZES;
 
             pub const LONGEST_VERTEX_BUFFER_SET = longest_set_of_vertex_buffers_const;
             pub const LONGEST_STORAGE_BUFFER_SET_VERT = longest_storage_buffer_set_vert_const;
@@ -4768,8 +4687,8 @@ pub fn GraphicsController(
                 return null;
             }
 
-            const INDEX_BUFFER_IDX_TYPES = ordered_index_buffer_types_const;
-            const INDEX_BUFFER_IDX_SIZES = ordered_index_buffer_sizes_const;
+            const INDEX_BUFFER_IDX_TYPES = _INDEX_BUFFER_TYPES;
+            const INDEX_BUFFER_IDX_SIZES = _INDEX_BUFFER_SIZES;
         };
 
         pub const WindowName = WINDOW_NAMES_ENUM;
@@ -4778,10 +4697,10 @@ pub fn GraphicsController(
         pub const UploadBufferName = UPLOAD_TRANSFER_BUFFER_NAMES_ENUM;
         pub const DownloadBufferName = DOWNLOAD_TRANSFER_BUFFER_NAMES_ENUM;
         pub const SamplerName = SAMPLER_NAMES_ENUM;
-        pub const VertexBufferName = GPU_VERTEX_BUFFER_NAMES_ENUM;
+        pub const VertexBufferName = VERTEX_BUFFER_NAMES_ENUM;
         pub const VertexStructName = GPU_SHADER_STRUCT_NAMES_ENUM;
-        pub const StorageBufferName = GPU_STORAGE_BUFFER_NAMES_ENUM;
-        pub const UniformName = GPU_UNIFORM_NAMES_ENUM;
+        pub const StorageBufferName = STORAGE_BUFFER_NAMES_ENUM;
+        pub const UniformName = UNIFORM_NAMES_ENUM;
         pub const VertexShaderName = VERTEX_SHADER_NAMES_ENUM;
         pub const FragmentShaderName = FRAGMENT_SHADER_NAMES_ENUM;
         pub const UniformCollection = STRUCT_OF_UNIFORM_STRUCTS;

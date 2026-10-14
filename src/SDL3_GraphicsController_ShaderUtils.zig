@@ -200,7 +200,7 @@ pub fn StorageStructField(comptime FIELDS: type) type {
 /// A struct that is written to a uniform/constant/storage buffer
 ///
 /// Follows `std140` packing rules for SDL cross-compile compatability
-pub fn StorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
+pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
     @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(
         Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS),
@@ -744,15 +744,6 @@ pub fn AnyUniformOrStorageStruct(comptime INNER: type) type {
 pub fn assert_type_is_uniform_or_storage_struct(comptime TYPE: type, comptime src: ?SourceLocation) void {
     assert_with_reason(Types.type_is_struct(TYPE) and @hasDecl(TYPE, "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_UNIFORM_OR_STORAGE_STRUCT"), src, "type `{s}` is not a Goolib SDL UniformOrStorageStruct", .{@typeName(TYPE)});
 }
-
-pub const WriteFormat = enum(u8) {
-    HLSL,
-};
-
-pub const StorageMode = enum(u8) {
-    READ_ONLY,
-    READ_WRITE,
-};
 
 pub const VertexComponentSize = enum(u8) {
     _32_x1 = 1,
@@ -2043,6 +2034,16 @@ pub fn VertexShaderInputStructField(
     };
 }
 
+pub const VERTEX_INPUT_SLOT_GOOLIB_ID = "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_INPUT_STRUCT";
+pub const VERTEX_INPUT_SLOT_GOOLIB_ID_VAL: bool = true;
+
+pub fn SlotPairDef(comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type) type {
+    return struct {
+        slot_index: u32,
+        slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
+    };
+}
+
 pub fn VertexShaderInputStruct(
     comptime NAME: []const u8,
     comptime STRUCT_FIELD_ENUM: type,
@@ -2086,10 +2087,7 @@ pub fn VertexShaderInputStruct(
     }
 
     // 2. Track pairs of (integer buffer slot, slot struct enum name) and validate 1-to-1 consistency
-    const SlotPair = struct {
-        slot_index: u32,
-        slot_name: VERTEX_SHADER_SLOT_STRUCT_ENUM,
-    };
+    const SlotPair = SlotPairDef(VERTEX_SHADER_SLOT_STRUCT_ENUM);
 
     comptime var registered_pairs: [_NUM_FIELDS]SlotPair = undefined;
     comptime var registered_pair_count: usize = 0;
@@ -2761,15 +2759,21 @@ pub fn VertexShaderInputStruct(
     };
 }
 
-pub fn AnyVertexShaderInputStruct(comptime INNER: type) type {
+pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_SHADER_SLOT_STRUCT_ENUM: type) type {
     assert_type_is_vertex_shader_input_struct(INNER, @src());
     return struct {
+        pub const SlotPair = SlotPairDef(VERTEX_SHADER_SLOT_STRUCT_ENUM);
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
         pub const NUM_LOCATIONS = INNER.NUM_LOCATIONS;
         pub const NUM_SLOTS = INNER.NUM_SLOTS;
         pub const NUM_BUFFER_SLOTS = INNER.NUM_BUFFER_SLOTS;
         pub const VertexShaderSlotStructEnum = INNER.VertexShaderSlotStructEnum;
         pub const SlotEnum = INNER.SlotEnum;
+        pub const ACTIVE_SLOT_COUNT: u32 = INNER.NUM_ACTIVE_SLOTS_CONST;
+
+        /// All (slot_index, slot_name) pairs bound by this shader pipeline
+        pub const ACTIVE_SLOT_PAIRS: [ACTIVE_SLOT_COUNT]SlotPair = INNER.ACTIVE_SLOT_PAIRS;
+        pub const ACTIVE_SLOT_TYPES: [ACTIVE_SLOT_COUNT]type = INNER.ACTIVE_SLOT_TYPES;
 
         pub fn SlotType(comptime slot: anytype) type {
             return INNER.SlotType(slot);
@@ -3772,6 +3776,7 @@ pub fn FragmentShaderOutputStruct(
     const target_formats_const = active_target_formats;
 
     return struct {
+        pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_FRAGMENT_OUTPUT_STRUCT: bool = true;
         pub const NUM_FIELDS = _NUM_FIELDS;
         pub const NUM_COLOR_TARGETS: usize = active_targets_count;
         pub const COLOR_TARGET_COUNT: u32 = @intCast(active_targets_count);
@@ -3795,6 +3800,20 @@ pub fn FragmentShaderOutputStruct(
             _ = try writer.write(HLSL_FRAGMENT_STUB[0..]);
         }
     };
+}
+
+pub fn AnyFragmentShaderOutputStruct(comptime INNER: type) type {
+    assert_type_is_fragment_shader_output_struct(INNER, @src());
+    return struct {
+        pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
+        pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            _ = try writer.write(INNER.HLSL_FRAGMENT_STUB[0..]);
+        }
+    };
+}
+
+pub fn assert_type_is_fragment_shader_output_struct(comptime TYPE: type, comptime src: ?SourceLocation) void {
+    assert_with_reason(Types.type_is_struct(TYPE) and @hasDecl(TYPE, "GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_FRAGMENT_OUTPUT_STRUCT"), src, "type `{s}` is not a Goolib SDL FragmentShaderOutputStruct", .{@typeName(TYPE)});
 }
 
 fn write_unpack_expr(
@@ -3885,7 +3904,7 @@ test "SDL_GraphicsController_TypeUtils => Uniform Layout/Stubs" {
         SPRITE,
         TEXT,
     };
-    const MyUniform = StorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const MyUniform = UniformOrStorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U.new(.world_pos, GPU_f32_3),
         U.new(.main_color, GPU_u32),
         U.new(.secondary_color, GPU_u32),
@@ -3916,7 +3935,7 @@ test "SDL_GraphicsController_TypeUtils => Uniform Layout/Stubs" {
         scalar_6,
     };
     const U2 = StorageStructField(F2);
-    const MyUniform2 = StorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const MyUniform2 = UniformOrStorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U2.new(.scalar_1, GPU_f32),
         U2.new(.scalar_2, GPU_f32),
         U2.new(.scalar_3, GPU_f32_2),
@@ -3952,7 +3971,7 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
         SPRITE,
         TEXT,
     };
-    const MyStruct = StorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const MyStruct = UniformOrStorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U.new(.world_pos, GPU_f32_3),
         U.new(.main_color, GPU_u32),
         U.new(.secondary_color, GPU_u32),
@@ -3981,7 +4000,7 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
         scalar_6,
     };
     const U2 = StorageStructField(F2);
-    const MyStruct2 = StorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
+    const MyStruct2 = UniformOrStorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
         U2.new(.scalar_1, GPU_f32),
         U2.new(.scalar_2, GPU_f32),
         U2.new(.scalar_3, GPU_f32_2),
