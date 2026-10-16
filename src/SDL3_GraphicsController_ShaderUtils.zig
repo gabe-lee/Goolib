@@ -184,14 +184,17 @@ pub const IncludeLayoutInStub = enum(u8) {
 /// A struct field within a `StorageStruct(FIELDS)`
 ///
 /// Follows `std140` packing rules
-pub fn StorageStructField(comptime FIELDS: type) type {
+pub fn UniformOrStorageStructField(comptime FIELDS: type) type {
     return struct {
         const Self = @This();
 
         field: FIELDS,
         gpu_type: GPUType,
 
-        pub fn new(comptime field: FIELDS, comptime gpu_type: GPUType) Self {
+        pub fn uniform_field(comptime field: FIELDS, comptime gpu_type: GPUType) Self {
+            return Self{ .field = field, .gpu_type = gpu_type };
+        }
+        pub fn storage_struct_field(comptime field: FIELDS, comptime gpu_type: GPUType) Self {
             return Self{ .field = field, .gpu_type = gpu_type };
         }
     };
@@ -200,7 +203,7 @@ pub fn StorageStructField(comptime FIELDS: type) type {
 /// A struct that is written to a uniform/constant/storage buffer
 ///
 /// Follows `std140` packing rules for SDL cross-compile compatability
-pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const StorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
+pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: IncludeLayoutInStub, comptime fields: []const UniformOrStorageStructField(FIELDS), comptime EVAL_QUOTA: comptime_int) type {
     @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(
         Types.type_is_enum(FIELDS) and Types.all_enum_values_start_from_zero_with_no_gaps(FIELDS),
@@ -217,7 +220,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
         .{ _NUM_FIELDS, fields.len },
     );
 
-    const _Field = StorageStructField(FIELDS);
+    const _Field = UniformOrStorageStructField(FIELDS);
     const _LAYOUT = INCLUDE_LAYOUT == .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB;
 
     comptime var _fields: [_NUM_FIELDS]_Field = undefined;
@@ -496,29 +499,31 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
     comptime var hlsl_stub_inner: [HLSL_STUB_INNER_MAX_LEN]u8 = undefined;
     comptime var pad_idx: usize = 0;
     comptime var comptime_writer = QuickWriter.writer(hlsl_stub_inner[0..]);
-    _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
 
     @setEvalBranchQuota(2000);
     for (all_slots[0..]) |slot| {
         switch (slot) {
             .FIELD => |fidx| {
                 const fenum: FIELDS = @enumFromInt(fidx);
-                const n1 = comptime_writer.write(@tagName(field_hlsl_names[fidx])) catch |err| assert_comptime_write_failure(@src(), err);
+                const n1 = @tagName(field_hlsl_names[fidx]).len;
+                comptime_writer.writeAll(@tagName(field_hlsl_names[fidx])) catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.writeByte(SPACE) catch |err| assert_comptime_write_failure(@src(), err);
-                const n2 = comptime_writer.write(@tagName(fenum)) catch |err| assert_comptime_write_failure(@src(), err);
+                const n2 = @tagName(fenum).len;
+                comptime_writer.writeAll(@tagName(fenum)) catch |err| assert_comptime_write_failure(@src(), err);
                 if (_LAYOUT) {
                     const comment_space = longest_field_name_plus_type - (n1 + n2 + 1);
-                    _ = comptime_writer.write(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                     for (0..comment_space) |_| {
                         comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
                     }
-                    _ = comptime_writer.write(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                     comptime_writer.printInt(field_locations[fidx], 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                     comptime_writer.printInt(field_sizes[fidx], 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                 } else {
-                    _ = comptime_writer.write(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                 }
             },
             .PAD => |span| {
@@ -538,22 +543,24 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
                         const this_size: math.Log2Int(usize) = @min(this_size_align, this_size_span);
                         assert_with_reason(this_size < PadSize.COUNT, @src(), "somehow `this_size` ({d}) is >= {d} (should not be possible)", .{ this_size, PadSize.COUNT });
                         const this_bytes = @as(usize, 1) << this_size;
-                        const n1 = comptime_writer.write(@tagName(HLSL_PAD_TYPES[this_size])) catch |err| assert_comptime_write_failure(@src(), err);
-                        const n2 = comptime_writer.write(SPACE_PAD_PREFIX) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n1 = @tagName(HLSL_PAD_TYPES[this_size]).len;
+                        comptime_writer.writeAll(@tagName(HLSL_PAD_TYPES[this_size])) catch |err| assert_comptime_write_failure(@src(), err);
+                        const n2 = SPACE_PAD_PREFIX.len;
+                        comptime_writer.writeAll(SPACE_PAD_PREFIX) catch |err| assert_comptime_write_failure(@src(), err);
                         comptime_writer.printInt(pad_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
                         if (_LAYOUT) {
                             const comment_space = longest_field_name_plus_type - (n1 + n2 + 1);
-                            _ = comptime_writer.write(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.writeAll(SEMICOL_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                             for (0..comment_space) |_| {
                                 comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
                             }
-                            _ = comptime_writer.write(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.writeAll(COMMENT_OFF_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                             comptime_writer.printInt(curr_offset, 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
-                            _ = comptime_writer.write(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.writeAll(SPACE_SIZE_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                             comptime_writer.printInt(this_bytes, 10, .lower, .{ .alignment = .right, .width = 4 }) catch |err| assert_comptime_write_failure(@src(), err);
-                            _ = comptime_writer.write(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.writeAll(NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                         } else {
-                            _ = comptime_writer.write(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
+                            _ = comptime_writer.writeAll(SEMICOL_NEWLINE_4_SPACE) catch |err| assert_comptime_write_failure(@src(), err);
                         }
                         curr_offset += this_bytes;
                         this_pad_rem -= this_bytes;
@@ -674,56 +681,56 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
         }
 
         pub fn write_hlsl_uniform_stub(struct_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_CBUFFER_SPACE);
-            _ = try writer.write(struct_name);
-            _ = try writer.write(SPACE_COLON_SPACE_REGISTER);
+            _ = try writer.writeAll(HLSL_CBUFFER_SPACE);
+            _ = try writer.writeAll(struct_name);
+            _ = try writer.writeAll(SPACE_COLON_SPACE_REGISTER);
             try writer.writeByte(HLSL_UNIFORM_REGISTER);
             try writer.printInt(resgister_num, 10, .lower, .{});
-            _ = try writer.write(COMMA_SPACE_HLSL_LAYER);
+            _ = try writer.writeAll(COMMA_SPACE_HLSL_LAYER);
             try writer.printInt(space_num, 10, .lower, .{});
-            _ = try writer.write(CLOSE_PAREN_SPACE_OPEN_BRACKET_NEWLINE);
+            _ = try writer.writeAll(CLOSE_PAREN_SPACE_OPEN_BRACKET_NEWLINE);
             if (_LAYOUT) {
-                _ = try writer.write(COMMENT_TOTAL_SIZE);
+                _ = try writer.writeAll(COMMENT_TOTAL_SIZE);
                 try writer.printInt(BYTES, 10, .lower, .{});
-                _ = try writer.write(USED_SIZE);
+                _ = try writer.writeAll(USED_SIZE);
                 try writer.printInt(USED_BYTES, 10, .lower, .{});
-                _ = try writer.write(WASTE_SIZE);
+                _ = try writer.writeAll(WASTE_SIZE);
                 try writer.printInt(WASTE_BYTES, 10, .lower, .{});
-                _ = try writer.write(PAREN_PERCENT);
+                _ = try writer.writeAll(PAREN_PERCENT);
                 try writer.printFloat(WASTE_PERCENT, .{ .precision = 2, .width = 5 });
-                _ = try writer.write(CLOSE_PAREN_NEWLINE);
+                _ = try writer.writeAll(CLOSE_PAREN_NEWLINE);
             }
-            _ = try writer.write(HLSL_STUB_INNER[0..]);
-            _ = try writer.write(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
+            _ = try writer.writeAll(HLSL_STUB_INNER[0..]);
+            _ = try writer.writeAll(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
         }
 
         pub fn write_hlsl_storage_buffer_stub(struct_name: []const u8, buffer_name: []const u8, resgister_num: usize, space_num: usize, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(STRUCT_SPACE);
-            _ = try writer.write(struct_name);
-            _ = try writer.write(SPACE_OPEN_BRACKET_NEWLINE);
+            _ = try writer.writeAll(STRUCT_SPACE);
+            _ = try writer.writeAll(struct_name);
+            _ = try writer.writeAll(SPACE_OPEN_BRACKET_NEWLINE);
             if (_LAYOUT) {
-                _ = try writer.write(COMMENT_TOTAL_SIZE);
+                _ = try writer.writeAll(COMMENT_TOTAL_SIZE);
                 try writer.printInt(BYTES, 10, .lower, .{});
-                _ = try writer.write(USED_SIZE);
+                _ = try writer.writeAll(USED_SIZE);
                 try writer.printInt(USED_BYTES, 10, .lower, .{});
-                _ = try writer.write(WASTE_SIZE);
+                _ = try writer.writeAll(WASTE_SIZE);
                 try writer.printInt(WASTE_BYTES, 10, .lower, .{});
-                _ = try writer.write(PAREN_PERCENT);
+                _ = try writer.writeAll(PAREN_PERCENT);
                 try writer.printFloat(WASTE_PERCENT, .{ .precision = 2, .width = 5 });
-                _ = try writer.write(CLOSE_PAREN_NEWLINE);
+                _ = try writer.writeAll(CLOSE_PAREN_NEWLINE);
             }
-            _ = try writer.write(HLSL_STUB_INNER[0..]);
-            _ = try writer.write(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
-            _ = try writer.write(HLSL_STRUCTURED_BUFFER);
-            _ = try writer.write(struct_name);
-            _ = try writer.write(CLOSE_ANGLE_BRACKET_SPACE);
-            _ = try writer.write(buffer_name);
-            _ = try writer.write(SPACE_COLON_SPACE_REGISTER);
+            _ = try writer.writeAll(HLSL_STUB_INNER[0..]);
+            _ = try writer.writeAll(NEWLINE_CLOSE_BRACKET_SEMICOL_NEWLINE);
+            _ = try writer.writeAll(HLSL_STRUCTURED_BUFFER);
+            _ = try writer.writeAll(struct_name);
+            _ = try writer.writeAll(CLOSE_ANGLE_BRACKET_SPACE);
+            _ = try writer.writeAll(buffer_name);
+            _ = try writer.writeAll(SPACE_COLON_SPACE_REGISTER);
             try writer.writeByte(HLSL_TEXTURE_REGISTER);
             try writer.printInt(resgister_num, 10, .lower, .{});
-            _ = try writer.write(COMMA_SPACE_HLSL_LAYER);
+            _ = try writer.writeAll(COMMA_SPACE_HLSL_LAYER);
             try writer.printInt(space_num, 10, .lower, .{});
-            _ = try writer.write(CLOSE_PAREN_SEMICOL_NEWLINE);
+            _ = try writer.writeAll(CLOSE_PAREN_SEMICOL_NEWLINE);
         }
     };
 }
@@ -923,6 +930,304 @@ pub const GPUType = struct {
 
     pub fn cpu_align(self: GPUType) comptime_int {
         return @alignOf(self.cpu_type);
+    }
+
+    // SCALARS
+    pub const GPU_bool = GPUType{
+        .cpu_type = Bool32,
+        .sdl_format = .U32_x1,
+        .hlsl_name = HLSL_NAME.bool,
+    };
+    pub const GPU_f32 = GPUType{
+        .cpu_type = f32,
+        .sdl_format = .F32_x1,
+        .hlsl_name = HLSL_NAME.float,
+    };
+    pub const GPU_u32 = GPUType{
+        .cpu_type = u32,
+        .sdl_format = .U32_x1,
+        .hlsl_name = HLSL_NAME.uint,
+    };
+    pub const GPU_i32 = GPUType{
+        .cpu_type = i32,
+        .sdl_format = .I32_x1,
+        .hlsl_name = HLSL_NAME.int,
+    };
+
+    // 2D VECTORS
+    pub const GPU_f32_2 = GPUType{
+        .cpu_type = define_vec2_type(f32),
+        .sdl_format = .F32_x2,
+        .hlsl_name = HLSL_NAME.float2,
+    };
+    pub const GPU_u32_2 = GPUType{
+        .cpu_type = define_vec2_type(u32),
+        .sdl_format = .U32_x2,
+        .hlsl_name = HLSL_NAME.uint2,
+    };
+    pub const GPU_i32_2 = GPUType{
+        .cpu_type = define_vec2_type(i32),
+        .sdl_format = .I32_x2,
+        .hlsl_name = HLSL_NAME.int2,
+    };
+
+    // 3D VECTORS
+    pub const GPU_f32_3 = GPUType{
+        .cpu_type = define_vec3_type(f32),
+        .sdl_format = .F32_x3,
+        .hlsl_name = HLSL_NAME.float3,
+    };
+    pub const GPU_u32_3 = GPUType{
+        .cpu_type = define_vec3_type(u32),
+        .sdl_format = .U32_x3,
+        .hlsl_name = HLSL_NAME.uint3,
+    };
+    pub const GPU_i32_3 = GPUType{
+        .cpu_type = define_vec3_type(i32),
+        .sdl_format = .I32_x3,
+        .hlsl_name = HLSL_NAME.int3,
+    };
+
+    // 4D VECTORS
+    pub const GPU_f32_4 = GPUType{
+        .cpu_type = define_vec4_type(f32),
+        .sdl_format = .F32_x4,
+        .hlsl_name = HLSL_NAME.float4,
+    };
+    pub const GPU_u32_4 = GPUType{
+        .cpu_type = define_vec4_type(u32),
+        .sdl_format = .U32_x4,
+        .hlsl_name = HLSL_NAME.uint4,
+    };
+    pub const GPU_i32_4 = GPUType{
+        .cpu_type = define_vec4_type(i32),
+        .sdl_format = .I32_x4,
+        .hlsl_name = HLSL_NAME.int4,
+    };
+
+    // MATRICES
+    // -- 1x1
+    pub const GPU_f32_1x1 = GPU_f32;
+    pub const GPU_u32_1x1 = GPU_u32;
+    pub const GPU_i32_1x1 = GPU_i32;
+    // ---- 2x1
+    pub const GPU_f32_2x1 = GPU_f32_2;
+    pub const GPU_u32_2x1 = GPU_u32_2;
+    pub const GPU_i32_2x1 = GPU_i32_2;
+    // ---- 3x1
+    pub const GPU_f32_3x1 = GPU_f32_3;
+    pub const GPU_u32_3x1 = GPU_u32_3;
+    pub const GPU_i32_3x1 = GPU_i32_3;
+    // ---- 4x1
+    pub const GPU_f32_4x1 = GPU_f32_4;
+    pub const GPU_u32_4x1 = GPU_u32_4;
+    pub const GPU_i32_4x1 = GPU_i32_4;
+    // ---- 1x2
+    pub const GPU_f32_1x2 = GPUType{
+        .cpu_type = define_matx_type(f32, 1, 2, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.float1x2,
+    };
+    pub const GPU_u32_1x2 = GPUType{
+        .cpu_type = define_matx_type(u32, 1, 2, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.uint1x2,
+    };
+    pub const GPU_i32_1x2 = GPUType{
+        .cpu_type = define_matx_type(i32, 1, 2, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.int1x2,
+    };
+    // ---- 2x2
+    pub const GPU_f32_2x2 = GPUType{
+        .cpu_type = define_matx_type(f32, 2, 2, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.float2x2,
+    };
+    pub const GPU_u32_2x2 = GPUType{
+        .cpu_type = define_matx_type(u32, 2, 2, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.uint2x2,
+    };
+    pub const GPU_i32_2x2 = GPUType{
+        .cpu_type = define_matx_type(i32, 2, 2, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.int2x2,
+    };
+    // ---- 3x2
+    pub const GPU_f32_3x2 = GPUType{
+        .cpu_type = define_matx_type(f32, 3, 2, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.float3x2,
+    };
+    pub const GPU_u32_3x2 = GPUType{
+        .cpu_type = define_matx_type(u32, 3, 2, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.uint3x2,
+    };
+    pub const GPU_i32_3x2 = GPUType{
+        .cpu_type = define_matx_type(i32, 3, 2, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.int3x2,
+    };
+    // ---- 4x2
+    pub const GPU_f32_4x2 = GPUType{
+        .cpu_type = define_matx_type(f32, 4, 2, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.float4x2,
+    };
+    pub const GPU_u32_4x2 = GPUType{
+        .cpu_type = define_matx_type(u32, 4, 2, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.uint4x2,
+    };
+    pub const GPU_i32_4x2 = GPUType{
+        .cpu_type = define_matx_type(i32, 4, 2, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.int4x2,
+    };
+    // ---- 1x3
+    pub const GPU_f32_1x3 = GPUType{
+        .cpu_type = define_matx_type(f32, 1, 3, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.float1x3,
+    };
+    pub const GPU_u32_1x3 = GPUType{
+        .cpu_type = define_matx_type(u32, 1, 3, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.uint1x3,
+    };
+    pub const GPU_i32_1x3 = GPUType{
+        .cpu_type = define_matx_type(i32, 1, 3, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.int1x3,
+    };
+    // ---- 2x3
+    pub const GPU_f32_2x3 = GPUType{
+        .cpu_type = define_matx_type(f32, 2, 3, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.float2x3,
+    };
+    pub const GPU_u32_2x3 = GPUType{
+        .cpu_type = define_matx_type(u32, 2, 3, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.uint2x3,
+    };
+    pub const GPU_i32_2x3 = GPUType{
+        .cpu_type = define_matx_type(i32, 2, 3, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.int2x3,
+    };
+    // ---- 3x3
+    pub const GPU_f32_3x3 = GPUType{
+        .cpu_type = define_matx_type(f32, 3, 3, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.float3x3,
+    };
+    pub const GPU_u32_3x3 = GPUType{
+        .cpu_type = define_matx_type(u32, 3, 3, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.uint3x3,
+    };
+    pub const GPU_i32_3x3 = GPUType{
+        .cpu_type = define_matx_type(i32, 3, 3, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.int3x3,
+    };
+    // ---- 4x3
+    pub const GPU_f32_4x3 = GPUType{
+        .cpu_type = define_matx_type(f32, 4, 3, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.float4x3,
+    };
+    pub const GPU_u32_4x3 = GPUType{
+        .cpu_type = define_matx_type(u32, 4, 3, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.uint4x3,
+    };
+    pub const GPU_i32_4x3 = GPUType{
+        .cpu_type = define_matx_type(i32, 4, 3, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.int4x3,
+    };
+    // ---- 1x4
+    pub const GPU_f32_1x4 = GPUType{
+        .cpu_type = define_matx_type(f32, 1, 4, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.float1x4,
+    };
+    pub const GPU_u32_1x4 = GPUType{
+        .cpu_type = define_matx_type(u32, 1, 4, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.uint1x4,
+    };
+    pub const GPU_i32_1x4 = GPUType{
+        .cpu_type = define_matx_type(i32, 1, 4, .COLUMN_MAJOR, 3),
+        .hlsl_name = HLSL_NAME.int1x4,
+    };
+    // ---- 2x4
+    pub const GPU_f32_2x4 = GPUType{
+        .cpu_type = define_matx_type(f32, 2, 4, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.float2x4,
+    };
+    pub const GPU_u32_2x4 = GPUType{
+        .cpu_type = define_matx_type(u32, 2, 4, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.uint2x4,
+    };
+    pub const GPU_i32_2x4 = GPUType{
+        .cpu_type = define_matx_type(i32, 2, 4, .COLUMN_MAJOR, 2),
+        .hlsl_name = HLSL_NAME.int2x4,
+    };
+    // ---- 3x4
+    pub const GPU_f32_3x4 = GPUType{
+        .cpu_type = define_matx_type(f32, 3, 4, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.float3x4,
+    };
+    pub const GPU_u32_3x4 = GPUType{
+        .cpu_type = define_matx_type(u32, 3, 4, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.uint3x4,
+    };
+    pub const GPU_i32_3x4 = GPUType{
+        .cpu_type = define_matx_type(i32, 3, 4, .COLUMN_MAJOR, 1),
+        .hlsl_name = HLSL_NAME.int3x4,
+    };
+    // ---- 4x4
+    pub const GPU_f32_4x4 = GPUType{
+        .cpu_type = define_matx_type(f32, 4, 4, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.float4x4,
+    };
+    pub const GPU_u32_4x4 = GPUType{
+        .cpu_type = define_matx_type(u32, 4, 4, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.uint4x4,
+    };
+    pub const GPU_i32_4x4 = GPUType{
+        .cpu_type = define_matx_type(i32, 4, 4, .COLUMN_MAJOR, 0),
+        .hlsl_name = HLSL_NAME.int4x4,
+    };
+
+    // PACKED
+    // -- 4 bytes
+    pub const GPU_u8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(u8), .U8_x4);
+    pub const GPU_i8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(i8), .I8_x4);
+    pub const GPU_bool_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(bool), .U8_x4);
+    pub const GPU_f16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(f16), .F16_x2);
+    pub const GPU_u16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(u16), .U16_x2);
+    pub const GPU_i16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(i16), .I16_x2);
+    // -- 8 bytes
+    pub const GPU_u8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u8, .U32_x2);
+    pub const GPU_i8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i8, .U32_x2);
+    pub const GPU_bool_8 = GPU_u32_2.with_cpu_and_sdl_type([8]bool, .U32_x2);
+    pub const GPU_f16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(f16), .F16_x4);
+    pub const GPU_u16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(u16), .U16_x4);
+    pub const GPU_i16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(i16), .I16_x4);
+    pub const GPU_f64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(f64, .U32_x2, 8);
+    pub const GPU_u64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(u64, .U32_x2, 8);
+    pub const GPU_i64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(i64, .U32_x2, 8);
+    // -- 16 bytes
+    pub const GPU_u8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]u8, .U32_x4);
+    pub const GPU_i8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]i8, .U32_x4);
+    pub const GPU_bool_16 = GPU_u32_2.with_cpu_and_sdl_type([16]bool, .U32_x4);
+    pub const GPU_f16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]f16, .U32_x4);
+    pub const GPU_u16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u16, .U32_x4);
+    pub const GPU_i16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i16, .U32_x4);
+    pub const GPU_f64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(f64), .U32_x4, 8);
+    pub const GPU_u64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(u64), .U32_x4, 8);
+    pub const GPU_i64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(i64), .U32_x4, 8);
+
+    // SPECIAL
+    pub fn GPU_enum32(comptime ENUM_TYPE: type) GPUType {
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
+        return GPU_u32.with_cpu_type(ENUM_TYPE);
+    }
+    pub fn GPU_enum16_2(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime STRUCT: type) GPUType {
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u16, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u16, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
+        assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2 }), @src(), "type `STRUCT` must have exactly 1 field with type `ENUM_TYPE_1` (`{s}`) and exactly 1 field with type `ENUM_TYPE_2` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(STRUCT) });
+        assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 2, @src(), "type `STRUCT` must have size = 4 and align = 2, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
+        return GPU_u16_2.with_cpu_type(STRUCT);
+    }
+    pub fn GPU_enum8_4(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime ENUM_TYPE_3: type, comptime ENUM_TYPE_4: type, comptime STRUCT: type) GPUType {
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u8, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u8, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_3) and Types.enum_tag_type(ENUM_TYPE_3) == u8, @src(), "type `ENUM_TYPE_3` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_3)});
+        assert_with_reason(Types.type_is_enum(ENUM_TYPE_4) and Types.enum_tag_type(ENUM_TYPE_4) == u8, @src(), "type `ENUM_TYPE_4` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_4)});
+        assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2, ENUM_TYPE_3, ENUM_TYPE_4 }), @src(), "type `STRUCT` must have exactly 1 field with each type `ENUM_TYPE_1` (`{s}`), `ENUM_TYPE_2` (`{s}`), `ENUM_TYPE_3` (`{s}`), and `ENUM_TYPE_4` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(ENUM_TYPE_3), @typeName(ENUM_TYPE_4), @typeName(STRUCT) });
+        assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 1, @src(), "type `STRUCT` must have size = 4 and align = 1, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
+        return GPU_u8_4.with_cpu_type(STRUCT);
     }
 };
 
@@ -1319,322 +1624,24 @@ fn pack_vertex_locations(comptime input_types: []const GPUType) PackedVertexLayo
     return result;
 }
 
-// SCALARS
-pub const GPU_bool = GPUType{
-    .cpu_type = Bool32,
-    .sdl_format = .U32_x1,
-    .hlsl_name = HLSL_NAME.bool,
-};
-pub const GPU_f32 = GPUType{
-    .cpu_type = f32,
-    .sdl_format = .F32_x1,
-    .hlsl_name = HLSL_NAME.float,
-};
-pub const GPU_u32 = GPUType{
-    .cpu_type = u32,
-    .sdl_format = .U32_x1,
-    .hlsl_name = HLSL_NAME.uint,
-};
-pub const GPU_i32 = GPUType{
-    .cpu_type = i32,
-    .sdl_format = .I32_x1,
-    .hlsl_name = HLSL_NAME.int,
-};
-
-// 2D VECTORS
-pub const GPU_f32_2 = GPUType{
-    .cpu_type = define_vec2_type(f32),
-    .sdl_format = .F32_x2,
-    .hlsl_name = HLSL_NAME.float2,
-};
-pub const GPU_u32_2 = GPUType{
-    .cpu_type = define_vec2_type(u32),
-    .sdl_format = .U32_x2,
-    .hlsl_name = HLSL_NAME.uint2,
-};
-pub const GPU_i32_2 = GPUType{
-    .cpu_type = define_vec2_type(i32),
-    .sdl_format = .I32_x2,
-    .hlsl_name = HLSL_NAME.int2,
-};
-
-// 3D VECTORS
-pub const GPU_f32_3 = GPUType{
-    .cpu_type = define_vec3_type(f32),
-    .sdl_format = .F32_x3,
-    .hlsl_name = HLSL_NAME.float3,
-};
-pub const GPU_u32_3 = GPUType{
-    .cpu_type = define_vec3_type(u32),
-    .sdl_format = .U32_x3,
-    .hlsl_name = HLSL_NAME.uint3,
-};
-pub const GPU_i32_3 = GPUType{
-    .cpu_type = define_vec3_type(i32),
-    .sdl_format = .I32_x3,
-    .hlsl_name = HLSL_NAME.int3,
-};
-
-// 4D VECTORS
-pub const GPU_f32_4 = GPUType{
-    .cpu_type = define_vec4_type(f32),
-    .sdl_format = .F32_x4,
-    .hlsl_name = HLSL_NAME.float4,
-};
-pub const GPU_u32_4 = GPUType{
-    .cpu_type = define_vec4_type(u32),
-    .sdl_format = .U32_x4,
-    .hlsl_name = HLSL_NAME.uint4,
-};
-pub const GPU_i32_4 = GPUType{
-    .cpu_type = define_vec4_type(i32),
-    .sdl_format = .I32_x4,
-    .hlsl_name = HLSL_NAME.int4,
-};
-
-// MATRICES
-// -- 1x1
-pub const GPU_f32_1x1 = GPU_f32;
-pub const GPU_u32_1x1 = GPU_u32;
-pub const GPU_i32_1x1 = GPU_i32;
-// ---- 2x1
-pub const GPU_f32_2x1 = GPU_f32_2;
-pub const GPU_u32_2x1 = GPU_u32_2;
-pub const GPU_i32_2x1 = GPU_i32_2;
-// ---- 3x1
-pub const GPU_f32_3x1 = GPU_f32_3;
-pub const GPU_u32_3x1 = GPU_u32_3;
-pub const GPU_i32_3x1 = GPU_i32_3;
-// ---- 4x1
-pub const GPU_f32_4x1 = GPU_f32_4;
-pub const GPU_u32_4x1 = GPU_u32_4;
-pub const GPU_i32_4x1 = GPU_i32_4;
-// ---- 1x2
-pub const GPU_f32_1x2 = GPUType{
-    .cpu_type = define_matx_type(f32, 1, 2, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.float1x2,
-};
-pub const GPU_u32_1x2 = GPUType{
-    .cpu_type = define_matx_type(u32, 1, 2, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.uint1x2,
-};
-pub const GPU_i32_1x2 = GPUType{
-    .cpu_type = define_matx_type(i32, 1, 2, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.int1x2,
-};
-// ---- 2x2
-pub const GPU_f32_2x2 = GPUType{
-    .cpu_type = define_matx_type(f32, 2, 2, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.float2x2,
-};
-pub const GPU_u32_2x2 = GPUType{
-    .cpu_type = define_matx_type(u32, 2, 2, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.uint2x2,
-};
-pub const GPU_i32_2x2 = GPUType{
-    .cpu_type = define_matx_type(i32, 2, 2, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.int2x2,
-};
-// ---- 3x2
-pub const GPU_f32_3x2 = GPUType{
-    .cpu_type = define_matx_type(f32, 3, 2, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.float3x2,
-};
-pub const GPU_u32_3x2 = GPUType{
-    .cpu_type = define_matx_type(u32, 3, 2, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.uint3x2,
-};
-pub const GPU_i32_3x2 = GPUType{
-    .cpu_type = define_matx_type(i32, 3, 2, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.int3x2,
-};
-// ---- 4x2
-pub const GPU_f32_4x2 = GPUType{
-    .cpu_type = define_matx_type(f32, 4, 2, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.float4x2,
-};
-pub const GPU_u32_4x2 = GPUType{
-    .cpu_type = define_matx_type(u32, 4, 2, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.uint4x2,
-};
-pub const GPU_i32_4x2 = GPUType{
-    .cpu_type = define_matx_type(i32, 4, 2, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.int4x2,
-};
-// ---- 1x3
-pub const GPU_f32_1x3 = GPUType{
-    .cpu_type = define_matx_type(f32, 1, 3, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.float1x3,
-};
-pub const GPU_u32_1x3 = GPUType{
-    .cpu_type = define_matx_type(u32, 1, 3, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.uint1x3,
-};
-pub const GPU_i32_1x3 = GPUType{
-    .cpu_type = define_matx_type(i32, 1, 3, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.int1x3,
-};
-// ---- 2x3
-pub const GPU_f32_2x3 = GPUType{
-    .cpu_type = define_matx_type(f32, 2, 3, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.float2x3,
-};
-pub const GPU_u32_2x3 = GPUType{
-    .cpu_type = define_matx_type(u32, 2, 3, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.uint2x3,
-};
-pub const GPU_i32_2x3 = GPUType{
-    .cpu_type = define_matx_type(i32, 2, 3, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.int2x3,
-};
-// ---- 3x3
-pub const GPU_f32_3x3 = GPUType{
-    .cpu_type = define_matx_type(f32, 3, 3, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.float3x3,
-};
-pub const GPU_u32_3x3 = GPUType{
-    .cpu_type = define_matx_type(u32, 3, 3, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.uint3x3,
-};
-pub const GPU_i32_3x3 = GPUType{
-    .cpu_type = define_matx_type(i32, 3, 3, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.int3x3,
-};
-// ---- 4x3
-pub const GPU_f32_4x3 = GPUType{
-    .cpu_type = define_matx_type(f32, 4, 3, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.float4x3,
-};
-pub const GPU_u32_4x3 = GPUType{
-    .cpu_type = define_matx_type(u32, 4, 3, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.uint4x3,
-};
-pub const GPU_i32_4x3 = GPUType{
-    .cpu_type = define_matx_type(i32, 4, 3, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.int4x3,
-};
-// ---- 1x4
-pub const GPU_f32_1x4 = GPUType{
-    .cpu_type = define_matx_type(f32, 1, 4, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.float1x4,
-};
-pub const GPU_u32_1x4 = GPUType{
-    .cpu_type = define_matx_type(u32, 1, 4, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.uint1x4,
-};
-pub const GPU_i32_1x4 = GPUType{
-    .cpu_type = define_matx_type(i32, 1, 4, .COLUMN_MAJOR, 3),
-    .hlsl_name = HLSL_NAME.int1x4,
-};
-// ---- 2x4
-pub const GPU_f32_2x4 = GPUType{
-    .cpu_type = define_matx_type(f32, 2, 4, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.float2x4,
-};
-pub const GPU_u32_2x4 = GPUType{
-    .cpu_type = define_matx_type(u32, 2, 4, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.uint2x4,
-};
-pub const GPU_i32_2x4 = GPUType{
-    .cpu_type = define_matx_type(i32, 2, 4, .COLUMN_MAJOR, 2),
-    .hlsl_name = HLSL_NAME.int2x4,
-};
-// ---- 3x4
-pub const GPU_f32_3x4 = GPUType{
-    .cpu_type = define_matx_type(f32, 3, 4, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.float3x4,
-};
-pub const GPU_u32_3x4 = GPUType{
-    .cpu_type = define_matx_type(u32, 3, 4, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.uint3x4,
-};
-pub const GPU_i32_3x4 = GPUType{
-    .cpu_type = define_matx_type(i32, 3, 4, .COLUMN_MAJOR, 1),
-    .hlsl_name = HLSL_NAME.int3x4,
-};
-// ---- 4x4
-pub const GPU_f32_4x4 = GPUType{
-    .cpu_type = define_matx_type(f32, 4, 4, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.float4x4,
-};
-pub const GPU_u32_4x4 = GPUType{
-    .cpu_type = define_matx_type(u32, 4, 4, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.uint4x4,
-};
-pub const GPU_i32_4x4 = GPUType{
-    .cpu_type = define_matx_type(i32, 4, 4, .COLUMN_MAJOR, 0),
-    .hlsl_name = HLSL_NAME.int4x4,
-};
-
-// PACKED
-// -- 4 bytes
-pub const GPU_u8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(u8), .U8_x4);
-pub const GPU_i8_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(i8), .I8_x4);
-pub const GPU_bool_4 = GPU_u32.with_cpu_and_sdl_type(define_vec4_type(bool), .U8_x4);
-pub const GPU_f16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(f16), .F16_x2);
-pub const GPU_u16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(u16), .U16_x2);
-pub const GPU_i16_2 = GPU_u32.with_cpu_and_sdl_type(define_vec2_type(i16), .I16_x2);
-// -- 8 bytes
-pub const GPU_u8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u8, .U32_x2);
-pub const GPU_i8_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i8, .U32_x2);
-pub const GPU_bool_8 = GPU_u32_2.with_cpu_and_sdl_type([8]bool, .U32_x2);
-pub const GPU_f16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(f16), .F16_x4);
-pub const GPU_u16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(u16), .U16_x4);
-pub const GPU_i16_4 = GPU_u32_2.with_cpu_and_sdl_type(define_vec4_type(i16), .I16_x4);
-pub const GPU_f64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(f64, .U32_x2, 8);
-pub const GPU_u64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(u64, .U32_x2, 8);
-pub const GPU_i64 = GPU_u32_2.with_cpu_and_sdl_type_and_align(i64, .U32_x2, 8);
-// -- 16 bytes
-pub const GPU_u8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]u8, .U32_x4);
-pub const GPU_i8_16 = GPU_u32_2.with_cpu_and_sdl_type([16]i8, .U32_x4);
-pub const GPU_bool_16 = GPU_u32_2.with_cpu_and_sdl_type([16]bool, .U32_x4);
-pub const GPU_f16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]f16, .U32_x4);
-pub const GPU_u16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]u16, .U32_x4);
-pub const GPU_i16_8 = GPU_u32_2.with_cpu_and_sdl_type([8]i16, .U32_x4);
-pub const GPU_f64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(f64), .U32_x4, 8);
-pub const GPU_u64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(u64), .U32_x4, 8);
-pub const GPU_i64_2 = GPU_u32_4.with_cpu_and_sdl_type_and_align(define_vec2_type(i64), .U32_x4, 8);
-
-// SPECIAL
-pub fn GPU_enum32(comptime ENUM_TYPE: type) GPUType {
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
-    return GPU_u32.with_cpu_type(ENUM_TYPE);
-}
-pub fn GPU_enum16_2(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime STRUCT: type) GPUType {
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u16, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u16, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u16, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
-    assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2 }), @src(), "type `STRUCT` must have exactly 1 field with type `ENUM_TYPE_1` (`{s}`) and exactly 1 field with type `ENUM_TYPE_2` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(STRUCT) });
-    assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 2, @src(), "type `STRUCT` must have size = 4 and align = 2, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
-    return GPU_u16_2.with_cpu_type(STRUCT);
-}
-pub fn GPU_enum8_4(comptime ENUM_TYPE_1: type, comptime ENUM_TYPE_2: type, comptime ENUM_TYPE_3: type, comptime ENUM_TYPE_4: type, comptime STRUCT: type) GPUType {
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_1) and Types.enum_tag_type(ENUM_TYPE_1) == u8, @src(), "type `ENUM_TYPE_1` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_1)});
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_2) and Types.enum_tag_type(ENUM_TYPE_2) == u8, @src(), "type `ENUM_TYPE_2` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_2)});
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_3) and Types.enum_tag_type(ENUM_TYPE_3) == u8, @src(), "type `ENUM_TYPE_3` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_3)});
-    assert_with_reason(Types.type_is_enum(ENUM_TYPE_4) and Types.enum_tag_type(ENUM_TYPE_4) == u8, @src(), "type `ENUM_TYPE_4` must be an enum type with tag type of u8, got type `{s}`", .{@typeName(ENUM_TYPE_4)});
-    assert_with_reason(Types.type_has_exactly_all_field_types(STRUCT, &.{ ENUM_TYPE_1, ENUM_TYPE_2, ENUM_TYPE_3, ENUM_TYPE_4 }), @src(), "type `STRUCT` must have exactly 1 field with each type `ENUM_TYPE_1` (`{s}`), `ENUM_TYPE_2` (`{s}`), `ENUM_TYPE_3` (`{s}`), and `ENUM_TYPE_4` (`{s}`), got type `{s}`", .{ @typeName(ENUM_TYPE_1), @typeName(ENUM_TYPE_2), @typeName(ENUM_TYPE_3), @typeName(ENUM_TYPE_4), @typeName(STRUCT) });
-    assert_with_reason(@sizeOf(STRUCT) == 4 and @alignOf(STRUCT) == 1, @src(), "type `STRUCT` must have size = 4 and align = 1, got type `{s}` (size = {d}, align = {d})", .{ @typeName(STRUCT), @sizeOf(STRUCT), @alignOf(STRUCT) });
-    return GPU_u8_4.with_cpu_type(STRUCT);
-}
-
 pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     assert_with_reason(Types.type_is_enum(ENUM_TYPE) and Types.enum_tag_type(ENUM_TYPE) == u32, @src(), "type `ENUM_TYPE` must be an enum type with tag type of u32, got type `{s}`", .{@typeName(ENUM_TYPE)});
     if (ENUM_TYPE == Bool32 or ENUM_TYPE == Bool16 or ENUM_TYPE == Bool8) {
-        _ = try writer.write(COMMENT_SPACE_ENUM_SPACE);
-        _ = try writer.write("#define TRUE 1\n");
-        _ = try writer.write("#define FALSE 0\n");
+        _ = try writer.writeAll(COMMENT_SPACE_ENUM_SPACE);
+        _ = try writer.writeAll("#define TRUE 1\n");
+        _ = try writer.writeAll("#define FALSE 0\n");
         return;
     }
     const LOCAL = comptime Utils.local_type_name(ENUM_TYPE);
-    _ = try writer.write(COMMENT_SPACE_ENUM_SPACE);
-    _ = try writer.write(LOCAL);
+    _ = try writer.writeAll(COMMENT_SPACE_ENUM_SPACE);
+    _ = try writer.writeAll(LOCAL);
     try writer.writeByte(NEWLINE);
     const INFO = @typeInfo(ENUM_TYPE).@"enum";
     inline for (INFO.fields) |field| {
-        _ = try writer.write(DEFINE_SPACE);
-        _ = try writer.write(LOCAL);
-        _ = try writer.write(DOUBLE_UNDERSCORE);
-        _ = try writer.write(field.name);
+        _ = try writer.writeAll(DEFINE_SPACE);
+        _ = try writer.writeAll(LOCAL);
+        _ = try writer.writeAll(DOUBLE_UNDERSCORE);
+        _ = try writer.writeAll(field.name);
         try writer.writeByte(SPACE);
         try writer.printInt(field.value, 10, .lower, .{});
         try writer.writeByte(NEWLINE);
@@ -1670,8 +1677,8 @@ pub const HLSL_INTERP_KIND = enum(u8) {
         "linear centroid ",
         "noperspective ",
         "noperspective centroid ",
-        "linear_no_perspective ",
-        "linear_no_perspective centroid ",
+        "linear noperspective ",
+        "linear noperspective centroid ",
         "sample ",
     };
 
@@ -1883,7 +1890,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
 
     pub fn print(self: HLSL_Semantic, writer: *std.Io.Writer) std.Io.Writer.Error!usize {
         var n: usize = 0;
-        n += try writer.write(@tagName(self));
+        n += try writer.writeAll(@tagName(self));
         switch (self) {
             .SV_ClipDistance,
             .SV_CullDistance,
@@ -1938,14 +1945,14 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
                 .DEFAULT, .NO_INTERP => {},
                 else => {
                     const found_valid_interp = !gpu_type.equals_any_gpu_only(&.{
-                        GPU_u32,
-                        GPU_u32_2,
-                        GPU_u32_3,
-                        GPU_u32_4,
-                        GPU_i32,
-                        GPU_i32_2,
-                        GPU_i32_3,
-                        GPU_i32_4,
+                        GPUType.GPU_u32,
+                        GPUType.GPU_u32_2,
+                        GPUType.GPU_u32_3,
+                        GPUType.GPU_u32_4,
+                        GPUType.GPU_i32,
+                        GPUType.GPU_i32_2,
+                        GPUType.GPU_i32_3,
+                        GPUType.GPU_i32_4,
                     });
                     assert_with_reason(found_valid_interp, src, "field `{s}` with type `{s}` cannot have interpolation mode `{s}`", .{ field_name, gpu_type, HLSL_INTERP_KIND.NAMES[@intFromEnum(interp)] });
                 },
@@ -1954,33 +1961,33 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
     }
 
     pub const ALLOWED_TYPES = [HLSL_SEMANTIC_KIND._COUNT][]const GPUType{
-        &.{GPU_f32}, // SV_ClipDistance = 0,
-        &.{GPU_f32}, // SV_CullDistance = 1,
-        &.{GPU_u32}, // SV_Coverage = 2,
-        &.{GPU_f32}, // SV_Depth = 3,
-        &.{GPU_f32}, // SV_DepthGreaterEqual = 4,
-        &.{GPU_f32}, // SV_DepthLessEqual = 5,
-        &.{GPU_u32_3}, // SV_DispatchThreadID = 6,
-        &.{ GPU_f32_2, GPU_f32_3 }, // SV_DomainLocation = 7,
-        &.{GPU_u32_3}, // SV_GroupID = 8,
-        &.{GPU_u32}, // SV_GroupIndex = 9,
-        &.{GPU_u32_3}, // SV_GroupThreadID = 10,
-        &.{GPU_u32}, // SV_GSInstanceID = 11,
-        &.{GPU_u32}, // SV_InnerCoverage = 12,
-        &.{ GPU_f32, GPU_f32_2 }, // SV_InsideTessFactor = 13,
-        &.{GPU_u32}, // SV_InstanceID = 14,
-        &.{GPU_bool}, // SV_IsFrontFace = 15,
-        &.{GPU_u32}, // SV_OutputControlPointID = 16,
-        &.{GPU_f32_4}, // SV_Position = 17,
-        &.{GPU_u32}, // SV_PrimitiveID = 18,
-        &.{GPU_u32}, // SV_RenderTargetArrayIndex = 19,
-        &.{GPU_u32}, // SV_SampleIndex = 20,
-        &.{GPU_u32}, // SV_StencilRef = 21,
-        &.{ GPU_f32_2, GPU_f32_3, GPU_f32_4 }, // SV_Target = 22,
-        &.{ GPU_f32_2, GPU_f32_3, GPU_f32_4 }, // SV_TessFactor = 23,
-        &.{GPU_u32}, // SV_VertexID = 24,
-        &.{GPU_u32}, // SV_ViewportArrayIndex = 25,
-        &.{GPU_u32}, // SV_ShadingRate = 26,
+        &.{GPUType.GPU_f32}, // SV_ClipDistance = 0,
+        &.{GPUType.GPU_f32}, // SV_CullDistance = 1,
+        &.{GPUType.GPU_u32}, // SV_Coverage = 2,
+        &.{GPUType.GPU_f32}, // SV_Depth = 3,
+        &.{GPUType.GPU_f32}, // SV_DepthGreaterEqual = 4,
+        &.{GPUType.GPU_f32}, // SV_DepthLessEqual = 5,
+        &.{GPUType.GPU_u32_3}, // SV_DispatchThreadID = 6,
+        &.{ GPUType.GPU_f32_2, GPUType.GPU_f32_3 }, // SV_DomainLocation = 7,
+        &.{GPUType.GPU_u32_3}, // SV_GroupID = 8,
+        &.{GPUType.GPU_u32}, // SV_GroupIndex = 9,
+        &.{GPUType.GPU_u32_3}, // SV_GroupThreadID = 10,
+        &.{GPUType.GPU_u32}, // SV_GSInstanceID = 11,
+        &.{GPUType.GPU_u32}, // SV_InnerCoverage = 12,
+        &.{ GPUType.GPU_f32, GPUType.GPU_f32_2 }, // SV_InsideTessFactor = 13,
+        &.{GPUType.GPU_u32}, // SV_InstanceID = 14,
+        &.{GPUType.GPU_bool}, // SV_IsFrontFace = 15,
+        &.{GPUType.GPU_u32}, // SV_OutputControlPointID = 16,
+        &.{GPUType.GPU_f32_4}, // SV_Position = 17,
+        &.{GPUType.GPU_u32}, // SV_PrimitiveID = 18,
+        &.{GPUType.GPU_u32}, // SV_RenderTargetArrayIndex = 19,
+        &.{GPUType.GPU_u32}, // SV_SampleIndex = 20,
+        &.{GPUType.GPU_u32}, // SV_StencilRef = 21,
+        &.{ GPUType.GPU_f32_2, GPUType.GPU_f32_3, GPUType.GPU_f32_4 }, // SV_Target = 22,
+        &.{ GPUType.GPU_f32_2, GPUType.GPU_f32_3, GPUType.GPU_f32_4 }, // SV_TessFactor = 23,
+        &.{GPUType.GPU_u32}, // SV_VertexID = 24,
+        &.{GPUType.GPU_u32}, // SV_ViewportArrayIndex = 25,
+        &.{GPUType.GPU_u32}, // SV_ShadingRate = 26,
         &.{}, // USER = 27,
         &.{}, // _PADDING = 28,
     };
@@ -1998,7 +2005,7 @@ pub fn VertexShaderInputStructField(
         from_vertex_buffer_slot: u32,
         vertex_buffer_slot_name: VERTEX_BUFFER_NAMES_ENUM,
 
-        pub fn new(
+        pub fn vertex_field(
             comptime field_name: STRUCT_FIELD_ENUM,
             comptime gpu_type: GPUType,
             comptime semantic: HLSL_SEMANTIC_KIND,
@@ -2014,7 +2021,7 @@ pub fn VertexShaderInputStructField(
             };
         }
 
-        pub fn new_advanced(
+        pub fn vertex_field_advanced(
             comptime field_name: STRUCT_FIELD_ENUM,
             comptime gpu_type: GPUType,
             comptime semantic: HLSL_SEMANTIC_KIND,
@@ -2500,10 +2507,10 @@ pub fn VertexShaderInputStruct(
     comptime var next_texcoord: u32 = 0;
     const PACKED_NAME = NAME ++ "_PACKED";
 
-    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (0..active_locations) |l_idx| {
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
         const num_comps: u8 = @intCast(@popCount(location_states[l_idx].used_components));
         const base = location_base_types[l_idx] orelse .float;
 
@@ -2530,60 +2537,60 @@ pub fn VertexShaderInputStruct(
                 else => "int4  ",
             },
         };
-        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" in_loc") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" in_loc") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(l_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" : TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" : TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(next_texcoord, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
         next_texcoord += 1;
 
         if (_LAYOUT) {
-            _ = comptime_writer.write("; // slot ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("; // slot ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(location_slots[l_idx], 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(", off ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(", off ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(location_byte_offsets[l_idx], 10, .lower, .{ .alignment = .right, .width = 3 }) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(", arange ") catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(@tagName(location_states[l_idx].arangement)) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(", arange ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(location_states[l_idx].arangement)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
 
         if (_LAYOUT) {
-            _ = comptime_writer.write("; // off ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("; // off ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(field_offsets[fidx], 10, .lower, .{ .alignment = .right, .width = 3 }) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(" (slot ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(" (slot ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(f.from_vertex_buffer_slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(", contract: ") catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(@tagName(f.vertex_buffer_slot_name)) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(")\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(", contract: ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(f.vertex_buffer_slot_name)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(")\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
-    _ = comptime_writer.write(NAME ++ " unpack_vertex_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ NAME ++ " v;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll(NAME ++ " unpack_vertex_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    " ++ NAME ++ " v;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
         const count = field_chunk_counts[fidx];
         const field_info = get_hlsl_info(f.gpu_type.hlsl_name);
 
-        _ = comptime_writer.write("    v.") catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" = ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll("    v.") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" = ") catch |err| assert_comptime_write_failure(@src(), err);
 
         if (count == 1) {
             const plc = field_placements[fidx][0];
@@ -2601,11 +2608,11 @@ pub fn VertexShaderInputStruct(
                 field_info.base_type,
             ) catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.writeByte('(') catch |err| assert_comptime_write_failure(@src(), err);
 
             for (0..count) |col| {
-                if (col > 0) _ = comptime_writer.write(", ") catch |err| assert_comptime_write_failure(@src(), err);
+                if (col > 0) _ = comptime_writer.writeAll(", ") catch |err| assert_comptime_write_failure(@src(), err);
                 const plc = field_placements[fidx][col];
                 const num_loc_comps: u8 = @intCast(@popCount(location_states[plc.loc].used_components));
                 const reg_base = location_base_types[plc.loc] orelse .float;
@@ -2623,9 +2630,9 @@ pub fn VertexShaderInputStruct(
             }
             _ = comptime_writer.writeByte(')') catch |err| assert_comptime_write_failure(@src(), err);
         }
-        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("    return v;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    return v;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     const hlsl_stub_final_len = comptime_writer.end;
     const hlsl_stub_inner_const: [hlsl_stub_final_len]u8 = make_const: {
@@ -2734,7 +2741,7 @@ pub fn VertexShaderInputStruct(
                 descs[s] = .{
                     .slot = ACTIVE_SLOT_INDICES[s],
                     .stride = ACTIVE_SLOT_STRIDES[s],
-                    .input_rate = SDL3.SDL_GPU_VERTEXINPUTRATE_VERTEX,
+                    .input_rate = .VERTEX,
                     .instance_step_rate = 0,
                 };
             }
@@ -2748,7 +2755,7 @@ pub fn VertexShaderInputStruct(
                 attrs[l] = .{
                     .location = @intCast(l),
                     .buffer_slot = loc_slots_const[l],
-                    .format = loc_formats_const[l].to_c(),
+                    .format = loc_formats_const[l],
                     .offset = loc_offsets_const[l],
                 };
             }
@@ -2756,7 +2763,7 @@ pub fn VertexShaderInputStruct(
         }
 
         pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_VERTEX_STUB[0..]);
+            _ = try writer.writeAll(HLSL_VERTEX_STUB[0..]);
         }
     };
 }
@@ -2789,7 +2796,7 @@ pub fn AnyVertexShaderInputStruct(comptime INNER: type, comptime VERTEX_BUFFER_N
         }
 
         pub fn write_hlsl_vertex_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(INNER.HLSL_VERTEX_STUB[0..]);
+            _ = try writer.writeAll(INNER.HLSL_VERTEX_STUB[0..]);
         }
         pub fn get_sdl_vertex_attributes() [NUM_ATTRIBUTES]SDL3.GPU_VertexAttribute {
             return INNER.get_sdl_vertex_attributes();
@@ -2811,7 +2818,7 @@ pub fn VertexToFragmentField(comptime STRUCT_FIELD_ENUM: type) type {
         semantic: HLSL_Semantic,
         interpolation: HLSL_INTERP_KIND = .DEFAULT,
 
-        pub fn new(
+        pub fn vert_to_frag_field(
             comptime field_name: STRUCT_FIELD_ENUM,
             comptime gpu_type: GPUType,
             comptime semantic: HLSL_Semantic,
@@ -2824,7 +2831,7 @@ pub fn VertexToFragmentField(comptime STRUCT_FIELD_ENUM: type) type {
             };
         }
 
-        pub fn new_interp(
+        pub fn vert_to_frag_field_advanced(
             comptime field_name: STRUCT_FIELD_ENUM,
             comptime gpu_type: GPUType,
             comptime semantic: HLSL_Semantic,
@@ -2970,7 +2977,7 @@ pub fn VertexToFragmentStruct(
         user_texcoord_idx: u32 = 0,
     };
 
-    comptime var stage_registers: [MAX_LOCATIONS]StageRegister = [_]StageRegister{.{}} ** MAX_LOCATIONS;
+    comptime var stage_registers: [MAX_LOCATIONS]StageRegister = @splat(.{});
     comptime var active_registers: usize = 0;
     comptime var next_texcoord: u32 = 0;
 
@@ -3071,27 +3078,27 @@ pub fn VertexToFragmentStruct(
 
     // VERTEX STUB
     // Unpacked Intermediate Struct
-    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Hardware Packed Stage Output / Input Struct
-    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (0..active_registers) |r_idx| {
         const reg = stage_registers[r_idx];
         const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
 
         // Interpolation qualifier
         if (reg.interp != .DEFAULT) {
-            _ = comptime_writer.write(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         // HLSL Type
@@ -3118,33 +3125,33 @@ pub fn VertexToFragmentStruct(
                 else => "int4  ",
             },
         };
-        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" reg") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" reg") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(r_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" : ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" : ") catch |err| assert_comptime_write_failure(@src(), err);
 
         if (reg.is_dedicated and reg.semantic != null) {
-            _ = comptime_writer.write(@tagName(reg.semantic.?)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(reg.semantic.?)) catch |err| assert_comptime_write_failure(@src(), err);
             if (reg.semantic.?.get_num()) |num| {
                 comptime_writer.printInt(num, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
             }
         } else {
-            _ = comptime_writer.write("TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(reg.user_texcoord_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         if (_LAYOUT) {
             // Add some layout info here?
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Vertex Shader Packing Function
-    _ = comptime_writer.write("" ++ PACKED_NAME ++ " pack_vertex_output(" ++ NAME ++ " vf) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("" ++ PACKED_NAME ++ " pack_vertex_output(" ++ NAME ++ " vf) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
@@ -3154,22 +3161,22 @@ pub fn VertexToFragmentStruct(
             const plc = field_placements[fidx][col];
             const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
 
-            _ = comptime_writer.write("    pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("    pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(" = vf.") catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(" = vf.") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
 
             if (count > 1) {
-                _ = comptime_writer.write("[") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("[") catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.printInt(col, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write("]") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("]") catch |err| assert_comptime_write_failure(@src(), err);
             }
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("    return pck;\n}\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    return pck;\n}\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     const hlsl_stub_vert_final_len = comptime_writer.end;
     const hlsl_stub_vert_const: [hlsl_stub_vert_final_len]u8 = make_const: {
@@ -3182,27 +3189,27 @@ pub fn VertexToFragmentStruct(
     comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
 
     // Unpacked Intermediate Struct
-    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Hardware Packed Stage Output / Input Struct
-    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (0..active_registers) |r_idx| {
         const reg = stage_registers[r_idx];
         const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
 
         // Interpolation qualifier
         if (reg.interp != .DEFAULT) {
-            _ = comptime_writer.write(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         // HLSL Type
@@ -3229,41 +3236,41 @@ pub fn VertexToFragmentStruct(
                 else => "int4  ",
             },
         };
-        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" reg") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" reg") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(r_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" : ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" : ") catch |err| assert_comptime_write_failure(@src(), err);
 
         if (reg.is_dedicated and reg.semantic != null) {
-            _ = comptime_writer.write(@tagName(reg.semantic.?)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(reg.semantic.?)) catch |err| assert_comptime_write_failure(@src(), err);
             if (reg.semantic.?.get_num()) |num| {
                 comptime_writer.printInt(num, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
             }
         } else {
-            _ = comptime_writer.write("TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("TEXCOORD") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(reg.user_texcoord_idx, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         if (_LAYOUT) {
             // Add some layout info here?
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Pixel Shader Unpacking Function
-    _ = comptime_writer.write("" ++ NAME ++ " unpack_frag_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ NAME ++ " vf;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("" ++ NAME ++ " unpack_frag_input(" ++ PACKED_NAME ++ " pck) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    " ++ NAME ++ " vf;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
         const count = field_chunk_counts[fidx];
 
-        _ = comptime_writer.write("    vf.") catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" = ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll("    vf.") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" = ") catch |err| assert_comptime_write_failure(@src(), err);
 
         if (count == 1) {
             const plc = field_placements[fidx][0];
@@ -3271,37 +3278,37 @@ pub fn VertexToFragmentStruct(
             const reg = stage_registers[plc.reg];
             const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-            _ = comptime_writer.write("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
             if (plc.comp_count < num_comps or plc.comp_count < 4) {
                 _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
             }
         } else {
-            _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
             _ = comptime_writer.writeByte('(') catch |err| assert_comptime_write_failure(@src(), err);
 
             for (0..count) |col| {
-                if (col > 0) _ = comptime_writer.write(", ") catch |err| assert_comptime_write_failure(@src(), err);
+                if (col > 0) _ = comptime_writer.writeAll(", ") catch |err| assert_comptime_write_failure(@src(), err);
                 const plc = field_placements[fidx][col];
                 const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
                 const reg = stage_registers[plc.reg];
                 const num_comps: u8 = @intCast(@popCount(reg.state.used_components));
 
-                _ = comptime_writer.write("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("pck.reg") catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.printInt(plc.reg, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
                 if (plc.comp_count < num_comps or plc.comp_count < 4) {
                     _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
                 }
             }
             _ = comptime_writer.writeByte(')') catch |err| assert_comptime_write_failure(@src(), err);
         }
-        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("    return vf;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    return vf;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     const hlsl_stub_frag_final_len = comptime_writer.end;
     const hlsl_stub_frag_const: [hlsl_stub_frag_final_len]u8 = make_const: {
@@ -3320,10 +3327,10 @@ pub fn VertexToFragmentStruct(
         pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_VERTEX_TO_FRAG_STRUCT: bool = true;
 
         pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_VERT_STUB[0..]);
+            _ = try writer.writeAll(HLSL_VERT_STUB[0..]);
         }
         pub fn write_hlsl_frag_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_FRAG_STUB[0..]);
+            _ = try writer.writeAll(HLSL_FRAG_STUB[0..]);
         }
     };
 }
@@ -3335,10 +3342,10 @@ pub fn AnyVertexToFragmentStruct(comptime INNER: type) type {
         pub const STRUCT_NAME_PACKED = INNER.STRUCT_NAME_PACKED;
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
         pub fn write_hlsl_vert_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(INNER.HLSL_VERT_STUB[0..]);
+            _ = try writer.writeAll(INNER.HLSL_VERT_STUB[0..]);
         }
         pub fn write_hlsl_frag_stub(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(INNER.HLSL_FRAG_STUB[0..]);
+            _ = try writer.writeAll(INNER.HLSL_FRAG_STUB[0..]);
         }
     };
 }
@@ -3430,6 +3437,35 @@ pub fn FragmentShaderOutputStruct(
         );
         field_defined[idx] = true;
     }
+    comptime var num_enums: usize = 0;
+    for (fields) |f| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            num_enums += 1;
+        }
+    }
+    const num_enums_const = num_enums;
+    comptime var unique_enums: [num_enums_const]type = undefined;
+    comptime var unique_enums_idx: [num_enums_const]u32 = undefined;
+    comptime var unique_enums_len: u32 = 0;
+    next_field: for (fields, 0..) |f, fidx| {
+        if (Types.type_is_enum(f.gpu_type.cpu_type)) {
+            for (unique_enums[0..unique_enums_len]) |unique_type| {
+                if (unique_type == f.gpu_type.cpu_type) {
+                    continue :next_field;
+                }
+            }
+            unique_enums[unique_enums_len] = f.gpu_type.cpu_type;
+            unique_enums_idx[unique_enums_len] = fidx;
+            unique_enums_len += 1;
+        }
+    }
+    const unique_enums_const = make: {
+        comptime var out: [unique_enums_len]type = undefined;
+        for (unique_enums_idx[0..unique_enums_len], 0..) |fidx, uidx| {
+            out[uidx] = fields[fidx].gpu_type.cpu_type;
+        }
+        break :make out;
+    };
 
     // Fragment semantic and type validation
     comptime var depth_field_idx: ?usize = null;
@@ -3454,7 +3490,7 @@ pub fn FragmentShaderOutputStruct(
                     .{ NAME, @tagName(fields[depth_field_idx orelse 0].field_name), @tagName(f.field_name) },
                 );
                 assert_with_reason(
-                    f.gpu_type.equals_gpu_only(GPU_f32),
+                    f.gpu_type.equals_gpu_only(GPUType.GPU_f32),
                     @src(),
                     "(FragmentShaderOutputStruct '{s}') depth output `{s}` must be a scalar float (GPU_f32), got `{s}`",
                     .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
@@ -3469,7 +3505,7 @@ pub fn FragmentShaderOutputStruct(
                     .{ NAME, @tagName(fields[coverage_field_idx.?].field_name), @tagName(f.field_name) },
                 );
                 assert_with_reason(
-                    f.gpu_type.equals_gpu_only(GPU_u32),
+                    f.gpu_type.equals_gpu_only(GPUType.GPU_u32),
                     @src(),
                     "(FragmentShaderOutputStruct '{s}') coverage output `{s}` must be a scalar uint (GPU_u32), got `{s}`",
                     .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
@@ -3484,7 +3520,7 @@ pub fn FragmentShaderOutputStruct(
                     .{ NAME, @tagName(fields[stencil_field_idx.?].field_name), @tagName(f.field_name) },
                 );
                 assert_with_reason(
-                    f.gpu_type.equals_gpu_only(GPU_u32),
+                    f.gpu_type.equals_gpu_only(GPUType.GPU_u32),
                     @src(),
                     "(FragmentShaderOutputStruct '{s}') stencil output `{s}` must be a scalar uint (GPU_u32), got `{s}`",
                     .{ NAME, @tagName(f.field_name), @tagName(f.gpu_type.hlsl_name) },
@@ -3610,45 +3646,45 @@ pub fn FragmentShaderOutputStruct(
     comptime var comptime_writer = QuickWriter.writer(hlsl_buffer[0..]);
 
     // Unpacked Logical Struct
-    _ = comptime_writer.write("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
 
         if (_LAYOUT) {
-            _ = comptime_writer.write("; // ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("; // ") catch |err| assert_comptime_write_failure(@src(), err);
             switch (f.semantic) {
                 .SV_Target => {
                     const plc = field_target_placements[fidx];
                     const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
-                    _ = comptime_writer.write("target ") catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll("target ") catch |err| assert_comptime_write_failure(@src(), err);
                     comptime_writer.printInt(plc.slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(" [.") catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write("]\n") catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(" [.") catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll("]\n") catch |err| assert_comptime_write_failure(@src(), err);
                 },
                 else => {
-                    _ = comptime_writer.write(@tagName(f.semantic)) catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(@tagName(f.semantic)) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll("\n") catch |err| assert_comptime_write_failure(@src(), err);
                 },
             }
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Hardware Packed Stage Output Struct
-    _ = comptime_writer.write("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("struct " ++ PACKED_NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Write all active render targets in ascending slot index
     for (0..MAX_TARGET_SLOTS) |slot| {
         if (!target_active[slot]) continue;
 
-        _ = comptime_writer.write(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
         const num_comps: u8 = @intCast(@popCount(target_states[slot].used_components));
         const base = target_base_types[slot] orelse .float;
 
@@ -3675,38 +3711,38 @@ pub fn FragmentShaderOutputStruct(
                 else => "int4  ",
             },
         };
-        _ = comptime_writer.write(type_str) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" target") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(type_str) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" target") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(" : SV_Target") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(" : SV_Target") catch |err| assert_comptime_write_failure(@src(), err);
         comptime_writer.printInt(slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
         if (_LAYOUT) {
-            _ = comptime_writer.write("; // comps ") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("; // comps ") catch |err| assert_comptime_write_failure(@src(), err);
             comptime_writer.printInt(num_comps, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
-            _ = comptime_writer.write("\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll("\n") catch |err| assert_comptime_write_failure(@src(), err);
         } else {
-            _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
         }
     }
 
     // Write system values if present
     if (depth_field_idx) |d_idx| {
-        _ = comptime_writer.write(SPACE_4 ++ "float depth : ") catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(@tagName(fields[d_idx].semantic)) catch |err| assert_comptime_write_failure(@src(), err);
-        _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4 ++ "float depth : ") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(@tagName(fields[d_idx].semantic)) catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
     if (coverage_field_idx) |_| {
-        _ = comptime_writer.write(SPACE_4 ++ "uint coverage : SV_Coverage;\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4 ++ "uint coverage : SV_Coverage;\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
     if (stencil_field_idx) |_| {
-        _ = comptime_writer.write(SPACE_4 ++ "uint stencil_ref : SV_StencilRef;\n") catch |err| assert_comptime_write_failure(@src(), err);
+        _ = comptime_writer.writeAll(SPACE_4 ++ "uint stencil_ref : SV_StencilRef;\n") catch |err| assert_comptime_write_failure(@src(), err);
     }
-    _ = comptime_writer.write("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("};\n\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     // Pixel Shader Packing Function
-    _ = comptime_writer.write("" ++ PACKED_NAME ++ " pack_fragment_output(" ++ NAME ++ " f) {\n") catch |err| assert_comptime_write_failure(@src(), err);
-    _ = comptime_writer.write("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("" ++ PACKED_NAME ++ " pack_fragment_output(" ++ NAME ++ " f) {\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
         const fidx = @intFromEnum(f.field_name);
@@ -3719,51 +3755,51 @@ pub fn FragmentShaderOutputStruct(
                 const target_base = target_base_types[plc.slot] orelse .float;
                 const swz = Swizzle{ .start = plc.comp_start, .count = plc.comp_count };
 
-                _ = comptime_writer.write("    pck.target") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("    pck.target") catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.printInt(plc.slot, 10, .lower, .{}) catch |err| assert_comptime_write_failure(@src(), err);
 
                 // Add swizzle if field doesn't span all active components of the target
                 if (plc.comp_count < target_comps) {
                     _ = comptime_writer.writeByte('.') catch |err| assert_comptime_write_failure(@src(), err);
-                    _ = comptime_writer.write(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
+                    _ = comptime_writer.writeAll(swz.string()) catch |err| assert_comptime_write_failure(@src(), err);
                 }
-                _ = comptime_writer.write(" = ") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(" = ") catch |err| assert_comptime_write_failure(@src(), err);
 
                 // Bitcast conversion if target type and field scalar type differ
                 const needs_cast = target_base != f_info.base_type;
                 if (needs_cast) {
                     switch (target_base) {
-                        .uint, .bool => _ = comptime_writer.write("asuint(") catch |err| assert_comptime_write_failure(@src(), err),
-                        .int => _ = comptime_writer.write("asint(") catch |err| assert_comptime_write_failure(@src(), err),
-                        .float => _ = comptime_writer.write("asfloat(") catch |err| assert_comptime_write_failure(@src(), err),
+                        .uint, .bool => _ = comptime_writer.writeAll("asuint(") catch |err| assert_comptime_write_failure(@src(), err),
+                        .int => _ = comptime_writer.writeAll("asint(") catch |err| assert_comptime_write_failure(@src(), err),
+                        .float => _ = comptime_writer.writeAll("asfloat(") catch |err| assert_comptime_write_failure(@src(), err),
                     }
                 }
-                _ = comptime_writer.write("f.") catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
                 if (needs_cast) {
                     _ = comptime_writer.writeByte(')') catch |err| assert_comptime_write_failure(@src(), err);
                 }
-                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
             },
             .SV_Depth, .SV_DepthGreaterEqual, .SV_DepthLessEqual => {
-                _ = comptime_writer.write("    pck.depth = f.") catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("    pck.depth = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
             },
             .SV_Coverage => {
-                _ = comptime_writer.write("    pck.coverage = f.") catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("    pck.coverage = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
             },
             .SV_StencilRef => {
-                _ = comptime_writer.write("    pck.stencil_ref = f.") catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
-                _ = comptime_writer.write(";\n") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll("    pck.stencil_ref = f.") catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(@tagName(f.field_name)) catch |err| assert_comptime_write_failure(@src(), err);
+                _ = comptime_writer.writeAll(";\n") catch |err| assert_comptime_write_failure(@src(), err);
             },
             else => unreachable,
         }
     }
-    _ = comptime_writer.write("    return pck;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
+    _ = comptime_writer.writeAll("    return pck;\n}\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     const hlsl_stub_final_len = comptime_writer.end;
     const hlsl_stub_inner_const: [hlsl_stub_final_len]u8 = make_const: {
@@ -3783,6 +3819,7 @@ pub fn FragmentShaderOutputStruct(
     const target_formats_const = active_target_formats;
 
     return struct {
+        pub const ENUMS = unique_enums_const;
         pub const STRUCT_NAME = NAME;
         pub const STRUCT_NAME_PACKED = PACKED_NAME;
         pub const GOOLIB_SDL_GRAPHICS_CONTROLLER_SHADER_UTILS_FRAGMENT_OUTPUT_STRUCT: bool = true;
@@ -3806,7 +3843,7 @@ pub fn FragmentShaderOutputStruct(
         }
 
         pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(HLSL_FRAGMENT_STUB[0..]);
+            _ = try writer.writeAll(HLSL_FRAGMENT_STUB[0..]);
         }
     };
 }
@@ -3828,7 +3865,7 @@ pub fn AnyFragmentShaderOutputStruct(comptime INNER: type) type {
             return INNER.TYPES[@intFromEnum(field)];
         }
         pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            _ = try writer.write(INNER.HLSL_FRAGMENT_STUB[0..]);
+            _ = try writer.writeAll(INNER.HLSL_FRAGMENT_STUB[0..]);
         }
     };
 }
@@ -3852,9 +3889,9 @@ fn write_unpack_expr(
     // Bitcast wrapper start
     if (needs_cast) {
         switch (field_base) {
-            .int => _ = try writer.write("asint("),
-            .uint, .bool => _ = try writer.write("asuint("),
-            .float => _ = try writer.write("asfloat("),
+            .int => _ = try writer.writeAll("asint("),
+            .uint, .bool => _ = try writer.writeAll("asuint("),
+            .float => _ = try writer.writeAll("asfloat("),
         }
     }
 
@@ -3881,13 +3918,13 @@ fn write_pack_expr(
 
     if (needs_cast) {
         switch (reg_base) {
-            .uint, .bool => _ = try writer.write("asuint("),
-            .int => _ = try writer.write("asint("),
-            .float => _ = try writer.write("asfloat("),
+            .uint, .bool => _ = try writer.writeAll("asuint("),
+            .int => _ = try writer.writeAll("asint("),
+            .float => _ = try writer.writeAll("asfloat("),
         }
     }
 
-    _ = try writer.write(field_expr);
+    _ = try writer.writeAll(field_expr);
 
     if (needs_cast) {
         _ = try writer.writeByte(')');
@@ -3920,18 +3957,18 @@ test "SDL_GraphicsController_TypeUtils => Uniform Layout/Stubs" {
         shader_mode,
         hamburgers_good,
     };
-    const U = StorageStructField(F);
+    const U = UniformOrStorageStructField(F);
     const ShaderMode = enum(u32) {
         SPRITE,
         TEXT,
     };
     const MyUniform = UniformOrStorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
-        U.new(.world_pos, GPU_f32_3),
-        U.new(.main_color, GPU_u32),
-        U.new(.secondary_color, GPU_u32),
-        U.new(.shader_mode, GPU_enum32(ShaderMode)),
-        U.new(.projection_matrix, GPU_f32_4x4),
-        U.new(.hamburgers_good, GPU_bool),
+        U.uniform_field(.world_pos, GPUType.GPU_f32_3),
+        U.uniform_field(.main_color, GPUType.GPU_u32),
+        U.uniform_field(.secondary_color, GPUType.GPU_u32),
+        U.uniform_field(.shader_mode, GPUType.GPU_enum32(ShaderMode)),
+        U.uniform_field(.projection_matrix, GPUType.GPU_f32_4x4),
+        U.uniform_field(.hamburgers_good, GPUType.GPU_bool),
     }, 100000);
     // assert_with_reason(@sizeOf(MyUniform) == 96, @src(), "layout failed", .{});
     // assert_with_reason(@alignOf(MyUniform) == 16, @src(), "layout failed", .{});
@@ -3955,16 +3992,16 @@ test "SDL_GraphicsController_TypeUtils => Uniform Layout/Stubs" {
         mat_2,
         scalar_6,
     };
-    const U2 = StorageStructField(F2);
+    const U2 = UniformOrStorageStructField(F2);
     const MyUniform2 = UniformOrStorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
-        U2.new(.scalar_1, GPU_f32),
-        U2.new(.scalar_2, GPU_f32),
-        U2.new(.scalar_3, GPU_f32_2),
-        U2.new(.mat_1, GPU_f32_3x4),
-        U2.new(.scalar_4, GPU_f32_3),
-        U2.new(.scalar_5, GPU_f32_4),
-        U2.new(.mat_2, GPU_i32_1x2),
-        U2.new(.scalar_6, GPU_f32),
+        U2.uniform_field(.scalar_1, GPUType.GPU_f32),
+        U2.uniform_field(.scalar_2, GPUType.GPU_f32),
+        U2.uniform_field(.scalar_3, GPUType.GPU_f32_2),
+        U2.uniform_field(.mat_1, GPUType.GPU_f32_3x4),
+        U2.uniform_field(.scalar_4, GPUType.GPU_f32_3),
+        U2.uniform_field(.scalar_5, GPUType.GPU_f32_4),
+        U2.uniform_field(.mat_2, GPUType.GPU_i32_1x2),
+        U2.uniform_field(.scalar_6, GPUType.GPU_f32),
     }, 100000);
     assert_with_reason(@sizeOf(MyUniform2) == 144, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyUniform2) == 16, @src(), "layout failed", .{});
@@ -3987,18 +4024,18 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
         shader_mode,
         hamburgers_good,
     };
-    const U = StorageStructField(F);
+    const U = UniformOrStorageStructField(F);
     const ShaderMode = enum(u32) {
         SPRITE,
         TEXT,
     };
     const MyStruct = UniformOrStorageStruct(F, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
-        U.new(.world_pos, GPU_f32_3),
-        U.new(.main_color, GPU_u32),
-        U.new(.secondary_color, GPU_u32),
-        U.new(.shader_mode, GPU_enum32(ShaderMode)),
-        U.new(.projection_matrix, GPU_f32_4x4),
-        U.new(.hamburgers_good, GPU_bool),
+        U.uniform_field(.world_pos, GPUType.GPU_f32_3),
+        U.uniform_field(.main_color, GPUType.GPU_u32),
+        U.uniform_field(.secondary_color, GPUType.GPU_u32),
+        U.uniform_field(.shader_mode, GPUType.GPU_enum32(ShaderMode)),
+        U.uniform_field(.projection_matrix, GPUType.GPU_f32_4x4),
+        U.uniform_field(.hamburgers_good, GPUType.GPU_bool),
     }, 100000);
     assert_with_reason(@sizeOf(MyStruct) == 96, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyStruct) == 16, @src(), "layout failed", .{});
@@ -4020,16 +4057,16 @@ test "SDL_GraphicsController_TypeUtils => Storage Layout/Stubs" {
         mat_2,
         scalar_6,
     };
-    const U2 = StorageStructField(F2);
+    const U2 = UniformOrStorageStructField(F2);
     const MyStruct2 = UniformOrStorageStruct(F2, .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB, &.{
-        U2.new(.scalar_1, GPU_f32),
-        U2.new(.scalar_2, GPU_f32),
-        U2.new(.scalar_3, GPU_f32_2),
-        U2.new(.mat_1, GPU_f32_3x4),
-        U2.new(.scalar_4, GPU_f32_3),
-        U2.new(.scalar_5, GPU_f32_4),
-        U2.new(.mat_2, GPU_i32_1x2),
-        U2.new(.scalar_6, GPU_f32),
+        U2.uniform_field(.scalar_1, GPUType.GPU_f32),
+        U2.uniform_field(.scalar_2, GPUType.GPU_f32),
+        U2.uniform_field(.scalar_3, GPUType.GPU_f32_2),
+        U2.uniform_field(.mat_1, GPUType.GPU_f32_3x4),
+        U2.uniform_field(.scalar_4, GPUType.GPU_f32_3),
+        U2.uniform_field(.scalar_5, GPUType.GPU_f32_4),
+        U2.uniform_field(.mat_2, GPUType.GPU_i32_1x2),
+        U2.uniform_field(.scalar_6, GPUType.GPU_f32),
     }, 100000);
     assert_with_reason(@sizeOf(MyStruct2) == 144, @src(), "layout failed", .{});
     assert_with_reason(@alignOf(MyStruct2) == 16, @src(), "layout failed", .{});
@@ -4066,12 +4103,12 @@ test "SDL_GraphicsController_TypeUtils => Vertex Struct Multi-Buffer Layout/Stub
         PipelineSlots,
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
-            S.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry),
-            S.new_advanced(.vert_normal, GPU_f32_3, .USER, .LINEAR, 0, .geometry),
-            S.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0, .geometry),
+            S.vertex_field_advanced(.world_pos, GPUType.GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry),
+            S.vertex_field_advanced(.vert_normal, GPUType.GPU_f32_3, .USER, .LINEAR, 0, .geometry),
+            S.vertex_field_advanced(.uv, GPUType.GPU_f32_2, .USER, .LINEAR, 0, .geometry),
 
-            S.new_advanced(.instance_transform, GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_data),
-            S.new_advanced(.instance_color, GPU_f32_4, .USER, .NO_INTERP, 1, .instance_data),
+            S.vertex_field_advanced(.instance_transform, GPUType.GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_data),
+            S.vertex_field_advanced(.instance_color, GPUType.GPU_f32_4, .USER, .NO_INTERP, 1, .instance_data),
         },
         100000,
     );
@@ -4115,15 +4152,15 @@ test "SDL_GraphicsController_TypeUtils => Vertex-To-Fragment Layout/Stubs" {
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
             // System value: Must get its own dedicated register
-            Field.new(.clip_pos, GPU_f32_4, HLSL_Semantic.sv_position()),
+            Field.vert_to_frag_field(.clip_pos, GPUType.GPU_f32_4, HLSL_Semantic.sv_position()),
 
             // Smooth linear floats: uv (vec2) + tint_strength (scalar) should PACK together
-            Field.new_interp(.uv, GPU_f32_2, HLSL_Semantic.user(0), .LINEAR),
-            Field.new_interp(.world_normal, GPU_f32_3, HLSL_Semantic.user(1), .LINEAR_CENTROID),
-            Field.new_interp(.tint_strength, GPU_f32, HLSL_Semantic.user(2), .LINEAR),
+            Field.vert_to_frag_field_advanced(.uv, GPUType.GPU_f32_2, HLSL_Semantic.user(0), .LINEAR),
+            Field.vert_to_frag_field_advanced(.world_normal, GPUType.GPU_f32_3, HLSL_Semantic.user(1), .LINEAR_CENTROID),
+            Field.vert_to_frag_field_advanced(.tint_strength, GPUType.GPU_f32, HLSL_Semantic.user(2), .LINEAR),
 
             // Flat integer: must NOT pack with linear floats
-            Field.new_interp(.instance_id, GPU_u32, HLSL_Semantic.user(3), .NO_INTERP),
+            Field.vert_to_frag_field_advanced(.instance_id, GPUType.GPU_u32, HLSL_Semantic.user(3), .NO_INTERP),
         },
         100000,
     );
@@ -4166,14 +4203,14 @@ test "SDL_GraphicsController_TypeUtils => Fragment Shader Output Layout/Stubs" {
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
             // Target 0: albedo (vec3) + roughness (scalar) pack cleanly into SV_Target0 (float4)
-            Field.target(.albedo, GPU_f32_3, 0),
-            Field.target(.roughness, GPU_f32, 0),
+            Field.target(.albedo, GPUType.GPU_f32_3, 0),
+            Field.target(.roughness, GPUType.GPU_f32, 0),
 
             // Target 1: normal (vec4) fills SV_Target1
-            Field.target(.normal, GPU_f32_4, 1),
+            Field.target(.normal, GPUType.GPU_f32_4, 1),
 
             // Depth buffer output: dedicated SV_Depth register
-            Field.other(.depth, GPU_f32, HLSL_Semantic.sv_depth()),
+            Field.other(.depth, GPUType.GPU_f32, HLSL_Semantic.sv_depth()),
         },
         100000,
     );
@@ -4223,12 +4260,12 @@ test "SDL_GraphicsController_TypeUtils => Multi-Pipeline Shared Vertex Buffer Co
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
             // Slot 0 => geometry_static
-            FieldA.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry_static),
-            FieldA.new_advanced(.normal, GPU_f32_3, .USER, .LINEAR, 0, .geometry_static),
-            FieldA.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 0, .geometry_static),
+            FieldA.vertex_field_advanced(.world_pos, GPUType.GPU_f32_3, .SV_Position, .LINEAR, 0, .geometry_static),
+            FieldA.vertex_field_advanced(.normal, GPUType.GPU_f32_3, .USER, .LINEAR, 0, .geometry_static),
+            FieldA.vertex_field_advanced(.uv, GPUType.GPU_f32_2, .USER, .LINEAR, 0, .geometry_static),
 
             // Slot 1 => instance_transforms
-            FieldA.new_advanced(.instance_mat, GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_transforms),
+            FieldA.vertex_field_advanced(.instance_mat, GPUType.GPU_f32_4x4, .USER, .NO_INTERP, 1, .instance_transforms),
         },
         100000,
     );
@@ -4248,9 +4285,9 @@ test "SDL_GraphicsController_TypeUtils => Multi-Pipeline Shared Vertex Buffer Co
         .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
         &.{
             // Slot 2 => geometry_static (same global contract!)
-            FieldB.new_advanced(.world_pos, GPU_f32_3, .SV_Position, .LINEAR, 2, .geometry_static),
-            FieldB.new_advanced(.normal, GPU_f32_3, .USER, .LINEAR, 2, .geometry_static),
-            FieldB.new_advanced(.uv, GPU_f32_2, .USER, .LINEAR, 2, .geometry_static),
+            FieldB.vertex_field_advanced(.world_pos, GPUType.GPU_f32_3, .SV_Position, .LINEAR, 2, .geometry_static),
+            FieldB.vertex_field_advanced(.normal, GPUType.GPU_f32_3, .USER, .LINEAR, 2, .geometry_static),
+            FieldB.vertex_field_advanced(.uv, GPUType.GPU_f32_2, .USER, .LINEAR, 2, .geometry_static),
         },
         100000,
     );

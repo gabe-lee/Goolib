@@ -116,6 +116,8 @@ pub const AnyFragmentShaderOutputStruct = ShaderUtils.AnyFragmentShaderOutputStr
 pub const GPUType = ShaderUtils.GPUType;
 const ErrorBehavior = Common.ErrorBehavior;
 
+const DEBUG = std.debug.print;
+
 const ct_assert_with_reason = Assert.assert_with_reason;
 const ct_assert_unreachable = Assert.assert_unreachable;
 const ct_assert_unreachable_err = Assert.assert_unreachable_err;
@@ -154,11 +156,11 @@ pub const CopyKind = enum(u8) {
     TEXTURE,
 };
 
-pub const StorageUsage = Flags(enum(GPU_BufferUsageFlags.RawInt) {
-    GRAPHICS_STORAGE_READ = GPU_BufferUsageFlags.Flag.GRAPHICS_STORAGE_READ,
-    COMPUTE_STORAGE_READ = GPU_BufferUsageFlags.Flag.COMPUTE_STORAGE_READ,
-    COMPUTE_STORAGE_WRITE = GPU_BufferUsageFlags.Flag.COMPUTE_STORAGE_WRITE,
-}, enum(GPU_BufferUsageFlags.RawInt) {});
+// pub const StorageUsage = std.enums.EnumSet(enum(u32) {
+//     GRAPHICS_STORAGE_READ = @intFromEnum(GPU_BufferUsageFlags.Key.GRAPHICS_STORAGE_READ),
+//     COMPUTE_STORAGE_READ = @intFromEnum(GPU_BufferUsageFlags.Key.COMPUTE_STORAGE_READ),
+//     COMPUTE_STORAGE_WRITE = @intFromEnum(GPU_BufferUsageFlags.Key.COMPUTE_STORAGE_WRITE),
+// });
 
 pub const GPUBufferKind = enum(u8) {
     STORAGE,
@@ -491,6 +493,22 @@ pub fn ShaderResource(comptime UNIFORM_NAMES_ENUM: type, comptime STORAGE_BUFFER
         STORAGE_TEXTURE: TEXTURE_NAMES_ENUM,
         STORAGE_BUFFER: STORAGE_BUFFER_NAMES_ENUM,
         UNIFORM_BUFFER: UNIFORM_NAMES_ENUM,
+
+        pub fn sampled_texture(comptime tex_name: TEXTURE_NAMES_ENUM, comptime samp_name: SAMPLER_NAMES_ENUM) @This() {
+            return @This(){ .SAMPLED_TEXTURE = .{
+                .tex_name = tex_name,
+                .samp_name = samp_name,
+            } };
+        }
+        pub fn storage_texture(comptime tex_name: TEXTURE_NAMES_ENUM) @This() {
+            return @This(){ .STORAGE_TEXTURE = tex_name };
+        }
+        pub fn storage_buffer(comptime buf_name: STORAGE_BUFFER_NAMES_ENUM) @This() {
+            return @This(){ .STORAGE_BUFFER = buf_name };
+        }
+        pub fn uniform(comptime uni_name: UNIFORM_NAMES_ENUM) @This() {
+            return @This(){ .UNIFORM_BUFFER = uni_name };
+        }
     };
 }
 
@@ -646,15 +664,25 @@ pub fn TextureDefinition(comptime TEXTURE_NAMES_ENUM: type) type {
         pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
         mipmap_levels: u32 = 0,
         sample_count: SDL3.GPU_SampleCount = ._1,
-        usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.from_flag(.SAMPLE),
+        usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.new(.SAMPLE),
 
-        pub fn texture_def(name: TEXTURE_NAMES_ENUM, shape: GPU_TextureType, format: GPU_TextureFormat, mipmap_levels: u32, sample_count: SDL3.GPU_SampleCount, usage: GPU_TextureUsageFlags) Self {
+        pub fn texture_def_advanced(name: TEXTURE_NAMES_ENUM, shape: GPU_TextureType, format: GPU_TextureFormat, mipmap_levels: u32, sample_count: SDL3.GPU_SampleCount, usage: GPU_TextureUsageFlags) Self {
             return Self{
                 .name = name,
                 .pixel_format = format,
                 .mipmap_levels = mipmap_levels,
                 .sample_count = sample_count,
                 .shape = shape,
+                .usage = usage,
+            };
+        }
+        pub fn texture_def(name: TEXTURE_NAMES_ENUM, format: GPU_TextureFormat, mipmap_levels: u32, usage: GPU_TextureUsageFlags) Self {
+            return Self{
+                .name = name,
+                .pixel_format = format,
+                .mipmap_levels = mipmap_levels,
+                .sample_count = ._1,
+                .shape = ._2D,
                 .usage = usage,
             };
         }
@@ -666,7 +694,7 @@ const TextureDef = struct {
     pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
     mipmap_levels: u32 = 0,
     sample_count: SDL3.GPU_SampleCount = ._1,
-    usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.from_flag(.SAMPLE),
+    usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.new(.SAMPLE),
 };
 
 pub fn SamplerDefinition(comptime SAMPLER_NAMES_ENUM: type) type {
@@ -712,9 +740,9 @@ pub fn StorageBufferDefinition(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
     return struct {
         name: STORAGE_BUFFER_NAMES_ENUM,
         elem_type: type,
-        usage: StorageUsage,
+        usage: GPU_BufferUsageFlags,
 
-        pub fn storage_buffer_def(comptime name: STORAGE_BUFFER_NAMES_ENUM, comptime elem_type: type, comptime usage: StorageUsage) @This() {
+        pub fn storage_buffer_def(comptime name: STORAGE_BUFFER_NAMES_ENUM, comptime elem_type: type, comptime usage: GPU_BufferUsageFlags) @This() {
             return @This(){
                 .name = name,
                 .elem_type = elem_type,
@@ -726,7 +754,7 @@ pub fn StorageBufferDefinition(comptime STORAGE_BUFFER_NAMES_ENUM: type) type {
 
 const StorageDef = struct {
     element_type: type,
-    usage: StorageUsage,
+    usage: GPU_BufferUsageFlags,
 };
 
 pub const ValidationSettings = struct {
@@ -754,6 +782,13 @@ pub fn IndexBufferDef(comptime INDEX_BUFFER_NAMES_ENUM: type) type {
     return struct {
         name: INDEX_BUFFER_NAMES_ENUM,
         index_size: SDL3.GPU_IndexTypeSize,
+
+        pub fn index_buffer_def(comptime name: INDEX_BUFFER_NAMES_ENUM, comptime size: SDL3.GPU_IndexTypeSize) @This() {
+            return @This(){
+                .name = name,
+                .index_size = size,
+            };
+        }
     };
 }
 
@@ -761,6 +796,13 @@ pub fn IndirectDrawBufferDef(comptime INDIRECT_BUFFER_NAMES_ENUM: type) type {
     return struct {
         name: INDIRECT_BUFFER_NAMES_ENUM,
         mode: IndirectDrawMode,
+
+        pub fn indirect_draw_buffer_def(comptime name: INDIRECT_BUFFER_NAMES_ENUM, comptime mode: IndirectDrawMode) @This() {
+            return @This(){
+                .name = name,
+                .mode = mode,
+            };
+        }
     };
 }
 
@@ -1100,7 +1142,7 @@ pub fn GraphicsController(
     const _STORAGE_BUFFER_TYPES, const _STORAGE_BUFFER_SIZES, const _STORAGE_BUFFER_USAGES = comptime make: {
         var types: [_NUM_STORAGE_BUFFERS]type = undefined;
         var sizes: [_NUM_STORAGE_BUFFERS]u32 = undefined;
-        var usages: [_NUM_STORAGE_BUFFERS]StorageUsage = undefined;
+        var usages: [_NUM_STORAGE_BUFFERS]GPU_BufferUsageFlags = undefined;
         var defined: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
         for (STORAGE_BUFFER_DEFINITIONS) |def| {
             const idx = @intFromEnum(def.name);
@@ -1311,7 +1353,7 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .STORAGE_BUFFER => |buf_name| {
-                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
+                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].contains(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
                         SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.vertex_shader), buf_name, .VERTEX);
                     },
                     else => {},
@@ -1411,7 +1453,7 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .STORAGE_BUFFER => |buf_name| {
-                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.fragment_shader) });
+                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].contains(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.fragment_shader) });
                         SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.fragment_shader), buf_name, .FRAGMENT);
                     },
                     else => {},
@@ -4927,7 +4969,7 @@ pub fn GraphicsController(
             for (options.vertex_shaders[0..]) |vert| {
                 const vert_idx = @intFromEnum(vert.name);
                 assert_with_reason(vert_shaders_init[vert_idx] == false, @src(), "vertex shader `{s}` was initialized more than once", .{@tagName(vert.name)});
-                assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.has_flag(vert.code.format), @src(), "vertex shader `{s}` has incompatible code format `{s}`", .{ @tagName(vert.name), vert.code.format.flag_name() });
+                assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.contains(vert.code.format), @src(), "vertex shader `{s}` has incompatible code format `{s}`", .{ @tagName(vert.name), vert.code.format.flag_name() });
                 const sdl_info = vert.sdl_info();
                 vert_shaders[vert_idx] = controller.gpu.create_shader(sdl_info) catch |err| return ERROR_MODE.handle(@src(), err);
                 vert_shaders_init[vert_idx] = true;
@@ -4945,7 +4987,7 @@ pub fn GraphicsController(
             for (options.fragment_shaders[0..]) |frag| {
                 const frag_idx = @intFromEnum(frag.name);
                 assert_with_reason(frag_shaders_init[frag_idx] == false, @src(), "fragment shader `{s}` was initialized more than once", .{@tagName(frag.name)});
-                assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.has_flag(frag.code.format), @src(), "fragment shader `{s}` has incompatible code format `{s}`", .{ @tagName(frag.name), frag.code.format.flag_name() });
+                assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.contains(frag.code.format), @src(), "fragment shader `{s}` has incompatible code format `{s}`", .{ @tagName(frag.name), frag.code.format.flag_name() });
                 const sdl_info = frag.sdl_info();
                 frag_shaders[frag_idx] = controller.gpu.create_shader(sdl_info) catch |err| return ERROR_MODE.handle(@src(), err);
                 frag_shaders_init[frag_idx] = true;
@@ -5423,7 +5465,7 @@ pub fn GraphicsController(
             const dir = try std.Io.Dir.cwd().openDir(io, template_folder_relative_path, .{});
             var write_buf: [1028]u8 = undefined;
             inline for (INTERNAL.VERTEX_SHADER_DEFS) |def| {
-                const file = try dir.createFile(io, "vert_shader_" ++ @tagName(def.vertex_shader) ++ ".template.hlsl", .{});
+                const file = try dir.createFile(io, "vert_" ++ @tagName(def.vertex_shader) ++ ".template.hlsl", .{});
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
@@ -5434,12 +5476,26 @@ pub fn GraphicsController(
                 inline for (INTERNAL.VERTEX_SHADER_UNIQUE_ENUMS[enum_start..enum_end]) |enum_type| {
                     try ShaderUtils.write_hlsl_enum_stub(enum_type, writer);
                 }
+                try writer.writeByte('\n');
+                inline for (INTERNAL.allowed_sample_pairs_for_vert_shaders(def.vertex_shader)) |pair| {
+                    try write_sampled_texture_pair(writer, pair, .VERTEX);
+                }
+                inline for (INTERNAL.allowed_storage_textures_for_vert_shaders(def.vertex_shader)) |storage_tex| {
+                    try write_read_only_storage_texture(writer, storage_tex, .VERTEX);
+                }
+                inline for (INTERNAL.allowed_storage_buffers_for_vert_shaders(def.vertex_shader)) |storage_buf| {
+                    try write_storage_buffer(writer, storage_buf, .VERTEX);
+                }
+                inline for (INTERNAL.allowed_uniforms_for_vert_shader(def.vertex_shader)) |uniform| {
+                    try write_uniform(writer, uniform, .VERTEX);
+                }
                 try V_IN.write_hlsl_vertex_stub(writer);
                 try V_OUT.write_hlsl_vert_stub(writer);
-                try writer.writeAll(V_OUT.STRUCT_NAME_PACKED ++ "main(" ++ V_IN.STRUCT_NAME_PACKED ++ " pck) {\n    " ++ V_IN.STRUCT_NAME ++ " in = unpack_vertex_input(pck);\n    " ++ V_OUT.STRUCT_NAME ++ " out;\n    // SHADER LOGIC\n    return pack_vertex_output(out);\n}");
+                try writer.writeAll(V_OUT.STRUCT_NAME_PACKED ++ " main(" ++ V_IN.STRUCT_NAME_PACKED ++ " pck) {\n    " ++ V_IN.STRUCT_NAME ++ " vert_in = unpack_vertex_input(pck);\n    " ++ V_OUT.STRUCT_NAME ++ " vert_out;\n    // SHADER LOGIC\n    return pack_vertex_output(vert_out);\n}");
+                try writer.flush();
             }
             inline for (INTERNAL.FRAGMENT_SHADER_DEFS) |def| {
-                const file = try dir.createFile(io, "frag_shader_" ++ @tagName(def.fragment_shader) ++ ".template.hlsl", .{});
+                const file = try dir.createFile(io, "frag_" ++ @tagName(def.fragment_shader) ++ ".template.hlsl", .{});
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
@@ -5450,10 +5506,84 @@ pub fn GraphicsController(
                 inline for (INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUMS[enum_start..enum_end]) |enum_type| {
                     try ShaderUtils.write_hlsl_enum_stub(enum_type, writer);
                 }
+                try writer.writeByte('\n');
+                inline for (INTERNAL.allowed_sample_pairs_for_frag_shaders(def.fragment_shader)) |pair| {
+                    try write_sampled_texture_pair(writer, pair, .FRAGMENT);
+                }
+                inline for (INTERNAL.allowed_storage_textures_for_frag_shaders(def.fragment_shader)) |storage_tex| {
+                    try write_read_only_storage_texture(writer, storage_tex, .FRAGMENT);
+                }
+                inline for (INTERNAL.allowed_storage_buffers_for_frag_shaders(def.fragment_shader)) |storage_buf| {
+                    try write_storage_buffer(writer, storage_buf, .FRAGMENT);
+                }
+                inline for (INTERNAL.allowed_uniforms_for_frag_shader(def.fragment_shader)) |uniform| {
+                    try write_uniform(writer, uniform, .FRAGMENT);
+                }
                 try F_IN.write_hlsl_frag_stub(writer);
                 try F_OUT.write_hlsl_fragment_output_structs(writer);
-                try writer.writeAll(F_OUT.STRUCT_NAME_PACKED ++ "main(" ++ F_IN.STRUCT_NAME_PACKED ++ " pck) {\n    " ++ F_IN.STRUCT_NAME ++ " in = unpack_frag_input(pck);\n    " ++ F_OUT.STRUCT_NAME ++ " out;\n    // SHADER LOGIC\n    return pack_fragment_output(out);\n}");
+                try writer.writeAll(F_OUT.STRUCT_NAME_PACKED ++ " main(" ++ F_IN.STRUCT_NAME_PACKED ++ " pck) {\n    " ++ F_IN.STRUCT_NAME ++ " frag_in = unpack_frag_input(pck);\n    " ++ F_OUT.STRUCT_NAME ++ " frag_out;\n    // SHADER LOGIC\n    return pack_fragment_output(frag_out);\n}");
+                try writer.flush();
             }
+        }
+
+        fn write_sampled_texture_pair(writer: *std.Io.Writer, comptime pair: _ShaderAllowedSamplePair, comptime stage: ShaderStage) std.Io.Writer.Error!void {
+            const space = comptime switch (stage) {
+                .VERTEX => "space0",
+                .FRAGMENT => "space2",
+            };
+            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@intFromEnum(pair.texture)];
+            const TEX_TYPE = switch (TEX_DEF.shape) {
+                ._2D => "Texture2D<",
+                ._2D_ARRAY => "Texture2DArray<",
+                ._3D => "Texture3D<",
+                .CUBE => "TextureCube<",
+                .CUBE_ARRAY => "TextureCubeArray<",
+            };
+            const TEX_SUB_TYPE = comptime if (std.mem.endsWith(u8, @tagName(TEX_DEF.pixel_format), "_INT")) "int4> " else if (std.mem.endsWith(u8, @tagName(TEX_DEF.pixel_format), "_UINT")) "uint4> " else "float4> ";
+            try writer.writeAll(TEX_TYPE ++ TEX_SUB_TYPE ++ @tagName(pair.texture) ++ " : register(t");
+            try writer.printInt(pair.gpu_register, 10, .lower, .{});
+            try writer.writeAll(", " ++ space ++ ");\nSamplerState " ++ @tagName(pair.sampler) ++ " : register(s");
+            try writer.printInt(pair.gpu_register, 10, .lower, .{});
+            try writer.writeAll(", " ++ space ++ ");\n\n");
+        }
+
+        fn write_read_only_storage_texture(writer: *std.Io.Writer, comptime def: _ShaderAllowedStorageTexture, comptime stage: ShaderStage) std.Io.Writer.Error!void {
+            const space = comptime switch (stage) {
+                .VERTEX => "space0",
+                .FRAGMENT => "space2",
+            };
+            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@intFromEnum(def.texture)];
+            const TEX_TYPE = switch (TEX_DEF.shape) {
+                ._2D => "Texture2D<",
+                ._2D_ARRAY => "Texture2DArray<",
+                ._3D => "Texture3D<",
+                .CUBE => "TextureCube<",
+                .CUBE_ARRAY => "TextureCubeArray<",
+            };
+            const TEX_SUB_TYPE = comptime if (std.mem.endsWith(u8, @tagName(TEX_DEF.pixel_format), "_INT")) "int4> " else if (std.mem.endsWith(u8, @tagName(TEX_DEF.pixel_format), "_UINT")) "uint4> " else "float4> ";
+            try writer.writeAll(TEX_TYPE ++ TEX_SUB_TYPE ++ @tagName(def.texture) ++ " : register(t");
+            try writer.printInt(def.gpu_register, 10, .lower, .{});
+            try writer.writeAll(", " ++ space ++ ");\n\n");
+        }
+
+        fn write_storage_buffer(writer: *std.Io.Writer, comptime def: _ShaderAllowedStorageBuffer, comptime stage: ShaderStage) std.Io.Writer.Error!void {
+            const space = comptime switch (stage) {
+                .VERTEX => 0,
+                .FRAGMENT => 2,
+            };
+            const STORAGE = AnyUniformOrStorageStruct(INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(def.buffer)]);
+            try STORAGE.write_hlsl_storage_buffer_stub(@tagName(def.buffer), @tagName(def.buffer) ++ "_BUFFER", @intCast(def.gpu_register), space, writer);
+            try writer.writeByte('\n');
+        }
+
+        fn write_uniform(writer: *std.Io.Writer, comptime def: _ShaderAllowedUniform, comptime stage: ShaderStage) std.Io.Writer.Error!void {
+            const space = comptime switch (stage) {
+                .VERTEX => 1,
+                .FRAGMENT => 3,
+            };
+            const UNI = AnyUniformOrStorageStruct(INTERNAL.UNIFORM_TYPES[@intFromEnum(def.uniform)]);
+            try UNI.write_hlsl_uniform_stub(@tagName(def.uniform), @intCast(def.register), space, writer);
+            try writer.writeByte('\n');
         }
     };
 }

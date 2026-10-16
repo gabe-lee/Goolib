@@ -13,6 +13,7 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
         .root_module = breakout_mod,
         .use_llvm = opts.USE_LLVM,
     });
+
     breakout.lto = opts.LINK_TIME_OPTIMIZE;
     breakout.root_module.addImport("Goolib", goolib);
     b.installArtifact(breakout);

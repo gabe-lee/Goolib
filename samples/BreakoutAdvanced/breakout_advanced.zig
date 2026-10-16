@@ -35,8 +35,6 @@ const app_log = std.log.scoped(.app);
 
 const Goolib = @import("Goolib");
 const SDL = Goolib.SDL3;
-const GraphicsControllerModule = SDL.GraphicsController;
-const GCM = GraphicsControllerModule;
 const AABB = Goolib.AABB2.define_aabb2_type(f32);
 const Rect = Goolib.Rect2.define_rect2_type(f32);
 const FVec: type = SDL.Vec_f32;
@@ -45,47 +43,14 @@ const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
 
+const GraphicsModule = @import("./breakout_graphics.zig");
+
 const best_score_storage_org_name = "goolib_samples";
-const best_score_storage_app_name = "breakout_advanced";
+const best_score_storage_app_name = "breakout";
 const records_storage_file_name = "records";
 const attempts_storage_file_name = "attempts";
 var fully_initialized = false;
 const window_size: IVec = IVec.new(640, 480);
-const Windows = enum{MainWindow};
-const Fences = enum{};
-const IndexBuffers = enum{};
-const IndirectBuffers = enum{};
-const UploadTransferBuffers = enum{};
-const DownloadTransferBuffers = enum{};
-const VertexBufferNames = enum{
-    screen_position,
-    sprite_id_and_corner,
-};
-const VertBufDefs = struct {
-    pub const screen_position = GCM.VertexBufferDescription{
-        .element_type = FVec,
-        .fields = enum{
-            pos,
-        },
-        .fields_info = struct {
-            pub const pos = GCM.VertexBufferFieldInfo{
-                .field_type = FVec,
-                .gpu_format = .F32_x2,
-                .offset = 0,
-            };
-        },
-    };
-};
-const ShaderStructNames = enum{};
-const UniformNames = enum{};
-const SamplerNames = enum{};
-const StorageBufferNames = enum{};
-const TextureNames = enum{};
-const VertexShaderNames = enum{};
-const FragmentShaderNames = enum{};
-const RenderPipelineNames = enum{};
-const Graphics = GraphicsControllerModule.GraphicsController(GCM.GPU_CreateOptions{ .shader_formats = GCM.GPU_ShaderFormatFlags.all(),.debug_mode = true,.driver_name = "vulkan" }, Windows, Fences, IndexBuffers, IndeirectBuffers, UploadTransferBuffers, DownloadTransferBuffers, VertexBuffers, comptime STRUCT_OF_GPU_VERTEX_BUFFER_DEFINITIONS: type, ShaderStructNames, comptime STRUCT_OF_SHADER_STRUCT_DEFINITIONS: type, UniformNames, comptime STRUCT_OF_UNIFORM_STRUCTS: type, SamplerNames, comptime SAMPLER_DEFINITIONS: [?]SamplerDefinition(SAMPLER_NAMES_ENUM), StorageBufferNames, comptime GPU_STORAGE_BUFFER_DEFINITIONS: [?]StroageBufferDefinition(GPU_STORAGE_BUFFER_NAMES_ENUM), TextureNames, comptime TEXTURE_DEFINITIONS: [?]TextureDefinition(TEXTURE_NAMES_ENUM), VertexShaderNames, comptime VERTEX_SHADER_DEFINITIONS: [?]VertexShaderDefinition(VERTEX_SHADER_NAMES_ENUM,GPU_SHADER_STRUCT_NAMES_ENUM,GPU_UNIFORM_NAMES_ENUM,GPU_STORAGE_BUFFER_NAMES_ENUM,TEXTURE_NAMES_ENUM,SAMPLER_NAMES_ENUM), FragmentShaderNames, comptime FRAGMENT_SHADER_DEFINITIONS: [?]FragmentShaderDefinition(FRAGMENT_SHADER_NAMES_ENUM,GPU_SHADER_STRUCT_NAMES_ENUM,GPU_UNIFORM_NAMES_ENUM,GPU_STORAGE_BUFFER_NAMES_ENUM,TEXTURE_NAMES_ENUM,SAMPLER_NAMES_ENUM), RenderPipelineNames, comptime RENDER_PIPELINE_DEFINITIONS: [?]RenderPipelineDefinition(RENDER_PIPELINE_NAMES_ENUM,VERTEX_SHADER_NAMES_ENUM,FRAGMENT_SHADER_NAMES_ENUM,GPU_VERTEX_BUFFER_NAMES_ENUM,GPU_SHADER_STRUCT_NAMES_ENUM), comptime VALIDATION: ValidationSettings,);
-var graphics = GraphicsControllerModule.;
 var window: *SDL.Window = undefined;
 var renderer: *SDL.Renderer = undefined;
 var sprite_texture: *SDL.SimpleTexture = undefined;
@@ -126,6 +91,8 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
     _ = appstate;
     _ = arg_count;
     _ = arg_list;
+    std.debug.print("VertexIn: {s}\n", .{@typeName(GraphicsModule.VertexIn)}); //DEBUG
+    std.debug.print("Controller: {s}\n", .{@typeName(GraphicsModule.Controller)}); //DEBUG
 
     var write_buf = BoundedArray(u8, 250){};
 

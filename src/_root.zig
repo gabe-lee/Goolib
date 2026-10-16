@@ -51,6 +51,7 @@ pub const DataGrid = @import("./DataGrid.zig");
 // pub const Compare = @import("./Compare.zig");
 pub const DummyAllocator = @import("./DummyAllocator.zig");
 pub const DummyIo = @import("./DummyIo.zig");
+pub const Enums = @import("./Enums.zig");
 pub const EnumMap = @import("./EnumMap.zig");
 pub const FileFormat = @import("./FileFormat.zig");
 // pub const Filegen = @import("./Filegen.zig");
@@ -130,6 +131,7 @@ comptime {
         _ = @import("./CompositeEnum.zig");
         _ = @import("./DataGrid.zig");
         _ = @import("./DummyAllocator.zig");
+        _ = @import("./Enums.zig");
         _ = @import("./EnumMap.zig");
         _ = @import("./FileFormat.zig");
         // _ = @import("./Filegen.zig");

@@ -1,6 +1,8 @@
 ############
 breakout.zig
 layout.zig
+BreakoutAdvanced/breakout_advanced.zig
+BreakoutAdvanced/breakout_graphics.zig
 ------------
 zlib license
 

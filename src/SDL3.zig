@@ -38,6 +38,8 @@ const Cast = Root.Cast;
 const Flags = Root.Flags.Flags;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
+const Enums = Root.Enums;
+const EnumSet = Enums.EnumSet;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
@@ -7272,7 +7274,7 @@ pub const GPU_ColorTargetBlendState = extern struct {
     src_alpha_blendfactor: GPU_BlendFactor = .INVALID,
     dst_alpha_blendfactor: GPU_BlendFactor = .INVALID,
     alpha_blend_op: GPU_BlendOp = .INVALID,
-    color_write_mask: GPU_ColorComponentFlags = .{ .raw = 0 },
+    color_write_mask: GPU_ColorComponentFlags = .empty,
     enable_blend: bool = false,
     enable_color_write_mask: bool = false,
     _padding1: u8 = 0,
@@ -7602,145 +7604,145 @@ pub const GPU_SwapchainComposition = enum(c_uint) {
 };
 
 pub const GPU_TransferBufferUsage = enum(c_uint) {
-    UPLOAD = C.SDL_TRANSFERBUFFERUSAGE_UPLOAD,
-    DOWNLOAD = C.SDL_TRANSFERBUFFERUSAGE_DOWNLOAD,
+    UPLOAD = C.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+    DOWNLOAD = C.SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD,
 
     pub const to_c = c_enum_conversions(GPU_TransferBufferUsage, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_TransferBufferUsage, c_uint).from_c;
 };
 
 pub const GPU_ShaderStage = enum(c_uint) {
-    VERTEX = C.SDL_SHADERSTAGE_VERTEX,
-    FRAGMENT = C.SDL_SHADERSTAGE_FRAGMENT,
+    VERTEX = C.SDL_GPU_SHADERSTAGE_VERTEX,
+    FRAGMENT = C.SDL_GPU_SHADERSTAGE_FRAGMENT,
 
     pub const to_c = c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage).to_c;
     pub const from_c = c_enum_conversions(GPU_ShaderStage, C.SDL_GPUShaderStage).from_c;
 };
 
 pub const GPU_VertexInputRate = enum(c_uint) {
-    VERTEX = C.SDL_VERTEXINPUTRATE_VERTEX,
-    INSTANCE = C.SDL_VERTEXINPUTRATE_INSTANCE,
+    VERTEX = C.SDL_GPU_VERTEXINPUTRATE_VERTEX,
+    INSTANCE = C.SDL_GPU_VERTEXINPUTRATE_INSTANCE,
 
     pub const to_c = c_enum_conversions(GPU_VertexInputRate, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_VertexInputRate, c_uint).from_c;
 };
 
 pub const GPU_FilterMode = enum(c_uint) {
-    NEAREST = C.SDL_FILTER_NEAREST,
-    LINEAR = C.SDL_FILTER_LINEAR,
+    NEAREST = C.SDL_GPU_FILTER_NEAREST,
+    LINEAR = C.SDL_GPU_FILTER_LINEAR,
 
     pub const to_c = c_enum_conversions(GPU_FilterMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_FilterMode, c_uint).from_c;
 };
 
 pub const GPU_SamplerMipmapMode = enum(c_uint) {
-    NEAREST = C.SDL_SAMPLERMIPMAPMODE_NEAREST,
-    LINEAR = C.SDL_SAMPLERMIPMAPMODE_LINEAR,
+    NEAREST = C.SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+    LINEAR = C.SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
 
     pub const to_c = c_enum_conversions(GPU_SamplerMipmapMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_SamplerMipmapMode, c_uint).from_c;
 };
 
 pub const GPU_SamplerAddressMode = enum(c_uint) {
-    REPEAT = C.SDL_SAMPLERADDRESSMODE_REPEAT,
-    MIRRORED_REPEAT = C.SDL_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
-    CLAMP_TO_EDGE = C.SDL_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+    REPEAT = C.SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+    MIRRORED_REPEAT = C.SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
+    CLAMP_TO_EDGE = C.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
 
     pub const to_c = c_enum_conversions(GPU_SamplerAddressMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_SamplerAddressMode, c_uint).from_c;
 };
 
 pub const GPU_PresentMode = enum(c_uint) {
-    VSYNC = C.SDL_PRESENTMODE_VSYNC,
-    IMMEDIATE = C.SDL_PRESENTMODE_IMMEDIATE,
-    MAILBOX = C.SDL_PRESENTMODE_MAILBOX,
+    VSYNC = C.SDL_GPU_PRESENTMODE_VSYNC,
+    IMMEDIATE = C.SDL_GPU_PRESENTMODE_IMMEDIATE,
+    MAILBOX = C.SDL_GPU_PRESENTMODE_MAILBOX,
 
     pub const to_c = c_enum_conversions(GPU_PresentMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_PresentMode, c_uint).from_c;
 };
 
 pub const GPU_BlendFactor = enum(c_uint) {
-    INVALID = C.SDL_BLENDFACTOR_INVALID,
-    ZERO = C.SDL_BLENDFACTOR_ZERO,
-    ONE = C.SDL_BLENDFACTOR_ONE,
-    SRC_COLOR = C.SDL_BLENDFACTOR_SRC_COLOR,
-    ONE_MINUS_SRC_COLOR = C.SDL_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
-    DST_COLOR = C.SDL_BLENDFACTOR_DST_COLOR,
-    ONE_MINUS_DST_COLOR = C.SDL_BLENDFACTOR_ONE_MINUS_DST_COLOR,
-    SRC_ALPHA = C.SDL_BLENDFACTOR_SRC_ALPHA,
-    ONE_MINUS_SRC_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-    DST_ALPHA = C.SDL_BLENDFACTOR_DST_ALPHA,
-    ONE_MINUS_DST_ALPHA = C.SDL_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
-    CONSTANT_COLOR = C.SDL_BLENDFACTOR_CONSTANT_COLOR,
-    ONE_MINUS_CONSTANT_COLOR = C.SDL_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR,
-    SRC_ALPHA_SATURATE = C.SDL_BLENDFACTOR_SRC_ALPHA_SATURATE,
+    INVALID = C.SDL_GPU_BLENDFACTOR_INVALID,
+    ZERO = C.SDL_GPU_BLENDFACTOR_ZERO,
+    ONE = C.SDL_GPU_BLENDFACTOR_ONE,
+    SRC_COLOR = C.SDL_GPU_BLENDFACTOR_SRC_COLOR,
+    ONE_MINUS_SRC_COLOR = C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR,
+    DST_COLOR = C.SDL_GPU_BLENDFACTOR_DST_COLOR,
+    ONE_MINUS_DST_COLOR = C.SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR,
+    SRC_ALPHA = C.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+    ONE_MINUS_SRC_ALPHA = C.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+    DST_ALPHA = C.SDL_GPU_BLENDFACTOR_DST_ALPHA,
+    ONE_MINUS_DST_ALPHA = C.SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
+    CONSTANT_COLOR = C.SDL_GPU_BLENDFACTOR_CONSTANT_COLOR,
+    ONE_MINUS_CONSTANT_COLOR = C.SDL_GPU_BLENDFACTOR_ONE_MINUS_CONSTANT_COLOR,
+    SRC_ALPHA_SATURATE = C.SDL_GPU_BLENDFACTOR_SRC_ALPHA_SATURATE,
 
     pub const to_c = c_enum_conversions(GPU_BlendFactor, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_BlendFactor, c_uint).from_c;
 };
 
 pub const GPU_BlendOp = enum(c_uint) {
-    INVALID = C.SDL_BLENDOP_INVALID,
-    ADD = C.SDL_BLENDOP_ADD,
-    SUBTRACT = C.SDL_BLENDOP_SUBTRACT,
-    REVERSE_SUBTRACT = C.SDL_BLENDOP_REVERSE_SUBTRACT,
-    MIN = C.SDL_BLENDOP_MIN,
-    MAX = C.SDL_BLENDOP_MAX,
+    INVALID = C.SDL_GPU_BLENDOP_INVALID,
+    ADD = C.SDL_GPU_BLENDOP_ADD,
+    SUBTRACT = C.SDL_GPU_BLENDOP_SUBTRACT,
+    REVERSE_SUBTRACT = C.SDL_GPU_BLENDOP_REVERSE_SUBTRACT,
+    MIN = C.SDL_GPU_BLENDOP_MIN,
+    MAX = C.SDL_GPU_BLENDOP_MAX,
 
     pub const to_c = c_enum_conversions(GPU_BlendOp, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_BlendOp, c_uint).from_c;
 };
 
 pub const GPU_CompareOp = enum(c_uint) {
-    INVALID = C.SDL_COMPAREOP_INVALID,
-    NEVER = C.SDL_COMPAREOP_NEVER,
-    LESS = C.SDL_COMPAREOP_LESS,
-    EQUAL = C.SDL_COMPAREOP_EQUAL,
-    LESS_OR_EQUAL = C.SDL_COMPAREOP_LESS_OR_EQUAL,
-    GREATER = C.SDL_COMPAREOP_GREATER,
-    NOT_EQUAL = C.SDL_COMPAREOP_NOT_EQUAL,
-    GREATER_OR_EQUAL = C.SDL_COMPAREOP_GREATER_OR_EQUAL,
-    ALWAYS = C.SDL_COMPAREOP_ALWAYS,
+    INVALID = C.SDL_GPU_COMPAREOP_INVALID,
+    NEVER = C.SDL_GPU_COMPAREOP_NEVER,
+    LESS = C.SDL_GPU_COMPAREOP_LESS,
+    EQUAL = C.SDL_GPU_COMPAREOP_EQUAL,
+    LESS_OR_EQUAL = C.SDL_GPU_COMPAREOP_LESS_OR_EQUAL,
+    GREATER = C.SDL_GPU_COMPAREOP_GREATER,
+    NOT_EQUAL = C.SDL_GPU_COMPAREOP_NOT_EQUAL,
+    GREATER_OR_EQUAL = C.SDL_GPU_COMPAREOP_GREATER_OR_EQUAL,
+    ALWAYS = C.SDL_GPU_COMPAREOP_ALWAYS,
 
     pub const to_c = c_enum_conversions(GPU_CompareOp, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_CompareOp, c_uint).from_c;
 };
 
 pub const GPU_StencilOp = enum(c_uint) {
-    INVALID = C.SDL_STENCILOP_INVALID,
-    KEEP = C.SDL_STENCILOP_KEEP,
-    ZERO = C.SDL_STENCILOP_ZERO,
-    REPLACE = C.SDL_STENCILOP_REPLACE,
-    INCREMENT_AND_CLAMP = C.SDL_STENCILOP_INCREMENT_AND_CLAMP,
-    DECREMENT_AND_CLAMP = C.SDL_STENCILOP_DECREMENT_AND_CLAMP,
-    INVERT = C.SDL_STENCILOP_INVERT,
-    INCREMENT_AND_WRAP = C.SDL_STENCILOP_INCREMENT_AND_WRAP,
-    DECREMENT_AND_WRAP = C.SDL_STENCILOP_DECREMENT_AND_WRAP,
+    INVALID = C.SDL_GPU_STENCILOP_INVALID,
+    KEEP = C.SDL_GPU_STENCILOP_KEEP,
+    ZERO = C.SDL_GPU_STENCILOP_ZERO,
+    REPLACE = C.SDL_GPU_STENCILOP_REPLACE,
+    INCREMENT_AND_CLAMP = C.SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP,
+    DECREMENT_AND_CLAMP = C.SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP,
+    INVERT = C.SDL_GPU_STENCILOP_INVERT,
+    INCREMENT_AND_WRAP = C.SDL_GPU_STENCILOP_INCREMENT_AND_WRAP,
+    DECREMENT_AND_WRAP = C.SDL_GPU_STENCILOP_DECREMENT_AND_WRAP,
 
     pub const to_c = c_enum_conversions(GPU_StencilOp, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_StencilOp, c_uint).from_c;
 };
 
 pub const GPU_FillMode = enum(c_uint) {
-    FILL = C.SDL_FILLMODE_FILL,
-    LINE = C.SDL_FILLMODE_LINE,
+    FILL = C.SDL_GPU_FILLMODE_FILL,
+    LINE = C.SDL_GPU_FILLMODE_LINE,
 
     pub const to_c = c_enum_conversions(GPU_FillMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_FillMode, c_uint).from_c;
 };
 
 pub const GPU_CullMode = enum(c_uint) {
-    NONE = C.SDL_CULLMODE_NONE,
-    FRONT = C.SDL_CULLMODE_FRONT,
-    BACK = C.SDL_CULLMODE_BACK,
+    NONE = C.SDL_GPU_CULLMODE_NONE,
+    FRONT = C.SDL_GPU_CULLMODE_FRONT,
+    BACK = C.SDL_GPU_CULLMODE_BACK,
 
     pub const to_c = c_enum_conversions(GPU_CullMode, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_CullMode, c_uint).from_c;
 };
 
 pub const GPU_FrontFaceWinding = enum(c_uint) {
-    CCW = C.SDL_FRONTFACE_COUNTER_CLOCKWISE,
-    CW = C.SDL_FRONTFACE_CLOCKWISE,
+    CCW = C.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+    CW = C.SDL_GPU_FRONTFACE_CLOCKWISE,
 
     pub const to_c = c_enum_conversions(GPU_FrontFaceWinding, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_FrontFaceWinding, c_uint).from_c;
@@ -8214,20 +8216,20 @@ pub const GPU_Fence = opaque {
 };
 
 pub const GPU_PrimitiveType = enum(c_uint) {
-    TRIANGLE_LIST = C.SDL_PRIMITIVETYPE_TRIANGLELIST,
-    TRIANGLE_STRIP = C.SDL_PRIMITIVETYPE_TRIANGLESTRIP,
-    LINE_LIST = C.SDL_PRIMITIVETYPE_LINELIST,
-    LINE_STRIP = C.SDL_PRIMITIVETYPE_LINESTRIP,
-    POINT_LIST = C.SDL_PRIMITIVETYPE_POINTLIST,
+    TRIANGLE_LIST = C.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+    TRIANGLE_STRIP = C.SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP,
+    LINE_LIST = C.SDL_GPU_PRIMITIVETYPE_LINELIST,
+    LINE_STRIP = C.SDL_GPU_PRIMITIVETYPE_LINESTRIP,
+    POINT_LIST = C.SDL_GPU_PRIMITIVETYPE_POINTLIST,
 
     pub const to_c = c_enum_conversions(GPU_PrimitiveType, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_PrimitiveType, c_uint).from_c;
 };
 
 pub const GPU_LoadOp = enum(c_uint) {
-    LOAD = C.SDL_LOADOP_LOAD,
-    CLEAR = C.SDL_LOADOP_CLEAR,
-    DONT_CARE = C.SDL_LOADOP_DONT_CARE,
+    LOAD = C.SDL_GPU_LOADOP_LOAD,
+    CLEAR = C.SDL_GPU_LOADOP_CLEAR,
+    DONT_CARE = C.SDL_GPU_LOADOP_DONT_CARE,
 
     pub const to_c = c_enum_conversions(GPU_LoadOp, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_LoadOp, c_uint).from_c;
@@ -8244,8 +8246,8 @@ pub const GPU_StoreOp = enum(c_uint) {
 };
 
 pub const GPU_IndexTypeSize = enum(c_uint) {
-    U16 = C.SDL_INDEXELEMENTSIZE_16BIT,
-    U32 = C.SDL_INDEXELEMENTSIZE_32BIT,
+    U16 = C.SDL_GPU_INDEXELEMENTSIZE_16BIT,
+    U32 = C.SDL_GPU_INDEXELEMENTSIZE_32BIT,
 
     pub const to_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).to_c;
     pub const from_c = c_enum_conversions(GPU_IndexTypeSize, C.SDL_GPUIndexElementSize).from_c;
@@ -8406,7 +8408,7 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
     }
 };
 
-pub const GPU_TextureUsageFlags = Flags(enum(u32) {
+pub const GPU_TextureUsageFlags = EnumSet(enum(c_uint) {
     SAMPLE = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
     COLOR_TARGET = C.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
     DEPTH_STENCIL_TARGET = C.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
@@ -8414,24 +8416,33 @@ pub const GPU_TextureUsageFlags = Flags(enum(u32) {
     COMPUTE_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
     COMPUTE_STORAGE_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
     COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE,
-}, null);
+});
+// pub const GPU_TextureUsageFlags = Flags(enum(u32) {
+//     SAMPLE = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+//     COLOR_TARGET = C.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
+//     DEPTH_STENCIL_TARGET = C.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+//     GRAPHICS_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_GRAPHICS_STORAGE_READ,
+//     COMPUTE_STORAGE_READ = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_READ,
+//     COMPUTE_STORAGE_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE,
+//     COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE = C.SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_SIMULTANEOUS_READ_WRITE,
+// }, null);
 
 pub const GPU_TextureType = enum(c_uint) {
-    _2D = C.SDL_TEXTURETYPE_2D,
-    _2D_ARRAY = C.SDL_TEXTURETYPE_2D_ARRAY,
-    _3D = C.SDL_TEXTURETYPE_3D,
-    CUBE = C.SDL_TEXTURETYPE_CUBE,
-    CUBE_ARRAY = C.SDL_TEXTURETYPE_CUBE_ARRAY,
+    _2D = C.SDL_GPU_TEXTURETYPE_2D,
+    _2D_ARRAY = C.SDL_GPU_TEXTURETYPE_2D_ARRAY,
+    _3D = C.SDL_GPU_TEXTURETYPE_3D,
+    CUBE = C.SDL_GPU_TEXTURETYPE_CUBE,
+    CUBE_ARRAY = C.SDL_GPU_TEXTURETYPE_CUBE_ARRAY,
 
     pub const to_c = c_enum_conversions(GPU_TextureType, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_TextureType, c_uint).from_c;
 };
 
 pub const GPU_SampleCount = enum(c_uint) {
-    _1 = C.SDL_SAMPLECOUNT_1,
-    _2 = C.SDL_SAMPLECOUNT_2,
-    _4 = C.SDL_SAMPLECOUNT_4,
-    _8 = C.SDL_SAMPLECOUNT_8,
+    _1 = C.SDL_GPU_SAMPLECOUNT_1,
+    _2 = C.SDL_GPU_SAMPLECOUNT_2,
+    _4 = C.SDL_GPU_SAMPLECOUNT_4,
+    _8 = C.SDL_GPU_SAMPLECOUNT_8,
 
     pub const to_c = c_enum_conversions(GPU_SampleCount, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_SampleCount, c_uint).from_c;
@@ -8449,15 +8460,15 @@ pub const GPU_CubeMapFace = enum(c_uint) {
     pub const from_c = c_enum_conversions(GPU_CubeMapFace, c_uint).from_c;
 };
 
-pub const GPU_BufferUsageFlags = Flags(enum(u32) {
+pub const GPU_BufferUsageFlags = EnumSet(enum(u32) {
     VERTEX = C.SDL_GPU_BUFFERUSAGE_VERTEX,
     INDEX = C.SDL_GPU_BUFFERUSAGE_INDEX,
     INDIRECT = C.SDL_GPU_BUFFERUSAGE_INDIRECT,
     GRAPHICS_STORAGE_READ = C.SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
     COMPUTE_STORAGE_READ = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
     COMPUTE_STORAGE_WRITE = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
-}, null);
-pub const GPU_ShaderFormatFlags = Flags(enum(u32) {
+});
+pub const GPU_ShaderFormatFlags = EnumSet(enum(c_int) {
     INVALID = C.SDL_GPU_SHADERFORMAT_INVALID,
     PRIVATE = C.SDL_GPU_SHADERFORMAT_PRIVATE,
     SPIRV = C.SDL_GPU_SHADERFORMAT_SPIRV,
@@ -8465,13 +8476,13 @@ pub const GPU_ShaderFormatFlags = Flags(enum(u32) {
     DXIL = C.SDL_GPU_SHADERFORMAT_DXIL,
     MSL = C.SDL_GPU_SHADERFORMAT_MSL,
     METALLIB = C.SDL_GPU_SHADERFORMAT_METALLIB,
-}, null);
-pub const GPU_ColorComponentFlags = Flags(enum(u8) {
+});
+pub const GPU_ColorComponentFlags = EnumSet(enum(u8) {
     R = C.SDL_GPU_COLORCOMPONENT_R,
     G = C.SDL_GPU_COLORCOMPONENT_G,
     B = C.SDL_GPU_COLORCOMPONENT_B,
     A = C.SDL_GPU_COLORCOMPONENT_A,
-}, null);
+});
 pub const Mem = struct {
     pub inline fn malloc(bytes: usize) ?*anyopaque {
         return C.SDL_malloc(bytes);

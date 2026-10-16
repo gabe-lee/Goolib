@@ -1,0 +1,45 @@
+
+Texture2D<float4> SPRITE_TEX : register(t0, space2);
+SamplerState PIXEL_SAMPLER : register(s0, space2);
+
+cbuffer GLOBAL : register(b0, space3) {
+    // TOTAL = 16   USED = 8   WASTE = 8 (%50.00)
+    float2 pos_offset; // off    0  size    8
+    uint2 __pad__0;    // off    8  size    8
+};
+
+struct vert_to_frag {
+    float4 vert_pos;
+    float2 tex_pos;
+};
+
+struct vert_to_frag_PACKED {
+    float4 reg0 : SV_Position;
+    linear noperspective float2 reg1 : TEXCOORD0;
+};
+
+vert_to_frag unpack_frag_input(vert_to_frag_PACKED pck) {
+    vert_to_frag vf;
+    vf.vert_pos = pck.reg0;
+    vf.tex_pos = pck.reg1.xy;
+    return vf;
+}
+struct fragment_out {
+    float4 color; // target 0 [.xyzw]
+};
+
+struct fragment_out_PACKED {
+    float4 target0 : SV_Target0; // comps 4
+};
+
+fragment_out_PACKED pack_fragment_output(fragment_out f) {
+    fragment_out_PACKED pck;
+    pck.target0 = f.color;
+    return pck;
+}
+fragment_out_PACKED main(vert_to_frag_PACKED pck) {
+    vert_to_frag frag_in = unpack_frag_input(pck);
+    fragment_out frag_out;
+    // SHADER LOGIC
+    return pack_fragment_output(frag_out);
+}
