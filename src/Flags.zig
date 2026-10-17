@@ -619,3 +619,307 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         }
     };
 }
+
+pub const FlagTagLayout = enum(u8) {
+    TAGS_ARE_FLAG_INDEXES,
+    TAGS_ARE_FLAG_VALUES,
+};
+
+pub fn SingleBitFlags(comptime LAYOUT: FlagTagLayout, comptime ENUM: type) type {
+    const INFO_1 = @typeInfo(ENUM);
+    assert_with_reason(INFO_1 == .@"enum", @src(), "parameter `ENUM` must be an enum type", .{});
+    const E_INFO = INFO_1.@"enum";
+    // const I_INFO = @typeInfo(E_INFO.tag_type).int;
+    // assert_with_reason(I_INFO.signedness == .unsigned, @src(), "parameter `ENUM` tag type must be an unsigned integer type", .{});
+
+    const _ValueInt = if (comptime LAYOUT == .TAGS_ARE_FLAG_VALUES) check: {
+        var bits: u16 = @bitSizeOf(E_INFO.tag_type);
+        // Round up to next power of 2, at least 8
+        bits = @max(8, bits);
+        bits -= 1;
+        bits |= bits >> 1;
+        bits |= bits >> 2;
+        bits |= bits >> 4;
+        bits |= bits >> 8;
+        bits += 1;
+        break :check std.meta.Int(.unsigned, bits);
+    } else check: {
+        var bits: u16 = 0;
+        for (E_INFO.fields) |field| {
+            bits = @max(bits, @as(u16, @intCast(field.value)));
+        }
+        bits += 1;
+        // Round up to next power of 2, at least 8
+        bits = @max(8, bits);
+        bits -= 1;
+        bits |= bits >> 1;
+        bits |= bits >> 2;
+        bits |= bits >> 4;
+        bits |= bits >> 8;
+        bits += 1;
+        break :check std.meta.Int(.unsigned, bits);
+    };
+    const _ALLOWED_BITS = comptime check: {
+        var allowed: _ValueInt = 0;
+        for (E_INFO.fields) |field| {
+            if (LAYOUT == .TAGS_ARE_FLAG_VALUES) {
+                allowed |= field.value;
+                const pop_count = @popCount(@as(E_INFO.tag_type, @intCast(field.value)));
+                assert_with_reason(pop_count == 1 or pop_count == 0, @src(), "SingleBitFlags is only compatible with enums where each tag is only a single bit, but tag `{s}` has value `{b}`", .{ field.name, field.value });
+            } else {
+                allowed |= @as(_ValueInt, 1) << field.value;
+            }
+        }
+        break :check allowed;
+    };
+    return extern struct {
+        raw: ValueInt = 0,
+
+        const Self = @This();
+        pub const ValueInt = _ValueInt;
+        pub const Flag = ENUM;
+        pub const ALLOWED_BITS: ValueInt = _ALLOWED_BITS;
+        const DISALLOWED: ValueInt = ~ALLOWED_BITS;
+        pub const ALL = Self{ .raw = ALLOWED_BITS };
+        pub const EMPTY = Self{ .raw = 0 };
+        const RAW_MAX = math.maxInt(ValueInt);
+        const NEEDS_VALID_ASSERT = ALLOWED_BITS != RAW_MAX;
+
+        inline fn assert_valid_bits(raw: ValueInt) void {
+            if (NEEDS_VALID_ASSERT) {
+                assert_with_reason(raw & DISALLOWED == 0, @src(), "invalid bits for flags type {s}:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ @typeName(Self), raw, ALLOWED_BITS, raw & DISALLOWED });
+            }
+        }
+
+        inline fn flag_to_bit(flag_: ENUM) ValueInt {
+            switch (comptime LAYOUT) {
+                .TAGS_ARE_FLAG_VALUES => {
+                    return @intCast(@intFromEnum(flag_));
+                },
+                .TAGS_ARE_FLAG_INDEXES => {
+                    return @as(ValueInt, 1) << @intCast(@intFromEnum(flag_));
+                },
+            }
+        }
+        inline fn bit_to_flag(raw_: ValueInt) Flag {
+            switch (comptime LAYOUT) {
+                .TAGS_ARE_FLAG_VALUES => {
+                    return @enumFromInt(@as(E_INFO.tag_type, @intCast(raw_)));
+                },
+                .TAGS_ARE_FLAG_INDEXES => {
+                    return @enumFromInt(@as(E_INFO.tag_type, @intCast(@ctz(raw_))));
+                },
+            }
+        }
+
+        pub inline fn empty() Self {
+            return EMPTY;
+        }
+        pub inline fn all() Self {
+            return ALL;
+        }
+
+        /// current flags must EXACTLY match one of the tags in the enum set
+        pub fn flag_name(self: Self) []const u8 {
+            assert_valid_bits(self.raw);
+            assert_with_reason(self.has_exactly_n_flags(1), @src(), "must have exactly one flag set in order to get the flag name", .{});
+            return @tagName(bit_to_flag(self.raw));
+        }
+        pub fn flag_tag(self: Self) Flag {
+            assert_valid_bits(self.raw);
+            assert_with_reason(self.has_exactly_n_flags(1), @src(), "must have exactly one flag set in order to get the flag enum tag", .{});
+            return bit_to_flag(self.raw);
+        }
+
+        pub inline fn is_empty(self: Self) bool {
+            return self.raw == 0;
+        }
+        pub inline fn not_empty(self: Self) bool {
+            return self.raw != 0;
+        }
+
+        pub fn flag(flag_: Flag) Self {
+            return Self{ .raw = flag_to_bit(flag_) };
+        }
+        pub fn flags(flags_: []const Flag) Self {
+            var self = Self{ .raw = 0 };
+            for (flags_) |flag_| {
+                self.raw |= flag_to_bit(flag_);
+            }
+            return self;
+        }
+        pub fn from_raw(val: ValueInt) Self {
+            assert_valid_bits(val);
+            return Self{ .raw = val };
+        }
+        pub fn from_raws(raws: []const ValueInt) Self {
+            var composite: ValueInt = 0;
+            for (raws) |raw| {
+                composite |= raw;
+            }
+            assert_valid_bits(composite);
+            return Self{ .raw = composite };
+        }
+
+        pub fn copy(self: Self) Self {
+            return Self{ .raw = self.raw };
+        }
+
+        pub fn union_with(self: *Self, other: Self) void {
+            self.raw |= other.raw;
+        }
+        pub fn intersection_with(self: *Self, other: Self) void {
+            self.raw &= other.raw;
+        }
+        pub fn xor_with(self: *Self, other: Self) void {
+            self.raw ^= other.raw;
+        }
+
+        pub fn add_all(self: *Self) void {
+            self.raw = ALLOWED_BITS;
+        }
+        pub fn add(self: *Self, flag_: Flag) void {
+            self.raw |= flag_to_bit(flag_);
+        }
+        pub fn add_if_true(self: *Self, flag_: Flag, condition: bool) void {
+            if (condition) {
+                self.raw |= flag_to_bit(flag_);
+            }
+        }
+        pub fn add_raw(self: *Self, raw: ValueInt) void {
+            assert_valid_bits(raw);
+            self.raw |= raw;
+        }
+        pub fn add_many(self: *Self, flags_: []const Flag) void {
+            for (flags_) |flag_| {
+                self.add(flag_);
+            }
+        }
+        pub fn add_many_if_true(self: *Self, flags_: []const Flag, condition: bool) void {
+            if (condition) {
+                for (flags_) |flag_| {
+                    self.add(flag_);
+                }
+            }
+        }
+        pub inline fn remove_all(self: *Self) void {
+            self.raw = 0;
+        }
+        pub fn remove(self: *Self, flag_: Flag) void {
+            self.raw &= ~flag_to_bit(flag_);
+        }
+        pub fn remove_if_false(self: *Self, flag_: Flag, condition: bool) void {
+            if (!condition) {
+                self.raw &= ~flag_to_bit(flag_);
+            }
+        }
+        pub inline fn remove_raw(self: *Self, raw: ValueInt) void {
+            self.raw &= ~raw;
+        }
+        pub fn remove_many(self: *Self, flags_: []const Flag) void {
+            for (flags_) |flag_| {
+                self.remove(flag_);
+            }
+        }
+        pub fn remove_many_if_false(self: *Self, flags_: []const Flag, condition: bool) void {
+            if (!condition) {
+                for (flags_) |flag_| {
+                    self.remove(flag_);
+                }
+            }
+        }
+        pub fn set_state(self: *Self, flag_: Flag, state: bool) void {
+            if (state) {
+                self.add(flag_);
+            } else {
+                self.remove(flag_);
+            }
+        }
+        pub fn set_state_on_many(self: *Self, flags_: []const Flag, state: bool) void {
+            var mask: ValueInt = 0;
+            for (flags_) |flag_| {
+                mask |= flag_to_bit(flag_);
+            }
+            if (state) {
+                self.raw |= mask;
+            } else {
+                self.raw &= ~mask;
+            }
+        }
+        pub fn has_flag(self: Self, flag_: Flag) bool {
+            const bits = flag_to_bit(flag_);
+            return self.raw & bits == bits;
+        }
+        pub fn missing_flag(self: Self, flag_: Flag) bool {
+            const bits = flag_to_bit(flag_);
+            return self.raw & bits == 0;
+        }
+        pub fn has_only_this_flag(self: Self, flag_: Flag) bool {
+            return self.raw == flag_to_bit(flag_);
+        }
+        pub fn has_all_flags(self: Self, flags_: []const Flag) bool {
+            var composite: ValueInt = 0;
+            for (flags_) |flag_| {
+                composite |= flag_to_bit(flag_);
+            }
+            return self.raw & composite == composite;
+        }
+        pub fn has_only_these_flags(self: Self, flags_: []const Flag) bool {
+            var composite: ValueInt = 0;
+            for (flags_) |flag_| {
+                composite |= flag_to_bit(flag_);
+            }
+            return self.raw == composite;
+        }
+        pub inline fn has_none_of_these_flags(self: Self, flags_: []const Flag) bool {
+            var composite: ValueInt = 0;
+            for (flags_) |flag_| {
+                composite |= flag_to_bit(flag_);
+            }
+            return self.raw & composite == 0;
+        }
+        pub inline fn has_any_of_these_flags(self: Self, flags_: []const Flag) bool {
+            var composite: ValueInt = 0;
+            for (flags_) |flag_| {
+                composite |= flag_to_bit(flag_);
+            }
+            return self.raw & composite > 0;
+        }
+
+        pub inline fn has_exactly_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) == n;
+        }
+        pub inline fn does_not_have_exactly_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) != n;
+        }
+        pub inline fn has_at_least_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) >= n;
+        }
+        pub inline fn has_more_than_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) > n;
+        }
+        pub inline fn has_at_most_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) <= n;
+        }
+        pub inline fn has_less_than_n_flags(self: Self, n: anytype) bool {
+            return @popCount(self.raw) < n;
+        }
+
+        pub fn iterator(self: Self) Iterator {
+            return Iterator{
+                .remaining = self.raw,
+            };
+        }
+
+        pub const Iterator = struct {
+            remaining: ValueInt = 0,
+
+            pub fn next(self: *Iterator) ?Flag {
+                if (self.remaining == 0) return null;
+                const lowest_bit = self.remaining & -%self.remaining;
+                self.remaining &= self.remaining - 1;
+                return bit_to_flag(lowest_bit);
+            }
+        };
+    };
+}

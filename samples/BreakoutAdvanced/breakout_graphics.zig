@@ -49,8 +49,7 @@ pub const FENCE_NAMES = enum(u8) {
 pub const INDEX_BUFFER_NAMES = enum(u8) {};
 pub const INDIRECT_BUFFER_NAMES = enum(u8) {};
 pub const UPLOAD_BUFFER_NAMES = enum(u8) {
-    VERTEX_DATA_UPLOAD,
-    SPRITE_DATA_UPLOAD,
+    MAIN_UPLOAD_BUFFER,
 };
 pub const DOWNLOAD_BUFFER_NAMES = enum(u8) {};
 pub const VERTEX_BUFFER_NAMES = enum(u8) {
@@ -145,23 +144,17 @@ pub const Global = ShaderUtilsModule.UniformOrStorageStruct(
 );
 pub const SpriteData = ShaderUtilsModule.UniformOrStorageStruct(
     enum {
-        top_left,
-        top_right,
-        bot_left,
-        bot_right,
+        texture_uv,
     },
     .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
     &.{
-        .storage_struct_field(.top_left, GPUType.GPU_f32_2),
-        .storage_struct_field(.top_right, GPUType.GPU_f32_2),
-        .storage_struct_field(.bot_left, GPUType.GPU_f32_2),
-        .storage_struct_field(.bot_right, GPUType.GPU_f32_2),
+        .storage_struct_field(.texture_uv, GPUType.GPU_f32_2),
     },
     100000,
 );
 pub const Controller = GraphicsControllerModule.GraphicsController(
     .{
-        .shader_formats = .new_many(&.{ .MSL, .DXIL, .SPIRV }),
+        .shader_formats = .flags(&.{ .MSL, .DXIL, .SPIRV }),
         .debug_mode = true,
         .driver_name = "vulkan",
     },
@@ -201,11 +194,11 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
     },
     STORAGE_BUFFER_NAMES,
     .{
-        .storage_buffer_def(.SPRITE_VERTEX_DATA, SpriteData, .new(.GRAPHICS_STORAGE_READ)),
+        .storage_buffer_def(.SPRITE_VERTEX_DATA, SpriteData, .flag(.GRAPHICS_STORAGE_READ)),
     },
     TEXTURE_NAMES,
     .{
-        .texture_def(.SPRITE_TEX, .R8G8B8A8_UNORM, 0, .new(.SAMPLE)),
+        .texture_def(.SPRITE_TEX, .R8G8B8A8_UNORM, 0, .flag(.SAMPLE)),
     },
     VERTEX_SHADER_NAMES,
     .{

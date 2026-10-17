@@ -156,12 +156,6 @@ pub const CopyKind = enum(u8) {
     TEXTURE,
 };
 
-// pub const StorageUsage = std.enums.EnumSet(enum(u32) {
-//     GRAPHICS_STORAGE_READ = @intFromEnum(GPU_BufferUsageFlags.Key.GRAPHICS_STORAGE_READ),
-//     COMPUTE_STORAGE_READ = @intFromEnum(GPU_BufferUsageFlags.Key.COMPUTE_STORAGE_READ),
-//     COMPUTE_STORAGE_WRITE = @intFromEnum(GPU_BufferUsageFlags.Key.COMPUTE_STORAGE_WRITE),
-// });
-
 pub const GPUBufferKind = enum(u8) {
     STORAGE,
     VERTEX,
@@ -664,7 +658,7 @@ pub fn TextureDefinition(comptime TEXTURE_NAMES_ENUM: type) type {
         pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
         mipmap_levels: u32 = 0,
         sample_count: SDL3.GPU_SampleCount = ._1,
-        usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.new(.SAMPLE),
+        usage: GPU_TextureUsageFlags = .flag(.SAMPLE),
 
         pub fn texture_def_advanced(name: TEXTURE_NAMES_ENUM, shape: GPU_TextureType, format: GPU_TextureFormat, mipmap_levels: u32, sample_count: SDL3.GPU_SampleCount, usage: GPU_TextureUsageFlags) Self {
             return Self{
@@ -694,7 +688,7 @@ const TextureDef = struct {
     pixel_format: GPU_TextureFormat = .R8G8B8A8_UNORM_SRGB,
     mipmap_levels: u32 = 0,
     sample_count: SDL3.GPU_SampleCount = ._1,
-    usage: GPU_TextureUsageFlags = GPU_TextureUsageFlags.new(.SAMPLE),
+    usage: GPU_TextureUsageFlags = .flag(.SAMPLE),
 };
 
 pub fn SamplerDefinition(comptime SAMPLER_NAMES_ENUM: type) type {
@@ -1353,7 +1347,7 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .STORAGE_BUFFER => |buf_name| {
-                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].contains(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
+                        ct_assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
                         SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.vertex_shader), buf_name, .VERTEX);
                     },
                     else => {},
@@ -2086,6 +2080,8 @@ pub fn GraphicsController(
             return self.gpu.get_swapchain_texture_format(self.get_claimed_window(window));
         }
 
+
+
         pub const Fence = union(FenceKind) {
             NAMED: FenceName,
             DIRECT: *GPU_Fence,
@@ -2096,7 +2092,6 @@ pub fn GraphicsController(
             pub fn direct_fence(fence: *GPU_Fence) Fence {
                 return Fence{ .DIRECT = fence };
             }
-
             pub fn wait(self: Fence, controller: *Controller) PossibleError(void) {
                 const fence: [1]*GPU_Fence = .{switch (self) {
                     .NAMED => |n| controller.get_fence(n),
@@ -4869,7 +4864,7 @@ pub fn GraphicsController(
             vertex_shaders: [INTERNAL.NUM_VERTEX_SHADERS]VertexShaderInit,
             fragment_shaders: [INTERNAL.NUM_FRAGMENT_SHADERS]FragmentShaderInit,
             uniforms_init: UniformCollection,
-            render_pipeline_props: []const RenderPipeInit = &.{},
+            render_pipeline_init: []const RenderPipeInit = &.{},
             init_windows: []const WindowInit = &.{},
             init_samplers: []const SamplerInit = &.{},
             init_textures: []const TextureInit = &.{},
@@ -5003,7 +4998,7 @@ pub fn GraphicsController(
                     }
                 }
             }
-            for (options.render_pipeline_props) |props| {
+            for (options.render_pipeline_init) |props| {
                 const idx = @intFromEnum(props.name);
                 assert_with_reason(pipelines_props_init[idx] == false, @src(), "render pipeline `{s}` was given props more than once", .{@tagName(props.name)});
                 pipelines_props_init[idx] = true;
@@ -5463,9 +5458,39 @@ pub fn GraphicsController(
         pub fn write_all_shader_templates(template_folder_relative_path: []const u8, io: std.Io) anyerror!void {
             try std.Io.Dir.cwd().createDirPath(io, template_folder_relative_path);
             const dir = try std.Io.Dir.cwd().openDir(io, template_folder_relative_path, .{});
-            var write_buf: [1028]u8 = undefined;
+            var write_buf: [1024]u8 = undefined;
+            var shell_write_buf: [1024]u8 = undefined;
+            const shell_file = try dir.createFile(io, "compile_shaders.sh", .{
+                .permissions = .executable_file,
+            });
+            defer shell_file.close(io);
+            var shell_writer_impl = shell_file.writer(io, shell_write_buf[0..]);
+            var shell_writer = &shell_writer_impl.interface;
             inline for (INTERNAL.VERTEX_SHADER_DEFS) |def| {
-                const file = try dir.createFile(io, "vert_" ++ @tagName(def.vertex_shader) ++ ".template.hlsl", .{});
+                const BASE_NAME: [:0]const u8 = "vert_" ++ @tagName(def.vertex_shader);
+                const HLSL_NAME: [:0]const u8 = BASE_NAME ++ ".hlsl";
+                const TEMP_NAME: [:0]const u8 = HLSL_NAME ++ ".template";
+                var tag_iter = GPU_OPTIONS.shader_formats.iterator();
+                next_tag: while (tag_iter.next()) |tag| {
+                    switch (tag) {
+                        .DXBC => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d DXBC -t vertex -e \"main\" -o " ++ BASE_NAME ++ ".dxbc\n");
+                        },
+                        .DXIL => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d DXIL -t vertex -e \"main\" -o " ++ BASE_NAME ++ ".dxil\n");
+                        },
+                        .MSL => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d MSL -t vertex -e \"main\" -o " ++ BASE_NAME ++ ".msl\n");
+                        },
+                        .SPIRV => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d SPIRV -t vertex -e \"main\" -o " ++ BASE_NAME ++ ".spv\n");
+                        },
+                        else => {
+                            continue :next_tag;
+                        },
+                    }
+                }
+                const file = try dir.createFile(io, TEMP_NAME, .{});
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
@@ -5495,7 +5520,30 @@ pub fn GraphicsController(
                 try writer.flush();
             }
             inline for (INTERNAL.FRAGMENT_SHADER_DEFS) |def| {
-                const file = try dir.createFile(io, "frag_" ++ @tagName(def.fragment_shader) ++ ".template.hlsl", .{});
+                const BASE_NAME: [:0]const u8 = "frag_" ++ @tagName(def.fragment_shader);
+                const HLSL_NAME: [:0]const u8 = BASE_NAME ++ ".hlsl";
+                const TEMP_NAME: [:0]const u8 = HLSL_NAME ++ ".template";
+                var tag_iter = GPU_OPTIONS.shader_formats.iterator();
+                next_tag: while (tag_iter.next()) |tag| {
+                    switch (tag) {
+                        .DXBC => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d DXBC -t fragment -e \"main\" -o " ++ BASE_NAME ++ ".dxbc\n");
+                        },
+                        .DXIL => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d DXIL -t fragment -e \"main\" -o " ++ BASE_NAME ++ ".dxil\n");
+                        },
+                        .MSL => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d MSL -t fragment -e \"main\" -o " ++ BASE_NAME ++ ".msl\n");
+                        },
+                        .SPIRV => {
+                            try shell_writer.writeAll("shadercross " ++ HLSL_NAME ++ " -s HLSL -d SPIRV -t fragment -e \"main\" -o " ++ BASE_NAME ++ ".spv\n");
+                        },
+                        else => {
+                            continue :next_tag;
+                        },
+                    }
+                }
+                const file = try dir.createFile(io, TEMP_NAME, .{});
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
@@ -5524,6 +5572,7 @@ pub fn GraphicsController(
                 try writer.writeAll(F_OUT.STRUCT_NAME_PACKED ++ " main(" ++ F_IN.STRUCT_NAME_PACKED ++ " pck) {\n    " ++ F_IN.STRUCT_NAME ++ " frag_in = unpack_frag_input(pck);\n    " ++ F_OUT.STRUCT_NAME ++ " frag_out;\n    // SHADER LOGIC\n    return pack_fragment_output(frag_out);\n}");
                 try writer.flush();
             }
+            try shell_writer.flush();
         }
 
         fn write_sampled_texture_pair(writer: *std.Io.Writer, comptime pair: _ShaderAllowedSamplePair, comptime stage: ShaderStage) std.Io.Writer.Error!void {
@@ -5587,3 +5636,7 @@ pub fn GraphicsController(
         }
     };
 }
+
+pub const SurfaceWrapper = struct {
+    s: *SDL3.Surface,
+};

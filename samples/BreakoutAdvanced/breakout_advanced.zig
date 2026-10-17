@@ -29,6 +29,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
+const build = @import("builtin");
 
 const sdl_log = std.log.scoped(.sdl);
 const app_log = std.log.scoped(.app);
@@ -44,55 +45,112 @@ const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
 
 const GraphicsModule = @import("./breakout_graphics.zig");
+const GraphicsController = GraphicsModule.Controller;
+const AnyGPUBuffer = GraphicsController.AnyGPUBuffer;
+const BlitInfo = GraphicsController.BlitInfo;
+const BlitRegion = GraphicsController.BlitRegion;
+const BufferLocation = GraphicsController.BufferLocation;
+const BufferRegion = GraphicsController.BufferRegion;
+const ColorTarget = GraphicsController.ColorTarget;
+const CommandBuffer = GraphicsController.CommandBuffer;
+const CopyDownloadDetails = GraphicsController.CopyDownloadDetails;
+const CopyPassGPUOnly = GraphicsController.CopyPassGPUOnly;
+const CopyPassTransferOnly = GraphicsController.CopyPassTransferOnly;
+const CopyUploadDetails = GraphicsController.CopyUploadDetails;
+const CreateOptions = GraphicsController.CreateOptions;
+const DeleteBufferDetails = GraphicsController.DeleteBufferDetails;
+const DepthTarget = GraphicsController.DepthTarget;
+const DownloadBufferInit = GraphicsController.DownloadBufferInit;
+const DownloadBufferName = GraphicsController.DownloadBufferName;
+const DownloadPass = GraphicsController.DownloadPass;
+const DownloadTransferBufferLocation = GraphicsController.DownloadTransferBufferLocation;
+const Fence = GraphicsController.Fence;
+const FenceName = GraphicsController.FenceName;
+const FragmentShaderInit = GraphicsController.FragmentShaderInit;
+const FragmentShaderName = GraphicsController.FragmentShaderName;
+const GPUAssetRegion = GraphicsController.GPUAssetRegion;
+const GrowAndCopyDownloadTransferDetails = GraphicsController.GrowAndCopyDownloadTransferDetails;
+const GrowAndCopyGPUBufferDetails = GraphicsController.GrowAndCopyGPUBufferDetails;
+const IndexBufferInit = GraphicsController.IndexBufferInit;
+const IndexBufferName = GraphicsController.IndexBufferName;
+const IndirectDrawBufferInit = GraphicsController.IndirectDrawBufferInit;
+const IndirectDrawBufferName = GraphicsController.IndirectDrawBufferName;
+const PendingFinalDownloadHandle = GraphicsController.PendingFinalDownloadHandle;
+const QueuedDownloadCopy = GraphicsController.QueuedDownloadCopy;
+const RenderPass = GraphicsController.RenderPass;
+const RenderPassWithPipeline = GraphicsController.RenderPassWithPipeline;
+const RenderPipeInit = GraphicsController.RenderPipeInit;
+const RenderPipelineName = GraphicsController.RenderPipelineName;
+const SamplerInit = GraphicsController.SamplerInit;
+const SamplerName = GraphicsController.SamplerName;
+const StorageBufferInit = GraphicsController.StorageBufferInit;
+const StorageBufferName = GraphicsController.StorageBufferName;
+const Target = GraphicsController.Target;
+const TextureDownloadInfo = GraphicsController.TextureDownloadInfo;
+const TextureInit = GraphicsController.TextureInit;
+const TextureLocation = GraphicsController.TextureLocation;
+const TextureRegion = GraphicsController.TextureRegion;
+const TextureUploadInfo = GraphicsController.TextureUploadInfo;
+const UniformCollection = GraphicsController.UniformCollection;
+const UniformName = GraphicsController.UniformName;
+const UploadBufferInit = GraphicsController.UploadBufferInit;
+const UploadBufferName = GraphicsController.UploadBufferName;
+const UploadPass = GraphicsController.UploadPass;
+const UploadTransferBufferLocation = GraphicsController.UploadTransferBufferLocation;
+const VertexBufferBindingOffset = GraphicsController.VertexBufferBindingOffset;
+const VertexBufferInit = GraphicsController.VertexBufferInit;
+const VertexBufferName = GraphicsController.VertexBufferName;
+const VertexShaderInit = GraphicsController.VertexShaderInit;
+const VertexStructName = GraphicsController.VertexStructName;
+const WindowInit = GraphicsController.WindowInit;
+const WindowName = GraphicsController.WindowName;
 
 const best_score_storage_org_name = "goolib_samples";
 const best_score_storage_app_name = "breakout";
 const records_storage_file_name = "records";
 const attempts_storage_file_name = "attempts";
-var fully_initialized = false;
 const window_size: IVec = IVec.new(640, 480);
-var window: *SDL.Window = undefined;
-var renderer: *SDL.Renderer = undefined;
-var sprite_texture: *SDL.SimpleTexture = undefined;
-var sounds: SDL.WaveAudio = undefined;
-var audio_device: SDL.AudioDeviceID = undefined;
-var audio_streams_buf: [8]*SDL.AudioStream = undefined;
-var audio_streams: []*SDL.AudioStream = audio_streams_buf[0..0];
-var gamepad: ?*SDL.Gamepad = undefined;
-var phcon: PhysicalControllerState = undefined;
-var prev_phcon: PhysicalControllerState = undefined;
-var vcon: VirtualControllerState = undefined;
-var prev_vcon: VirtualControllerState = undefined;
-var best_win: u32 = undefined;
-var timekeeper: Timekeeper = undefined;
 
-var app_err: ErrorStore = .{};
+const WindowFlags = SDL.WindowFlags.Flag;
+const Vec2 = Goolib.Vec2.define_vec2_type(f32);
 
-var paddle: Paddle = undefined;
-var ball: Ball = undefined;
-var bricks: BoundedArray(Brick, 100) = undefined;
-
-var won = false;
-var records_need_save = false;
-
-var score: u32 = undefined;
-var score_color: SDL.Color_RGBA_u8 = undefined;
-
-var attempts: u32 = 0;
+const AppState = struct {
+    graphics: GraphicsController = undefined,
+    timekeeper: Timekeeper = undefined,
+    fully_initialized: bool = false,
+    sounds: SDL.WaveAudio = undefined,
+    audio_device: SDL.AudioDeviceID = undefined,
+    audio_streams_buf: [8]*SDL.AudioStream = undefined,
+    audio_streams: []*SDL.AudioStream = undefined, //audio_streams_buf[0..0],
+    gamepad: ?*SDL.Gamepad = undefined,
+    phys_controller: PhysicalControllerState = undefined,
+    prev_phys_controller: PhysicalControllerState = undefined,
+    virtual_controller: VirtualControllerState = undefined,
+    prev_virtual_controller: VirtualControllerState = undefined,
+    best_win: u32 = undefined,
+    app_err: ErrorStore = .{},
+    paddle: Paddle = undefined,
+    ball: Ball = undefined,
+    bricks: BoundedArray(Brick, 100) = undefined,
+    won: bool = false,
+    records_need_save: bool = false,
+    score: u32 = undefined,
+    score_color: SDL.Color_RGBA_u8 = undefined,
+    attempts: u32 = 0,
+};
+var app_state = AppState{};
 
 pub fn main() !u8 {
-    app_err.reset();
+    app_state.app_err.reset();
     var empty_argv: [0:null]?[*:0]u8 = .{};
     const status: u8 = @truncate(@as(c_uint, @bitCast(SDL.App.run_app(empty_argv.len, @ptrCast(&empty_argv), sdl_main_func))));
-    return app_err.load() orelse status;
+    return app_state.app_err.load() orelse status;
 }
 
-pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) anyerror!SDL.AppResult {
-    _ = appstate;
+pub fn app_init(app_state_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) anyerror!SDL.AppResult {
+    app_state_opq.?.* = @ptrCast(&app_state);
     _ = arg_count;
     _ = arg_list;
-    std.debug.print("VertexIn: {s}\n", .{@typeName(GraphicsModule.VertexIn)}); //DEBUG
-    std.debug.print("Controller: {s}\n", .{@typeName(GraphicsModule.Controller)}); //DEBUG
 
     var write_buf = BoundedArray(u8, 250){};
 
@@ -132,70 +190,147 @@ pub fn app_init(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[
 
     SDL.App.set_hint(SDL.HINT.RENDER_VSYNC, "1") catch {};
 
-    window = try SDL.Window.create(.{ .title = "Breakout Sample", .size = window_size });
-    errdefer window.destroy();
-    renderer = try window.create_renderer();
-    errdefer renderer.destroy();
+    const rgba_bmp_surface = make: {
+        const bmp_stream = try SDL.IOStream.from_mem(Sprites.bmp);
+        const bmp_surface = try SDL.Surface.load_from_bmp_iostream(bmp_stream, true);
+        const rgba_bmp_surface = try bmp_surface.convert_to_format(.RGBA_8888);
+        bmp_surface.destroy();
+        break :make rgba_bmp_surface;
+    };
+
+    app_state.graphics = GraphicsController.create(.{
+        .vertex_shaders = .{
+            VertexShaderInit{
+                .name = .MAIN_VERTEX_SHADER,
+                .code = switch (build.os.tag) {
+                    .linux => @embedFile("./vert_MAIN_VERTEX_SHADER.spv"),
+                    .windows => @embedFile("./vert_MAIN_VERTEX_SHADER.dxil"),
+                    .macos => @embedFile("./vert_MAIN_VERTEX_SHADER.msl"),
+                    else => @embedFile("./vert_MAIN_VERTEX_SHADER.spv"),
+                },
+            },
+        },
+        .fragment_shaders = .{
+            FragmentShaderInit{
+                .name = .MAIN_FRAGMENT_SHADER,
+                .code = switch (build.os.tag) {
+                    .linux => @embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"),
+                    .windows => @embedFile("./frag_MAIN_FRAGMENT_SHADER.dxil"),
+                    .macos => @embedFile("./frag_MAIN_FRAGMENT_SHADER.msl"),
+                    else => @embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"),
+                },
+            },
+        },
+        .uniforms_init = UniformCollection{
+            .GLOBAL = .{
+                .pos_offset = Vec2.new(0, 0),
+            },
+        },
+        .render_pipeline_init = &.{
+            RenderPipeInit{
+                .name = .MAIN_PIPELINE,
+            },
+        },
+        .init_windows = &.{
+            WindowInit{
+                .name = .MAIN,
+                .claim_on_init = true,
+                .size = window_size,
+                .title = "Breakout Sample Advanced",
+                .flags = .flags(&.{
+                    WindowFlags.RESIZABLE,
+                    WindowFlags.KEYBOARD_GRABBED,
+                    WindowFlags.INPUT_FOCUS,
+                    WindowFlags.MOUSE_GRABBED,
+                }),
+            },
+        },
+        .init_samplers = &.{
+            SamplerInit{
+                .name = .PIXEL_SAMPLER,
+                .settings = .DEFAULT,
+            },
+        },
+        .init_storage_buffers = &.{
+            StorageBufferInit{
+                .name = .SPRITE_VERTEX_DATA,
+                .max_element_count = 14 * 4,
+            },
+        },
+        .init_textures = &.{
+            TextureInit{
+                .name = .SPRITE_TEX,
+                .width = @intCast(rgba_bmp_surface.size.x),
+                .height = @intCast(rgba_bmp_surface.size.y),
+            },
+        },
+        .init_upload_buffers = &.{
+            UploadBufferInit{
+                .name = .MAIN_UPLOAD_BUFFER,
+                .max_byte_size = @max(400 * @sizeOf(GraphicsModule.VertexIn), 2500 * 4),
+            },
+        },
+        .internal_lists_alloc = std.heap.smp_allocator,
+    });
+    errdefer app_state.graphics.destroy();
 
     write_buf.clear();
     sdl_log.debug("SDL render drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        try renderer.get_name(),
-        SDL.Renderer.get_driver_count(),
-        SDL.Renderer.get_driver_name,
+        try app_state.graphics.gpu.get_driver_name(),
+        SDL.GPU_Device.get_num_drivers(),
+        SDL.GPU_Device.get_driver_name_by_index,
     )});
-
     {
-        const stream = try SDL.IOStream.from_const_mem(Sprites.bmp[0..Sprites.bmp.len]);
-        const surface = try stream.save_bmp_to_new_surface(true);
-        defer surface.destroy();
-
-        sprite_texture = try renderer.create_texture_from_surface(surface);
-        errdefer comptime unreachable;
+        var upload = app_state.graphics.begin_upload_pass();
+        try upload.upload_to_texture(rgba_bmp_surface.pixel_slice(), .SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 1, .MAIN_UPLOAD_BUFFER);
+        upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
+        upload = app_state.graphics.begin_upload_pass();
+        try upload.upload_to_storage_buffer(Sprites.tex_coords[0..], .SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER);
+        upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
     }
-    errdefer sprite_texture.destroy();
 
     {
         const stream = try SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
-        sounds = try stream.load_wav(true);
+        app_state.sounds = try stream.load_wav(true);
         errdefer comptime unreachable;
     }
-    errdefer sounds.destroy();
+    errdefer app_state.sounds.destroy();
 
-    audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&sounds.spec));
-    errdefer audio_device.close();
+    app_state.audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&app_state.sounds.spec));
+    errdefer app_state.audio_device.close();
 
-    errdefer while (audio_streams.len != 0) {
-        audio_streams[audio_streams.len - 1].destroy();
-        if (audio_streams.len != 0) audio_streams.len -= 1;
+    errdefer while (app_state.audio_streams.len != 0) {
+        app_state.audio_streams[app_state.audio_streams.len - 1].destroy();
+        if (app_state.audio_streams.len != 0) app_state.audio_streams.len -= 1;
     };
-    while (audio_streams.len < audio_streams_buf.len) {
-        audio_streams.len += 1;
-        audio_streams[audio_streams.len - 1] = try SDL.AudioStream.create(.same_input_and_output(&sounds.spec));
+    while (app_state.audio_streams.len < app_state.audio_streams_buf.len) {
+        app_state.audio_streams.len += 1;
+        app_state.audio_streams[app_state.audio_streams.len - 1] = try SDL.AudioStream.create(.same_input_and_output(&app_state.sounds.spec));
     }
 
-    try audio_device.bind_many_audio_streams(audio_streams);
+    try app_state.audio_device.bind_many_audio_streams(app_state.audio_streams);
 
     {
         const gamepads_list = try SDL.JoystickID.get_all_gamepads();
         defer gamepads_list.free();
 
-        gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
+        app_state.gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
     }
-    errdefer if (gamepad) |pad| pad.close();
+    errdefer if (app_state.gamepad) |pad| pad.close();
 
-    phcon = .{};
-    prev_phcon = phcon;
-    vcon = .{};
-    prev_vcon = vcon;
+    app_state.phys_controller = .{};
+    app_state.prev_phys_controller = app_state.phys_controller;
+    app_state.virtual_controller = .{};
+    app_state.prev_virtual_controller = app_state.virtual_controller;
 
     try load_records();
 
-    timekeeper = .{ .tocks_per_s = SDL.Time.get_performance_frequency() };
+    app_state.timekeeper = .{ .tocks_per_s = SDL.Time.get_performance_frequency() };
 
     try reset_game();
 
-    fully_initialized = true;
+    app_state.fully_initialized = true;
     errdefer comptime unreachable;
 
     return SDL.AppResult.CONTINUE;
@@ -217,9 +352,151 @@ const Sprites = struct {
     const brick_1x1_blue   = SDL.Rect_f32{ .pos = .{.x =  67, .y = 69}, .size = .{.x = 32, .y = 32} };
     const brick_2x1_gray   = SDL.Rect_f32{ .pos = .{.x = 101, .y = 69}, .size = .{.x = 64, .y = 32} };
     const brick_1x1_gray   = SDL.Rect_f32{ .pos = .{.x = 167, .y = 69}, .size = .{.x = 32, .y = 32} };
- 
+
     const ball             = SDL.Rect_f32{ .pos = .{.x =  2, .y = 104}, .size = .{.x =  22, .y = 22} };
     const paddle           = SDL.Rect_f32{ .pos = .{.x = 27, .y = 103}, .size = .{.x = 104, .y = 24} };
+    const tex_coords = [_]Vec2{
+        brick_2x1_purple.top_left(),
+        brick_2x1_purple.top_right(),
+        brick_2x1_purple.bot_left(),
+        brick_2x1_purple.bot_right(),
+        //
+        brick_1x1_purple.top_left(),
+        brick_1x1_purple.top_right(),
+        brick_1x1_purple.bot_left(),
+        brick_1x1_purple.bot_right(),
+        //
+        brick_2x1_red.top_left(),
+        brick_2x1_red.top_right(),
+        brick_2x1_red.bot_left(),
+        brick_2x1_red.bot_right(),
+        //
+        brick_1x1_red.top_left(),
+        brick_1x1_red.top_right(),
+        brick_1x1_red.bot_left(),
+        brick_1x1_red.bot_right(),
+        //
+        brick_2x1_yellow.top_left(),
+        brick_2x1_yellow.top_right(),
+        brick_2x1_yellow.bot_left(),
+        brick_2x1_yellow.bot_right(),
+        //
+        brick_1x1_yellow.top_left(),
+        brick_1x1_yellow.top_right(),
+        brick_1x1_yellow.bot_left(),
+        brick_1x1_yellow.bot_right(),
+        //
+        brick_2x1_green.top_left(),
+        brick_2x1_green.top_right(),
+        brick_2x1_green.bot_left(),
+        brick_2x1_green.bot_right(),
+        //
+        brick_1x1_green.top_left(),
+        brick_1x1_green.top_right(),
+        brick_1x1_green.bot_left(),
+        brick_1x1_green.bot_right(),
+        //
+        brick_2x1_blue.top_left(),
+        brick_2x1_blue.top_right(),
+        brick_2x1_blue.bot_left(),
+        brick_2x1_blue.bot_right(),
+        //
+        brick_1x1_blue.top_left(),
+        brick_1x1_blue.top_right(),
+        brick_1x1_blue.bot_left(),
+        brick_1x1_blue.bot_right(),
+        //
+        brick_2x1_gray.top_left(),
+        brick_2x1_gray.top_right(),
+        brick_2x1_gray.bot_left(),
+        brick_2x1_gray.bot_right(),
+        //
+        brick_1x1_gray.top_left(),
+        brick_1x1_gray.top_right(),
+        brick_1x1_gray.bot_left(),
+        brick_1x1_gray.bot_right(),
+        //
+        ball.top_left(),
+        ball.top_right(),
+        ball.bot_left(),
+        ball.bot_right(),
+        //
+        paddle.top_left(),
+        paddle.top_right(),
+        paddle.bot_left(),
+        paddle.bot_right(),
+    };
+    const tex_coord_indexes = enum(u32) {
+        brick_2x1_purple_TOP_LEFT,
+        brick_2x1_purple_TOP_RIGHT,
+        brick_2x1_purple_BOT_LEFT,
+        brick_2x1_purple_BOT_RIGHT,
+        //
+        brick_1x1_purple_TOP_LEFT,
+        brick_1x1_purple_TOP_RIGHT,
+        brick_1x1_purple_BOT_LEFT,
+        brick_1x1_purple_BOT_RIGHT,
+        //
+        brick_2x1_red_TOP_LEFT,
+        brick_2x1_red_TOP_RIGHT,
+        brick_2x1_red_BOT_LEFT,
+        brick_2x1_red_BOT_RIGHT,
+        //
+        brick_1x1_red_TOP_LEFT,
+        brick_1x1_red_TOP_RIGHT,
+        brick_1x1_red_BOT_LEFT,
+        brick_1x1_red_BOT_RIGHT,
+        //
+        brick_2x1_yellow_TOP_LEFT,
+        brick_2x1_yellow_TOP_RIGHT,
+        brick_2x1_yellow_BOT_LEFT,
+        brick_2x1_yellow_BOT_RIGHT,
+        //
+        brick_1x1_yellow_TOP_LEFT,
+        brick_1x1_yellow_TOP_RIGHT,
+        brick_1x1_yellow_BOT_LEFT,
+        brick_1x1_yellow_BOT_RIGHT,
+        //
+        brick_2x1_green_TOP_LEFT,
+        brick_2x1_green_TOP_RIGHT,
+        brick_2x1_green_BOT_LEFT,
+        brick_2x1_green_BOT_RIGHT,
+        //
+        brick_1x1_green_TOP_LEFT,
+        brick_1x1_green_TOP_RIGHT,
+        brick_1x1_green_BOT_LEFT,
+        brick_1x1_green_BOT_RIGHT,
+        //
+        brick_2x1_blue_TOP_LEFT,
+        brick_2x1_blue_TOP_RIGHT,
+        brick_2x1_blue_BOT_LEFT,
+        brick_2x1_blue_BOT_RIGHT,
+        //
+        brick_1x1_blue_TOP_LEFT,
+        brick_1x1_blue_TOP_RIGHT,
+        brick_1x1_blue_BOT_LEFT,
+        brick_1x1_blue_BOT_RIGHT,
+        //
+        brick_2x1_gray_TOP_LEFT,
+        brick_2x1_gray_TOP_RIGHT,
+        brick_2x1_gray_BOT_LEFT,
+        brick_2x1_gray_BOT_RIGHT,
+        //
+        brick_1x1_gray_TOP_LEFT,
+        brick_1x1_gray_TOP_RIGHT,
+        brick_1x1_gray_BOT_LEFT,
+        brick_1x1_gray_BOT_RIGHT,
+        //
+        ball_TOP_LEFT,
+        ball_TOP_RIGHT,
+        ball_BOT_LEFT,
+        ball_BOT_RIGHT,
+        //
+        paddle_TOP_LEFT,
+        paddle_TOP_RIGHT,
+        paddle_BOT_LEFT,
+        paddle_BOT_RIGHT,
+    };
     // zig fmt: on
 };
 
@@ -461,10 +738,10 @@ fn load_records() !void {
     };
     var stream = try SDL.IOStream.from_mem(buf[0..8]);
     defer stream.close() catch {};
-    attempts = try stream.read_u32_le();
-    best_win = try stream.read_u32_le();
+    app_state.attempts = try stream.read_u32_le();
+    app_state.best_win = try stream.read_u32_le();
 
-    app_log.debug("loaded records:\n\tattempts = {d}\n\tbest win: {d}", .{ attempts, best_win });
+    app_log.debug("loaded records:\n\tattempts = {d}\n\tbest win: {d}", .{ app_state.attempts, app_state.best_win });
 }
 
 fn save_records() !void {
@@ -477,23 +754,23 @@ fn save_records() !void {
         total_time += 10;
         if (total_time > 10000) return error.save_best_score_ready_timeout;
     }
-    records_need_save = false;
+    app_state.records_need_save = false;
 
-    const new_best_win = if (won and score < best_win) score else best_win;
+    const new_best_win = if (app_state.won and app_state.score < app_state.best_win) app_state.score else app_state.best_win;
     var buf: [8:0]u8 = undefined;
     const stream = try SDL.IOStream.from_mem(buf[0..8]);
     defer stream.close() catch {};
-    try stream.write_u32_le(attempts);
+    try stream.write_u32_le(app_state.attempts);
     try stream.write_u32_le(new_best_win);
     try storage.write_file_from_buffer(records_storage_file_name, buf[0..8]);
-    app_log.debug("saved records:\n\tattempts = {d}\n\tbest win: {d}", .{ attempts, new_best_win });
+    app_log.debug("saved records:\n\tattempts = {d}\n\tbest win: {d}", .{ app_state.attempts, new_best_win });
 }
 
 fn reset_game() !void {
-    won = false;
-    records_need_save = false;
-    attempts += 1;
-    paddle = .{
+    app_state.won = false;
+    app_state.records_need_save = false;
+    app_state.attempts += 1;
+    app_state.paddle = .{
         .box = .{
             .pos = .{
                 .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprites.paddle.size.x * 0.5,
@@ -507,11 +784,11 @@ fn reset_game() !void {
         .src_rect = &Sprites.paddle,
     };
 
-    ball = .{
+    app_state.ball = .{
         .box = .{
             .pos = .{
-                .x = paddle.box.pos.x + paddle.box.size.x * 0.5,
-                .y = paddle.box.pos.y - Sprites.ball.size.y,
+                .x = app_state.paddle.box.pos.x + app_state.paddle.box.size.x * 0.5,
+                .y = app_state.paddle.box.pos.y - Sprites.ball.size.y,
             },
             .size = .{
                 .x = Sprites.ball.size.x,
@@ -523,7 +800,7 @@ fn reset_game() !void {
         .src_rect = &Sprites.ball,
     };
 
-    bricks = .{};
+    app_state.bricks = .{};
     {
         const x = Cast.num_cast(window_size.x, f32) * 0.5;
         const h = Sprites.brick_1x1_gray.size.y;
@@ -539,7 +816,7 @@ fn reset_game() !void {
             const y = gap + (h + gap) * (@as(f32, @floatFromInt(row)) + 1);
             var large = row % 2 == 0;
             var src_rect = src_rects[@intFromBool(large)];
-            bricks.append(.{
+            app_state.bricks.append(.{
                 .box = .{ .pos = .{
                     .x = x - src_rect.size.x * 0.5,
                     .y = y,
@@ -557,7 +834,7 @@ fn reset_game() !void {
                 src_rect = src_rects[@intFromBool(large)];
                 rel_x += src_rect.size.x * 0.5;
                 for ([_]f32{ -1, 1 }) |sign| {
-                    bricks.append(.{
+                    app_state.bricks.append(.{
                         .box = .{
                             .pos = .{
                                 .x = x - src_rect.size.x * 0.5 + rel_x * sign,
@@ -575,8 +852,8 @@ fn reset_game() !void {
         }
     }
 
-    score = 0;
-    score_color = SDL.Color_RGBA_u8.new_rgba(0xff, 0xff, 0xff, 0xff);
+    app_state.score = 0;
+    app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0xff, 0xff, 0xff, 0xff);
 }
 
 fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
@@ -591,54 +868,54 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     }) = .initEmpty();
 
     // Update the game state.
-    while (timekeeper.consume()) {
+    while (app_state.timekeeper.consume()) {
         // Map the physical controller state to the virtual controller state.
 
-        prev_vcon = vcon;
-        vcon.move_paddle_exact = 0;
+        app_state.prev_virtual_controller = app_state.virtual_controller;
+        app_state.virtual_controller.move_paddle_exact = 0;
 
-        vcon.move_paddle_left =
-            phcon.k_left or
-            phcon.g_left or
-            phcon.g_leftx <= -0x4000;
-        vcon.move_paddle_right =
-            phcon.k_right or
-            phcon.g_right or
-            phcon.g_leftx >= 0x4000;
-        vcon.slow_paddle_movement =
-            phcon.k_lshift or
-            phcon.g_left_shoulder or
-            phcon.g_right_shoulder or
-            phcon.g_left_trigger >= 0x2000 or
-            phcon.g_right_trigger >= 0x2000;
-        vcon.launch_ball =
-            phcon.k_space or
-            phcon.g_south or
-            phcon.g_east;
-        vcon.reset_game =
-            phcon.k_r or
-            phcon.g_back or
-            phcon.g_start;
+        app_state.virtual_controller.move_paddle_left =
+            app_state.phys_controller.k_left or
+            app_state.phys_controller.g_left or
+            app_state.phys_controller.g_leftx <= -0x4000;
+        app_state.virtual_controller.move_paddle_right =
+            app_state.phys_controller.k_right or
+            app_state.phys_controller.g_right or
+            app_state.phys_controller.g_leftx >= 0x4000;
+        app_state.virtual_controller.slow_paddle_movement =
+            app_state.phys_controller.k_lshift or
+            app_state.phys_controller.g_left_shoulder or
+            app_state.phys_controller.g_right_shoulder or
+            app_state.phys_controller.g_left_trigger >= 0x2000 or
+            app_state.phys_controller.g_right_trigger >= 0x2000;
+        app_state.virtual_controller.launch_ball =
+            app_state.phys_controller.k_space or
+            app_state.phys_controller.g_south or
+            app_state.phys_controller.g_east;
+        app_state.virtual_controller.reset_game =
+            app_state.phys_controller.k_r or
+            app_state.phys_controller.g_back or
+            app_state.phys_controller.g_start;
 
-        if (!vcon.lock_mouse) {
-            if (phcon.m_left and !prev_phcon.m_left) {
-                vcon.lock_mouse = true;
-                try window.set_mouse_mode_relative(true);
+        if (!app_state.virtual_controller.lock_mouse) {
+            if (app_state.phys_controller.m_left and !app_state.prev_phys_controller.m_left) {
+                app_state.virtual_controller.lock_mouse = true;
+                try app_state.graphics.get_window(.MAIN).set_mouse_mode_relative(true);
             }
         } else {
-            if (phcon.k_escape and !prev_phcon.k_escape) {
-                vcon.lock_mouse = false;
-                try window.set_mouse_mode_relative(false);
+            if (app_state.phys_controller.k_escape and !app_state.prev_phys_controller.k_escape) {
+                app_state.virtual_controller.lock_mouse = false;
+                try app_state.graphics.get_window(.MAIN).set_mouse_mode_relative(false);
             } else {
-                vcon.launch_ball = vcon.launch_ball or phcon.m_left;
-                vcon.move_paddle_exact = phcon.m_xrel;
+                app_state.virtual_controller.launch_ball = app_state.virtual_controller.launch_ball or app_state.phys_controller.m_left;
+                app_state.virtual_controller.move_paddle_exact = app_state.phys_controller.m_xrel;
             }
         }
 
-        prev_phcon = phcon;
-        phcon.m_xrel = 0;
+        app_state.prev_phys_controller = app_state.phys_controller;
+        app_state.phys_controller.m_xrel = 0;
 
-        if (vcon.reset_game and !prev_vcon.reset_game) {
+        if (app_state.virtual_controller.reset_game and !app_state.prev_virtual_controller.reset_game) {
             try reset_game();
             return SDL.AppResult.CONTINUE;
         }
@@ -647,34 +924,34 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         {
             var paddle_vel_x: f32 = 0;
             var keyboard_gamepad_vel_x: f32 = 0;
-            if (vcon.move_paddle_left) keyboard_gamepad_vel_x -= 10;
-            if (vcon.move_paddle_right) keyboard_gamepad_vel_x += 10;
-            if (vcon.slow_paddle_movement) keyboard_gamepad_vel_x *= 0.5;
+            if (app_state.virtual_controller.move_paddle_left) keyboard_gamepad_vel_x -= 10;
+            if (app_state.virtual_controller.move_paddle_right) keyboard_gamepad_vel_x += 10;
+            if (app_state.virtual_controller.slow_paddle_movement) keyboard_gamepad_vel_x *= 0.5;
             paddle_vel_x += keyboard_gamepad_vel_x;
-            var mouse_vel_x = vcon.move_paddle_exact;
-            if (vcon.slow_paddle_movement) mouse_vel_x *= 0.25;
+            var mouse_vel_x = app_state.virtual_controller.move_paddle_exact;
+            if (app_state.virtual_controller.slow_paddle_movement) mouse_vel_x *= 0.25;
             paddle_vel_x += mouse_vel_x;
-            paddle.box.pos.x = std.math.clamp(paddle.box.pos.x + paddle_vel_x, 0, window_size.x - paddle.box.size.x);
+            app_state.paddle.box.pos.x = std.math.clamp(app_state.paddle.box.pos.x + paddle_vel_x, 0, window_size.x - app_state.paddle.box.size.x);
         }
 
-        const previous_ball_y = ball.box.pos.y;
+        const previous_ball_y = app_state.ball.box.pos.y;
 
-        if (!ball.launched) {
+        if (!app_state.ball.launched) {
             // Stick the ball to the paddle.
-            ball.box.pos.x = paddle.box.pos.x + paddle.box.size.x * 0.5;
+            app_state.ball.box.pos.x = app_state.paddle.box.pos.x + app_state.paddle.box.size.x * 0.5;
 
-            if (vcon.launch_ball and !prev_vcon.launch_ball) {
+            if (app_state.virtual_controller.launch_ball and !app_state.prev_virtual_controller.launch_ball) {
                 // Launch the ball.
-                const angle = ball.get_paddle_bounce_angle(paddle);
-                ball.vel.x = @cos(angle) * 4;
-                ball.vel.y = @sin(angle) * 4;
-                ball.launched = true;
+                const angle = app_state.ball.get_paddle_bounce_angle(app_state.paddle);
+                app_state.ball.vel.x = @cos(angle) * 4;
+                app_state.ball.vel.y = @sin(angle) * 4;
+                app_state.ball.launched = true;
             }
         }
 
-        if (ball.launched) {
+        if (app_state.ball.launched) {
             // Check for and handle collisions using swept AABB collision detection.
-            var rem_vel: FVec = ball.vel;
+            var rem_vel: FVec = app_state.ball.vel;
             while (rem_vel.x != 0 or rem_vel.y != 0) {
                 var t: f32 = 1;
                 var sign_x: f32 = 0;
@@ -690,7 +967,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 if (rem_vel.x < 0) {
                     // Left wall
-                    const wall_t = -ball.box.pos.x * inv_rem_vel.x;
+                    const wall_t = -app_state.ball.box.pos.x * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = 1;
@@ -698,7 +975,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     }
                 } else if (rem_vel.x > 0) {
                     // Right wall
-                    const wall_t = (window_size.x - ball.box.size.x - ball.box.pos.x) * inv_rem_vel.x;
+                    const wall_t = (window_size.x - app_state.ball.box.size.x - app_state.ball.box.pos.x) * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = -1;
@@ -707,7 +984,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 }
                 if (rem_vel.y < 0) {
                     // Top wall
-                    const wall_t = -ball.box.pos.y * inv_rem_vel.y;
+                    const wall_t = -app_state.ball.box.pos.y * inv_rem_vel.y;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_y = 1;
@@ -717,15 +994,15 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     // Paddle
                     const paddle_top: Rect = .{
                         .pos = .{
-                            .x = paddle.box.pos.x,
-                            .y = paddle.box.pos.y,
+                            .x = app_state.paddle.box.pos.x,
+                            .y = app_state.paddle.box.pos.y,
                         },
                         .size = .{
-                            .x = paddle.box.size.x,
+                            .x = app_state.paddle.box.size.x,
                             .y = 0,
                         },
                     };
-                    if (Collision.sweep_test(ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
+                    if (Collision.sweep_test(app_state.ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
                         if (t - collision.t >= 0.001) {
                             t = @min(0, collision.t);
                             sign_y = -1;
@@ -737,17 +1014,17 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 // Bricks
                 const broad: Rect = .{
                     .pos = .{
-                        .x = @min(ball.box.pos.x, ball.box.pos.x + rem_vel.x),
-                        .y = @min(ball.box.pos.y, ball.box.pos.y + rem_vel.y),
+                        .x = @min(app_state.ball.box.pos.x, app_state.ball.box.pos.x + rem_vel.x),
+                        .y = @min(app_state.ball.box.pos.y, app_state.ball.box.pos.y + rem_vel.y),
                     },
                     .size = .{
-                        .x = @max(ball.box.size.x, ball.box.size.x + rem_vel.x),
-                        .y = @max(ball.box.size.y, ball.box.size.y + rem_vel.y),
+                        .x = @max(app_state.ball.box.size.x, app_state.ball.box.size.x + rem_vel.x),
+                        .y = @max(app_state.ball.box.size.y, app_state.ball.box.size.y + rem_vel.y),
                     },
                 };
-                for (bricks.slice(), 0..) |brick, i| {
+                for (app_state.bricks.slice(), 0..) |brick, i| {
                     if (Collision.intersects(broad, brick.box)) {
-                        if (Collision.sweep_test(ball.box, rem_vel, brick.box, FVec.ZERO)) |collision| {
+                        if (Collision.sweep_test(app_state.ball.box, rem_vel, brick.box, FVec.ZERO)) |collision| {
                             if (t - collision.t >= 0.001) {
                                 t = collision.t;
                                 sign_x = collision.sign_x;
@@ -760,34 +1037,34 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 // Bounce the ball off the object it collided with (if any).
                 if (collidee == .paddle) {
-                    const angle = ball.get_paddle_bounce_angle(paddle);
+                    const angle = app_state.ball.get_paddle_bounce_angle(app_state.paddle);
                     const vel_factor = 1.05;
-                    ball.box.pos.x += rem_vel.x * t;
-                    ball.box.pos.y += rem_vel.y * t;
-                    const vel = @sqrt(ball.vel.x * ball.vel.x + ball.vel.y * ball.vel.y) * vel_factor;
-                    ball.vel.x = @cos(angle) * vel;
-                    ball.vel.y = @sin(angle) * vel;
+                    app_state.ball.box.pos.x += rem_vel.x * t;
+                    app_state.ball.box.pos.y += rem_vel.y * t;
+                    const vel = @sqrt(app_state.ball.vel.x * app_state.ball.vel.x + app_state.ball.vel.y * app_state.ball.vel.y) * vel_factor;
+                    app_state.ball.vel.x = @cos(angle) * vel;
+                    app_state.ball.vel.y = @sin(angle) * vel;
                     rem_vel.x *= (1 - t);
                     rem_vel.y *= (1 - t);
                     const remaining_vel = @sqrt(rem_vel.x * rem_vel.x + rem_vel.y * rem_vel.y) * vel_factor;
                     rem_vel.x = @cos(angle) * remaining_vel;
                     rem_vel.y = @sin(angle) * remaining_vel;
                 } else {
-                    ball.box.pos.x += rem_vel.x * t;
-                    ball.box.pos.y += rem_vel.y * t;
-                    ball.vel.x = std.math.copysign(ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
-                    ball.vel.y = std.math.copysign(ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
-                    rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), ball.vel.x);
-                    rem_vel.y = std.math.copysign(rem_vel.y * (1 - t), ball.vel.y);
+                    app_state.ball.box.pos.x += rem_vel.x * t;
+                    app_state.ball.box.pos.y += rem_vel.y * t;
+                    app_state.ball.vel.x = std.math.copysign(app_state.ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
+                    app_state.ball.vel.y = std.math.copysign(app_state.ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
+                    rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), app_state.ball.vel.x);
+                    rem_vel.y = std.math.copysign(rem_vel.y * (1 - t), app_state.ball.vel.y);
                     if (collidee == .brick) {
-                        _ = bricks.swapRemove(collidee.brick);
+                        _ = app_state.bricks.swapRemove(collidee.brick);
                     }
                 }
 
                 // Enqueue an appropriate sound effect.
                 switch (collidee) {
                     .wall => {
-                        if (ball.box.pos.y < window_size.y) {
+                        if (app_state.ball.box.pos.y < window_size.y) {
                             sounds_to_play.insert(.hit_wall);
                         }
                     },
@@ -795,9 +1072,9 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                         sounds_to_play.insert(.hit_paddle);
                     },
                     .brick => {
-                        if (bricks.len == 0) {
-                            won = true;
-                            records_need_save = true;
+                        if (app_state.bricks.len == 0) {
+                            app_state.won = true;
+                            app_state.records_need_save = true;
                             sounds_to_play.insert(.win);
                         } else {
                             sounds_to_play.insert(.hit_brick);
@@ -808,33 +1085,33 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             }
         }
 
-        if (previous_ball_y < window_size.y and ball.box.pos.y >= window_size.y) {
+        if (previous_ball_y < window_size.y and app_state.ball.box.pos.y >= window_size.y) {
             // The ball fell below the paddle.
-            if (bricks.len != 0) {
+            if (app_state.bricks.len != 0) {
                 sounds_to_play.insert(.lose);
-                records_need_save = true;
+                app_state.records_need_save = true;
             }
         }
 
         // Update score.
-        if (ball.launched) {
-            if (ball.box.pos.y < window_size.y) {
-                if (bricks.len != 0) {
-                    score +|= 1;
+        if (app_state.ball.launched) {
+            if (app_state.ball.box.pos.y < window_size.y) {
+                if (app_state.bricks.len != 0) {
+                    app_state.score +|= 1;
                 } else {
-                    best_win = @min(score, best_win);
+                    app_state.best_win = @min(app_state.score, app_state.best_win);
                 }
             }
-            if (score <= best_win and bricks.len == 0) {
-                score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
-            } else if (ball.box.pos.y >= window_size.y or score > best_win) {
-                score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
+            if (app_state.score <= app_state.best_win and app_state.bricks.len == 0) {
+                app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
+            } else if (app_state.ball.box.pos.y >= window_size.y or app_state.score > app_state.best_win) {
+                app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
             }
         }
     }
 
     // Save score.
-    if (records_need_save) {
+    if (app_state.records_need_save) {
         try save_records();
     }
 
@@ -848,16 +1125,16 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         var stream_index: usize = 0;
         var it = sounds_to_play.iterator();
         iterate_sounds: while (it.next()) |sound| {
-            const stream = find_available_stream: while (stream_index < audio_streams.len) {
+            const stream = find_available_stream: while (stream_index < app_state.audio_streams.len) {
                 defer stream_index += 1;
-                const stream = audio_streams[stream_index];
+                const stream = app_state.audio_streams[stream_index];
                 if (try stream.get_bytes_available_to_take_out() == 0) {
                     break :find_available_stream stream;
                 }
             } else {
                 break :iterate_sounds;
             };
-            const frame_size: usize = @intCast(sounds.spec.frame_size());
+            const frame_size: usize = @intCast(app_state.sounds.spec.frame_size());
             const start: usize, const end: usize = switch (sound) {
                 .hit_wall => Sounds.hit_wall,
                 .hit_paddle => Sounds.hit_paddle,
@@ -865,7 +1142,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 .win => Sounds.win,
                 .lose => Sounds.lose,
             };
-            const data = sounds.data[(frame_size * start)..(frame_size * end)];
+            const data = app_state.sounds.data[(frame_size * start)..(frame_size * end)];
             try stream.put_in_audio_data(data);
         }
     }
@@ -873,30 +1150,12 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     // Draw.
     {
         const CLEAR_COLOR = SDL.Color_RGBA_u8.new(0x47, 0x5b, 0x8d, 0xff);
-        try renderer.set_draw_color(CLEAR_COLOR);
-        try renderer.draw_clear_fill();
-
-        for (bricks.slice()) |brick| try renderer.draw_texture_rect(sprite_texture, .rect(brick.src_rect), .rect(&brick.box));
-        try renderer.draw_texture_rect(sprite_texture, .rect(ball.src_rect), .rect(&ball.box));
-        try renderer.draw_texture_rect(sprite_texture, .rect(paddle.src_rect), .rect(&paddle.box));
-
-        try renderer.set_render_scale(FVec.new(2, 2));
-        {
-            var buf: [13]u8 = undefined;
-            var time: f32 = @min(@as(f32, @floatFromInt(score)) / Timekeeper.updates_per_s, 999.999);
-            var text = try std.fmt.bufPrintZ(&buf, "TIME {d: >7.3}", .{time});
-            try renderer.set_draw_color(score_color);
-            try renderer.draw_debug_text(FVec.new(8, 8), text.ptr);
-            time = @min(@as(f32, @floatFromInt(best_win)) / Timekeeper.updates_per_s, 999.999);
-            text = try std.fmt.bufPrintZ(&buf, "BEST {d: >7.3}", .{time});
-            try renderer.set_draw_color(SDL.Color_RGBA_u8.ONE);
-            try renderer.draw_debug_text(FVec.new(window_size.x / 2 - 8 * 12, 8), text.ptr);
+        for (app_state.bricks.slice()) |brick| {
+            //CHECKPOINT chencge Brick, Ball, and Paddle defs to take sprite ids instead of raw coords
         }
-        try renderer.set_render_scale(FVec.new(1, 1));
-        try renderer.present();
     }
 
-    timekeeper.produce(SDL.Time.get_performance_counter());
+    app_state.timekeeper.produce(SDL.Time.get_performance_counter());
 
     return SDL.AppResult.CONTINUE;
 }
@@ -911,55 +1170,55 @@ fn handle_event(appstate: ?*anyopaque, event_: ?*SDL.Event) !SDL.AppResult {
         .KEY_DOWN, .KEY_UP => {
             const is_down = event.type == .KEY_DOWN;
             switch (event.keyboard.scancode) {
-                .LEFT => phcon.k_left = is_down,
-                .RIGHT => phcon.k_right = is_down,
-                .LSHIFT => phcon.k_lshift = is_down,
-                .SPACE => phcon.k_space = is_down,
-                .R => phcon.k_r = is_down,
-                .ESCAPE => phcon.k_escape = is_down,
+                .LEFT => app_state.phys_controller.k_left = is_down,
+                .RIGHT => app_state.phys_controller.k_right = is_down,
+                .LSHIFT => app_state.phys_controller.k_lshift = is_down,
+                .SPACE => app_state.phys_controller.k_space = is_down,
+                .R => app_state.phys_controller.k_r = is_down,
+                .ESCAPE => app_state.phys_controller.k_escape = is_down,
                 else => {},
             }
         },
         .MOUSE_BUTTON_DOWN, .MOUSE_BUTTON_UP => {
             const is_down = event.type == .MOUSE_BUTTON_DOWN;
             switch (event.mouse_button.button) {
-                .LEFT => phcon.m_left = is_down,
+                .LEFT => app_state.phys_controller.m_left = is_down,
                 else => {},
             }
         },
         .MOUSE_MOTION => {
-            phcon.m_xrel += event.mouse_motion.delta.x;
+            app_state.phys_controller.m_xrel += event.mouse_motion.delta.x;
         },
         .GAMEPAD_ADDED => {
-            if (gamepad == null) {
-                gamepad = try event.gamepad_device.controller_id.open_gamepad();
+            if (app_state.gamepad == null) {
+                app_state.gamepad = try event.gamepad_device.controller_id.open_gamepad();
             }
         },
         .GAMEPAD_REMOVED => {
-            if (gamepad) |pad| {
+            if (app_state.gamepad) |pad| {
                 pad.close();
-                gamepad = null;
+                app_state.gamepad = null;
             }
         },
         .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP => {
             const is_down = event.type == .GAMEPAD_BUTTON_DOWN;
             switch (event.gamepad_button.button) {
-                .DPAD_LEFT => phcon.g_left = is_down,
-                .DPAD_RIGHT => phcon.g_right = is_down,
-                .LEFT_SHOULDER => phcon.g_left_shoulder = is_down,
-                .RIGHT_SHOULDER => phcon.g_right_shoulder = is_down,
-                .SOUTH => phcon.g_south = is_down,
-                .EAST => phcon.g_east = is_down,
-                .BACK => phcon.g_back = is_down,
-                .START => phcon.g_start = is_down,
+                .DPAD_LEFT => app_state.phys_controller.g_left = is_down,
+                .DPAD_RIGHT => app_state.phys_controller.g_right = is_down,
+                .LEFT_SHOULDER => app_state.phys_controller.g_left_shoulder = is_down,
+                .RIGHT_SHOULDER => app_state.phys_controller.g_right_shoulder = is_down,
+                .SOUTH => app_state.phys_controller.g_south = is_down,
+                .EAST => app_state.phys_controller.g_east = is_down,
+                .BACK => app_state.phys_controller.g_back = is_down,
+                .START => app_state.phys_controller.g_start = is_down,
                 else => {},
             }
         },
         .GAMEPAD_AXIS_MOTION => {
             switch (event.gamepad_axis.axis) {
-                .LEFTX => phcon.g_leftx = event.gamepad_axis.value,
-                .LEFT_TRIGGER => phcon.g_left_trigger = event.gamepad_axis.value,
-                .RIGHT_TRIGGER => phcon.g_right_trigger = event.gamepad_axis.value,
+                .LEFTX => app_state.phys_controller.g_leftx = event.gamepad_axis.value,
+                .LEFT_TRIGGER => app_state.phys_controller.g_left_trigger = event.gamepad_axis.value,
+                .RIGHT_TRIGGER => app_state.phys_controller.g_right_trigger = event.gamepad_axis.value,
                 else => {},
             }
         },
@@ -983,18 +1242,18 @@ fn app_quit(appstate: ?*anyopaque, result: anyerror!SDL.AppResult) void {
         },
     };
 
-    if (fully_initialized) {
-        if (gamepad) |pad| pad.close();
-        while (audio_streams.len != 0) {
-            audio_streams[audio_streams.len - 1].destroy();
-            audio_streams.len -= 1;
+    if (app_state.fully_initialized) {
+        if (app_state.gamepad) |pad| pad.close();
+        while (app_state.audio_streams.len != 0) {
+            app_state.audio_streams[app_state.audio_streams.len - 1].destroy();
+            app_state.audio_streams.len -= 1;
         }
-        audio_device.close();
-        sounds.destroy();
-        sprite_texture.destroy();
-        renderer.destroy();
-        window.destroy();
-        fully_initialized = false;
+        app_state.audio_device.close();
+        app_state.sounds.destroy();
+        app_state.sprite_texture.destroy();
+        app_state.renderer.destroy();
+        app_state.window.destroy();
+        app_state.fully_initialized = false;
     }
 }
 
@@ -1003,19 +1262,19 @@ fn sdl_main_func(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_i
 }
 
 fn sdl_init_func(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) SDL.AppResult {
-    return app_init(appstate, arg_count, arg_list) catch |err| app_err.store(err);
+    return app_init(appstate, arg_count, arg_list) catch |err| app_state.app_err.store(err);
 }
 
 fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) SDL.AppResult {
-    return app_update(appstate) catch |err| app_err.store(err);
+    return app_update(appstate) catch |err| app_state.app_err.store(err);
 }
 
 fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.AppResult {
-    return handle_event(appstate, event) catch |err| app_err.store(err);
+    return handle_event(appstate, event) catch |err| app_state.app_err.store(err);
 }
 
 fn sdl_quit_func(appstate: ?*anyopaque, close_result: SDL.AppResult) callconv(.c) void {
-    app_quit(appstate, app_err.load() orelse close_result);
+    app_quit(appstate, app_state.app_err.load() orelse close_result);
 }
 
 fn BoundedArray(comptime T: type, comptime N: usize) type {

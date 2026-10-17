@@ -1,10 +1,8 @@
 
 struct SPRITE_VERTEX_DATA {
-    // TOTAL = 32   USED = 32   WASTE = 0 (% 0.00)
-    float2 top_left;   // off    0  size    8
-    float2 top_right;  // off    8  size    8
-    float2 bot_left;   // off   16  size    8
-    float2 bot_right;  // off   24  size    8
+    // TOTAL = 16   USED = 8   WASTE = 8 (%50.00)
+    float2 texture_uv; // off    0  size    8
+    uint2 __pad__0;    // off    8  size    8
 };
 StructuredBuffer<SPRITE_VERTEX_DATA> SPRITE_VERTEX_DATA_BUFFER : register(t0, space0);
 

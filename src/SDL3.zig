@@ -38,8 +38,8 @@ const Cast = Root.Cast;
 const Flags = Root.Flags.Flags;
 const Utils = Root.Utils;
 const Assert = Root.Assert;
-const Enums = Root.Enums;
-const EnumSet = Enums.EnumSet;
+// const Enums = Root.Enums;
+// const EnumSet = Enums.EnumSet;
 const assert_with_reason = Assert.assert_with_reason;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
@@ -2242,6 +2242,14 @@ pub const Surface = extern struct {
     pub const to_c = c_non_opaque_conversions(Surface, C.SDL_Surface).to_c;
     pub const from_c = c_non_opaque_conversions(Surface, C.SDL_Surface).from_c;
 
+    pub fn pixel_slice(self: *Surface) []u8 {
+        if (self.pixel_data == null) return Utils.invalid_slice(u8);
+        const ptr: [*]u8 = @ptrCast(@alignCast(self.pixel_data.?));
+        const px_size = self.format.bytes_per_pixel();
+        const total_size = @as(c_uint, @intCast(self.size.component_mult())) * px_size;
+        return ptr[0..total_size];
+    }
+
     pub fn create_surface(size: Vec_c_int, format: PixelFormat) Error!*Surface {
         return ptr_cast_or_fail_err(*Surface, C.SDL_CreateSurface(size.x, size.y, format));
     }
@@ -3643,7 +3651,7 @@ pub const DisplayList = extern struct {
     }
 };
 
-pub const WindowFlags = Flags(enum(u64) {
+pub const WindowFlags = Root.Flags.SingleBitFlags(.TAGS_ARE_FLAG_VALUES, enum(u64) {
     FULLSCREEN = C.SDL_WINDOW_FULLSCREEN,
     OPENGL = C.SDL_WINDOW_OPENGL,
     OCCLUDED = C.SDL_WINDOW_OCCLUDED,
@@ -3669,7 +3677,7 @@ pub const WindowFlags = Flags(enum(u64) {
     METAL = C.SDL_WINDOW_METAL,
     TRANSPARENT = C.SDL_WINDOW_TRANSPARENT,
     NOT_FOCUSABLE = C.SDL_WINDOW_NOT_FOCUSABLE,
-}, enum(u64) {});
+});
 
 /// Helper struct for SDL functions that expect a `?*IRect` where:
 /// - `null` == use entire area
@@ -6863,7 +6871,7 @@ pub const GPU_Device = opaque {
     pub fn get_num_drivers() c_int {
         return C.SDL_GetNumGPUDrivers();
     }
-    pub fn get_driver_name_by_inndex(index: c_int) Error![*:0]const u8 {
+    pub fn get_driver_name_by_index(index: c_int) Error![*:0]const u8 {
         return ptr_cast_or_null_err([*:0]const u8, C.SDL_GetGPUDriver(index));
     }
     pub fn device_supports_shader_formats(device_name: [*:0]const u8, shader_formats: GPU_ShaderFormatFlags) bool {
@@ -7274,7 +7282,7 @@ pub const GPU_ColorTargetBlendState = extern struct {
     src_alpha_blendfactor: GPU_BlendFactor = .INVALID,
     dst_alpha_blendfactor: GPU_BlendFactor = .INVALID,
     alpha_blend_op: GPU_BlendOp = .INVALID,
-    color_write_mask: GPU_ColorComponentFlags = .empty,
+    color_write_mask: GPU_ColorComponentFlags = .EMPTY,
     enable_blend: bool = false,
     enable_color_write_mask: bool = false,
     _padding1: u8 = 0,
@@ -8236,10 +8244,10 @@ pub const GPU_LoadOp = enum(c_uint) {
 };
 
 pub const GPU_StoreOp = enum(c_uint) {
-    STORE = C.SDL_STOREOP_STORE,
-    DONT_CARE = C.SDL_STOREOP_DONT_CARE,
-    RESOLVE = C.SDL_STOREOP_RESOLVE,
-    RESOLVE_AND_STORE = C.SDL_STOREOP_RESOLVE_AND_STORE,
+    STORE = C.SDL_GPU_STOREOP_STORE,
+    DONT_CARE = C.SDL_GPU_STOREOP_DONT_CARE,
+    RESOLVE = C.SDL_GPU_STOREOP_RESOLVE,
+    RESOLVE_AND_STORE = C.SDL_GPU_STOREOP_RESOLVE_AND_STORE,
 
     pub const to_c = c_enum_conversions(GPU_StoreOp, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_StoreOp, c_uint).from_c;
@@ -8408,7 +8416,7 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
     }
 };
 
-pub const GPU_TextureUsageFlags = EnumSet(enum(c_uint) {
+pub const GPU_TextureUsageFlags = Root.Flags.SingleBitFlags(.TAGS_ARE_FLAG_VALUES, enum(c_uint) {
     SAMPLE = C.SDL_GPU_TEXTUREUSAGE_SAMPLER,
     COLOR_TARGET = C.SDL_GPU_TEXTUREUSAGE_COLOR_TARGET,
     DEPTH_STENCIL_TARGET = C.SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
@@ -8449,18 +8457,18 @@ pub const GPU_SampleCount = enum(c_uint) {
 };
 
 pub const GPU_CubeMapFace = enum(c_uint) {
-    POSITIVE_X = C.SDL_CUBEMAPFACE_POSITIVEX,
-    NEGATIVE_X = C.SDL_CUBEMAPFACE_NEGATIVEX,
-    POSITIVE_Y = C.SDL_CUBEMAPFACE_POSITIVEY,
-    NEGATIVE_Y = C.SDL_CUBEMAPFACE_NEGATIVEY,
-    POSITIVE_Z = C.SDL_CUBEMAPFACE_POSITIVEZ,
-    NEGATIVE_Z = C.SDL_CUBEMAPFACE_NEGATIVEZ,
+    POSITIVE_X = C.SDL_GPU_CUBEMAPFACE_POSITIVEX,
+    NEGATIVE_X = C.SDL_GPU_CUBEMAPFACE_NEGATIVEX,
+    POSITIVE_Y = C.SDL_GPU_CUBEMAPFACE_POSITIVEY,
+    NEGATIVE_Y = C.SDL_GPU_CUBEMAPFACE_NEGATIVEY,
+    POSITIVE_Z = C.SDL_GPU_CUBEMAPFACE_POSITIVEZ,
+    NEGATIVE_Z = C.SDL_GPU_CUBEMAPFACE_NEGATIVEZ,
 
     pub const to_c = c_enum_conversions(GPU_CubeMapFace, c_uint).to_c;
     pub const from_c = c_enum_conversions(GPU_CubeMapFace, c_uint).from_c;
 };
 
-pub const GPU_BufferUsageFlags = EnumSet(enum(u32) {
+pub const GPU_BufferUsageFlags = Root.Flags.SingleBitFlags(.TAGS_ARE_FLAG_VALUES, enum(u32) {
     VERTEX = C.SDL_GPU_BUFFERUSAGE_VERTEX,
     INDEX = C.SDL_GPU_BUFFERUSAGE_INDEX,
     INDIRECT = C.SDL_GPU_BUFFERUSAGE_INDIRECT,
@@ -8468,7 +8476,7 @@ pub const GPU_BufferUsageFlags = EnumSet(enum(u32) {
     COMPUTE_STORAGE_READ = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
     COMPUTE_STORAGE_WRITE = C.SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
 });
-pub const GPU_ShaderFormatFlags = EnumSet(enum(c_int) {
+pub const GPU_ShaderFormatFlags = Root.Flags.SingleBitFlags(.TAGS_ARE_FLAG_VALUES, enum(c_int) {
     INVALID = C.SDL_GPU_SHADERFORMAT_INVALID,
     PRIVATE = C.SDL_GPU_SHADERFORMAT_PRIVATE,
     SPIRV = C.SDL_GPU_SHADERFORMAT_SPIRV,
@@ -8477,7 +8485,7 @@ pub const GPU_ShaderFormatFlags = EnumSet(enum(c_int) {
     MSL = C.SDL_GPU_SHADERFORMAT_MSL,
     METALLIB = C.SDL_GPU_SHADERFORMAT_METALLIB,
 });
-pub const GPU_ColorComponentFlags = EnumSet(enum(u8) {
+pub const GPU_ColorComponentFlags = Root.Flags.SingleBitFlags(.TAGS_ARE_FLAG_VALUES, enum(u8) {
     R = C.SDL_GPU_COLORCOMPONENT_R,
     G = C.SDL_GPU_COLORCOMPONENT_G,
     B = C.SDL_GPU_COLORCOMPONENT_B,

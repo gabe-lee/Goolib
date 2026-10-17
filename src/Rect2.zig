@@ -63,6 +63,25 @@ pub fn define_rect2_type(comptime T: type) type {
             return self.to_aabb2().approx_overlaps(other.to_aabb2());
         }
 
+        pub fn top_left(self: T_Rect2) T_Vec2 {
+            return self.pos;
+        }
+        pub fn top_right(self: T_Rect2) T_Vec2 {
+            return T_Vec2{
+                .x = self.pos.x + self.size.x,
+                .y = self.pos.y,
+            };
+        }
+        pub fn bot_left(self: T_Rect2) T_Vec2 {
+            return T_Vec2{
+                .x = self.pos.x,
+                .y = self.pos.y + self.size.y,
+            };
+        }
+        pub fn bot_right(self: T_Rect2) T_Vec2 {
+            return self.pos.add(self.size);
+        }
+
         pub fn overlap_area(self: T_Rect2, other: T_Rect2) ?T_Rect2 {
             const overlap_aabb = self.to_aabb2().overlap_area(other.to_aabb2());
             if (overlap_aabb) |aabb| return aabb.to_rect2();
