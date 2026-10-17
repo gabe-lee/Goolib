@@ -68,8 +68,8 @@ pub inline fn bit_cast(from: anytype, comptime TO: type) TO {
     return @as(TO, @bitCast(from));
 }
 
-pub fn real_cast(val: anytype) Utils.real_type(@TypeOf(val)) {
-    return num_cast(val, Utils.real_type(@TypeOf(val)));
+pub fn real_cast(val: anytype) Types.real_type(@TypeOf(val)) {
+    return num_cast(val, Types.real_type(@TypeOf(val)));
 }
 
 pub fn int_cast_log2(from: anytype, comptime TO: type) Log2Int(TO) {

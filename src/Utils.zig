@@ -1220,19 +1220,19 @@ test "first_n_bits_set" {
 }
 
 pub fn invalid_ptr(comptime T: type) *T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_const(comptime T: type) *const T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_many(comptime T: type) [*]T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_many_const(comptime T: type) [*]const T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), @alignOf(T));
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_slice(comptime T: type) []T {

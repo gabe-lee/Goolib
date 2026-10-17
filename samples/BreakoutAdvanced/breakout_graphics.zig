@@ -19,6 +19,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
+const build = @import("builtin");
 
 const sdl_log = std.log.scoped(.sdl);
 const app_log = std.log.scoped(.app);
@@ -33,6 +34,8 @@ const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
 
+const GPU_IndexTypeSize = SDL.GPU_IndexTypeSize;
+
 pub const GraphicsControllerModule = Goolib.SDL3.GraphicsController;
 pub const ShaderUtilsModule = Goolib.SDL3.ShaderUtils;
 pub const GPUType = ShaderUtilsModule.GPUType;
@@ -46,7 +49,9 @@ pub const WINDOW_NAMES = enum(u8) {
 pub const FENCE_NAMES = enum(u8) {
     GPU_COMMANDS_COMPLETE,
 };
-pub const INDEX_BUFFER_NAMES = enum(u8) {};
+pub const INDEX_BUFFER_NAMES = enum(u8) {
+    VERT_INDEXES,
+};
 pub const INDIRECT_BUFFER_NAMES = enum(u8) {};
 pub const UPLOAD_BUFFER_NAMES = enum(u8) {
     MAIN_UPLOAD_BUFFER,
@@ -96,14 +101,12 @@ pub const VertexIn = ShaderUtilsModule.VertexShaderInputStruct(
     "vertex_in",
     enum {
         position,
-        sprite_id,
         sprite_vertex,
     },
     VERTEX_BUFFER_NAMES,
     .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
     &.{
-        .vertex_field_advanced(.position, GPUType.GPU_f32_3, .USER, .NO_INTERP, 0, .VERTEX_POSITIONS),
-        .vertex_field_advanced(.sprite_id, GPUType.GPU_u32, .USER, .NO_INTERP, 1, .SPRITE_VERTEX_INDEXES),
+        .vertex_field_advanced(.position, GPUType.GPU_f32_2, .USER, .NO_INTERP, 0, .VERTEX_POSITIONS),
         .vertex_field_advanced(.sprite_vertex, GPUType.GPU_u32, .USER, .NO_INTERP, 1, .SPRITE_VERTEX_INDEXES),
     },
     1000,
@@ -156,12 +159,19 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
     .{
         .shader_formats = .flags(&.{ .MSL, .DXIL, .SPIRV }),
         .debug_mode = true,
-        .driver_name = "vulkan",
+        .driver_name = switch (build.os.tag) {
+            .windows => "direct3d12",
+            .linux => "vulkan",
+            .macos => "metal",
+            else => null,
+        },
     },
     WINDOW_NAMES,
     FENCE_NAMES,
     INDEX_BUFFER_NAMES,
-    .{},
+    .{
+        .index_buffer_def(.VERT_INDEXES, GPU_IndexTypeSize.U16),
+    },
     INDIRECT_BUFFER_NAMES,
     .{},
     UPLOAD_BUFFER_NAMES,
@@ -225,10 +235,16 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
         },
     },
     RENDER_PIPELINE_NAMES,
-    .{RenderPipelineDefinition{ .name = .MAIN_PIPELINE, .vertex = .MAIN_VERTEX_SHADER, .fragment = .MAIN_FRAGMENT_SHADER, .target_info = .{
-        .num_color_targets = @intCast(MAIN_PIPE_COLOR_TARGETS.len),
-        .color_target_descriptions = @ptrCast(&MAIN_PIPE_COLOR_TARGETS[0]),
-    } }},
+    .{RenderPipelineDefinition{
+        .name = .MAIN_PIPELINE,
+        .vertex = .MAIN_VERTEX_SHADER,
+        .fragment = .MAIN_FRAGMENT_SHADER,
+        .target_info = .{
+            .num_color_targets = @intCast(MAIN_PIPE_COLOR_TARGETS.len),
+            .color_target_descriptions = @ptrCast(&MAIN_PIPE_COLOR_TARGETS[0]),
+        },
+        .rasterizer_options = .{},
+    }},
     .{},
     10000,
 );

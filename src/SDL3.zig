@@ -6944,13 +6944,13 @@ pub const GPU_Device = opaque {
         C.SDL_ReleaseGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c_ptr());
     }
     pub fn acquire_command_buffer(self: *GPU_Device) Error!*GPU_CommandBuffer {
-        return ptr_cast_or_fail_err(*GPU_CommandBuffer, C.SDL_AcquireGPUCommandBuffer(self.to_c()));
+        return ptr_cast_or_fail_err(*GPU_CommandBuffer, C.SDL_AcquireGPUCommandBuffer(self.to_c_ptr()));
     }
     pub fn map_transfer_buffer(self: *GPU_Device, buffer: *GPU_TransferBuffer, cycle: bool) Error![*]u8 {
-        return ptr_cast_or_fail_err([*]u8, C.SDL_MapGPUTransferBuffer(self.to_c_ptr(), buffer, cycle));
+        return ptr_cast_or_fail_err([*]u8, C.SDL_MapGPUTransferBuffer(self.to_c_ptr(), buffer.to_c_ptr(), cycle));
     }
     pub fn unmap_transfer_buffer(self: *GPU_Device, buffer: *GPU_TransferBuffer) void {
-        C.SDL_UnmapGPUTransferBuffer(self.to_c_ptr(), buffer);
+        C.SDL_UnmapGPUTransferBuffer(self.to_c_ptr(), buffer.to_c_ptr());
     }
     pub fn window_supports_swapchain_composition(self: *GPU_Device, window: *Window, composition: GPU_SwapchainComposition) bool {
         return C.SDL_WindowSupportsGPUSwapchainComposition(self.to_c_ptr(), window.to_c_ptr(), composition.to_c());
@@ -7027,7 +7027,7 @@ pub const GPU_TransferBufferCreateInfo = extern struct {
 };
 
 pub const GPU_BufferCreateInfo = extern struct {
-    usage: GPU_BufferUsageFlags = .blank(),
+    usage: GPU_BufferUsageFlags = .empty(),
     size: u32 = 0,
     props: PropertiesID = .NULL,
 
@@ -7473,7 +7473,7 @@ pub const GPU_ColorTargetInfo = extern struct {
     texture: ?*GPU_Texture = null,
     mip_level: u32 = 0,
     layer_or_depth_plane: u32 = 0,
-    clear_color: Color_RGBA_f32 = .BLACK,
+    clear_color: Color_RGBA_f32 = .new_rgba(0, 0, 0, 1),
     load_op: GPU_LoadOp = .LOAD,
     store_op: GPU_StoreOp = .STORE,
     resolve_texture: ?*GPU_Texture = null,
@@ -8092,7 +8092,9 @@ pub const GPU_CommandBuffer = opaque {
     }
     pub fn wait_and_aquire_swapchain_texture(self: *GPU_CommandBuffer, window: *Window) Error!GPU_SwapchainTexture {
         var tex: GPU_SwapchainTexture = undefined;
-        try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), tex.texture.to_c_ptr(), &tex.w, &tex.h));
+        var tex_ptr: ?*C.SDL_GPUTexture = null;
+        try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), @ptrCast(&tex_ptr), &tex.w, &tex.h));
+        tex.texture = GPU_Texture.from_c_ptr(tex_ptr.?);
         return tex;
     }
     pub fn submit_commands(self: *GPU_CommandBuffer) Error!void {
@@ -8117,7 +8119,7 @@ pub const GPU_RenderPass = opaque {
     pub const from_c_ptr = c_opaque_conversions(GPU_RenderPass, C.SDL_GPURenderPass).from_c_ptr;
 
     pub fn bind_graphics_pipeline(self: *GPU_RenderPass, pipeline: *GPU_GraphicsPipeline) void {
-        C.SDL_BindGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c());
+        C.SDL_BindGPUGraphicsPipeline(self.to_c_ptr(), pipeline.to_c_ptr());
     }
     pub fn set_viewport(self: *GPU_RenderPass, viewport: GPU_Viewport) void {
         C.SDL_SetGPUViewport(self.to_c_ptr(), viewport.to_c());

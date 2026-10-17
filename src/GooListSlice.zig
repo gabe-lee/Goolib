@@ -52,6 +52,9 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const assert_unreachable_err_always_panic = Assert.assert_unreachable_err_always_panic;
 const num_cast = Cast.num_cast;
+const real_type_of = Type.real_type_of;
+const real_type = Type.real_type;
+const real_cast = Cast.real_cast;
 const kind_info = KindInfo.get_kind_info;
 
 pub const FieldLayout = enum {
@@ -1923,14 +1926,14 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn copy_self_range_to_dest_range(self: ListSelf, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_start: anytype) void {
             self.assert_valid_range(self_start, self_end_exclusive, @src());
             if (comptime @sizeOf(ELEM) == 0) return;
-            var remaining_count = self_end_exclusive - self_start;
+            var remaining_count: IDX = self_end_exclusive - self_start;
             if (remaining_count == 0) return;
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const DEST = @TypeOf(dest);
             DEST.assert_mutable(@src());
             dest.assert_idx_plus_count_less_equal_len(@intCast(dest_start), @intCast(remaining_count), @src());
-            const dest_end_exclusive: @TypeOf(dest_start) = dest_start + num_cast(remaining_count, @TypeOf(dest_start));
-            dest.assert_valid_idx_or_len(dest_end_exclusive, @src());
+            const dest_end_exclusive: real_type_of(dest_start) = real_cast(dest_start) + num_cast(remaining_count, real_type_of(dest_start));
+            dest.assert_valid_idx_or_len(@intCast(dest_end_exclusive), @src());
             if (comptime (FIELD_LAYOUT == .WHOLE_STRUCTS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .WHOLE_STRUCTS) or (FIELD_LAYOUT == .SPLIT_FIELDS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .SPLIT_FIELDS)) {
                 var remaining_self = self.slice_const(self_start, self_end_exclusive);
                 var remaining_dest = dest.slice(dest_start, dest_end_exclusive);

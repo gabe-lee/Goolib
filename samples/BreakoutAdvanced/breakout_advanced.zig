@@ -43,6 +43,15 @@ const IVec: type = SDL.Vec_c_int;
 const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
+const GooListSlice = Goolib.GooListSlice;
+const ListU16 = GooListSlice.ListAllocated(u16);
+const SliceU16 = GooListSlice.SliceImmutable(u16);
+const ListFVec = GooListSlice.ListAllocated(FVec);
+const SliceFVec = GooListSlice.SliceImmutable(FVec);
+const ListU32 = GooListSlice.ListAllocated(u32);
+const SliceU32 = GooListSlice.SliceImmutable(u32);
+const Allocator = std.mem.Allocator;
+const alloc = std.heap.smp_allocator;
 
 const GraphicsModule = @import("./breakout_graphics.zig");
 const GraphicsController = GraphicsModule.Controller;
@@ -112,7 +121,6 @@ const attempts_storage_file_name = "attempts";
 const window_size: IVec = IVec.new(640, 480);
 
 const WindowFlags = SDL.WindowFlags.Flag;
-const Vec2 = Goolib.Vec2.define_vec2_type(f32);
 
 const AppState = struct {
     graphics: GraphicsController = undefined,
@@ -137,18 +145,49 @@ const AppState = struct {
     score: u32 = undefined,
     score_color: SDL.Color_RGBA_u8 = undefined,
     attempts: u32 = 0,
+    index_buffer: ListU16 = .{},
+    position_buffer: ListFVec = .{},
+    sprite_idx_buffer: ListU32 = .{},
+
+    pub fn clear_vert_buffers(self: *AppState) void {
+        self.index_buffer.clear();
+        self.position_buffer.clear();
+        self.sprite_idx_buffer.clear();
+    }
+    pub fn append_vertices(self: *AppState, rect: Rect, sprite: Sprites.Sprite_, alloc_: Allocator) void {
+        self.index_buffer.grow_capacity_if_needed_for_n_more_elems(6, .GROW_BY_25_PERCENT, alloc_);
+        self.position_buffer.grow_capacity_if_needed_for_n_more_elems(4, .GROW_BY_25_PERCENT, alloc_);
+        self.sprite_idx_buffer.grow_capacity_if_needed_for_n_more_elems(4, .GROW_BY_25_PERCENT, alloc_);
+        const vert_start = self.position_buffer.get_len();
+        self.position_buffer.append_many_assume_cap(SliceFVec.from_slice_const_keep_data(&.{
+            rect.top_left(),
+            rect.top_right(),
+            rect.bot_left(),
+            rect.bot_right(),
+        }));
+        self.sprite_idx_buffer.append_many_assume_cap(SliceU32.from_slice_const_keep_data(&.{
+            sprite.vert_index(.TOP_LEFT),
+            sprite.vert_index(.TOP_RIGHT),
+            sprite.vert_index(.BOT_LEFT),
+            sprite.vert_index(.BOT_RIGHT),
+        }));
+        self.index_buffer.append_many_assume_cap(SliceU16.from_slice_const_keep_data(&.{
+            vert_start, vert_start + 2, vert_start + 1, // top-left triangle
+            vert_start + 1, vert_start + 2, vert_start + 3, // bot-right triangle
+        }));
+    }
 };
-var app_state = AppState{};
+var app = AppState{};
 
 pub fn main() !u8 {
-    app_state.app_err.reset();
+    app.app_err.reset();
     var empty_argv: [0:null]?[*:0]u8 = .{};
     const status: u8 = @truncate(@as(c_uint, @bitCast(SDL.App.run_app(empty_argv.len, @ptrCast(&empty_argv), sdl_main_func))));
-    return app_state.app_err.load() orelse status;
+    return app.app_err.load() orelse status;
 }
 
-pub fn app_init(app_state_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) anyerror!SDL.AppResult {
-    app_state_opq.?.* = @ptrCast(&app_state);
+pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) anyerror!SDL.AppResult {
+    app_opq.?.* = @ptrCast(&app);
     _ = arg_count;
     _ = arg_list;
 
@@ -198,7 +237,7 @@ pub fn app_init(app_state_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:nu
         break :make rgba_bmp_surface;
     };
 
-    app_state.graphics = GraphicsController.create(.{
+    app.graphics = GraphicsController.create(.{
         .vertex_shaders = .{
             VertexShaderInit{
                 .name = .MAIN_VERTEX_SHADER,
@@ -223,7 +262,7 @@ pub fn app_init(app_state_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:nu
         },
         .uniforms_init = UniformCollection{
             .GLOBAL = .{
-                .pos_offset = Vec2.new(0, 0),
+                .pos_offset = FVec.new(0, 0),
             },
         },
         .render_pipeline_init = &.{
@@ -272,230 +311,208 @@ pub fn app_init(app_state_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:nu
         },
         .internal_lists_alloc = std.heap.smp_allocator,
     });
-    errdefer app_state.graphics.destroy();
+    errdefer app.graphics.destroy();
 
     write_buf.clear();
     sdl_log.debug("SDL render drivers: {s}", .{try fmt_sdl_drivers(
         &write_buf,
-        try app_state.graphics.gpu.get_driver_name(),
+        try app.graphics.gpu.get_driver_name(),
         SDL.GPU_Device.get_num_drivers(),
         SDL.GPU_Device.get_driver_name_by_index,
     )});
     {
-        var upload = app_state.graphics.begin_upload_pass();
+        var upload = app.graphics.begin_upload_pass();
         try upload.upload_to_texture(rgba_bmp_surface.pixel_slice(), .SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 1, .MAIN_UPLOAD_BUFFER);
         upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
-        upload = app_state.graphics.begin_upload_pass();
+        upload = app.graphics.begin_upload_pass();
         try upload.upload_to_storage_buffer(Sprites.tex_coords[0..], .SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER);
         upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
     }
 
     {
         const stream = try SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
-        app_state.sounds = try stream.load_wav(true);
+        app.sounds = try stream.load_wav(true);
         errdefer comptime unreachable;
     }
-    errdefer app_state.sounds.destroy();
+    errdefer app.sounds.destroy();
 
-    app_state.audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&app_state.sounds.spec));
-    errdefer app_state.audio_device.close();
+    app.audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&app.sounds.spec));
+    errdefer app.audio_device.close();
 
-    errdefer while (app_state.audio_streams.len != 0) {
-        app_state.audio_streams[app_state.audio_streams.len - 1].destroy();
-        if (app_state.audio_streams.len != 0) app_state.audio_streams.len -= 1;
+    errdefer while (app.audio_streams.len != 0) {
+        app.audio_streams[app.audio_streams.len - 1].destroy();
+        if (app.audio_streams.len != 0) app.audio_streams.len -= 1;
     };
-    while (app_state.audio_streams.len < app_state.audio_streams_buf.len) {
-        app_state.audio_streams.len += 1;
-        app_state.audio_streams[app_state.audio_streams.len - 1] = try SDL.AudioStream.create(.same_input_and_output(&app_state.sounds.spec));
+    while (app.audio_streams.len < app.audio_streams_buf.len) {
+        app.audio_streams.len += 1;
+        app.audio_streams[app.audio_streams.len - 1] = try SDL.AudioStream.create(.same_input_and_output(&app.sounds.spec));
     }
 
-    try app_state.audio_device.bind_many_audio_streams(app_state.audio_streams);
+    try app.audio_device.bind_many_audio_streams(app.audio_streams);
 
     {
         const gamepads_list = try SDL.JoystickID.get_all_gamepads();
         defer gamepads_list.free();
 
-        app_state.gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
+        app.gamepad = if (gamepads_list.list.len > 0) try gamepads_list.list[0].open_gamepad() else null;
     }
-    errdefer if (app_state.gamepad) |pad| pad.close();
+    errdefer if (app.gamepad) |pad| pad.close();
 
-    app_state.phys_controller = .{};
-    app_state.prev_phys_controller = app_state.phys_controller;
-    app_state.virtual_controller = .{};
-    app_state.prev_virtual_controller = app_state.virtual_controller;
+    app.phys_controller = .{};
+    app.prev_phys_controller = app.phys_controller;
+    app.virtual_controller = .{};
+    app.prev_virtual_controller = app.virtual_controller;
 
     try load_records();
 
-    app_state.timekeeper = .{ .tocks_per_s = SDL.Time.get_performance_frequency() };
+    app.timekeeper = .{ .tocks_per_s = SDL.Time.get_performance_frequency() };
 
     try reset_game();
 
-    app_state.fully_initialized = true;
+    app.fully_initialized = true;
     errdefer comptime unreachable;
 
     return SDL.AppResult.CONTINUE;
 }
 
+const Sprite = Sprites.Sprite_;
 const Sprites = struct {
     const bmp = @embedFile("sprites.bmp");
 
     // zig fmt: off
-    const brick_2x1_purple = SDL.Rect_f32{ .pos = .{.x =   1, .y =  1}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_purple = SDL.Rect_f32{ .pos = .{.x =  67, .y =  1}, .size = .{.x = 32, .y = 32} };
-    const brick_2x1_red    = SDL.Rect_f32{ .pos = .{.x = 101, .y =  1}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_red    = SDL.Rect_f32{ .pos = .{.x = 167, .y =  1}, .size = .{.x = 32, .y = 32} };
-    const brick_2x1_yellow = SDL.Rect_f32{ .pos = .{.x =   1, .y = 35}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_yellow = SDL.Rect_f32{ .pos = .{.x =  67, .y = 35}, .size = .{.x = 32, .y = 32} };
-    const brick_2x1_green  = SDL.Rect_f32{ .pos = .{.x = 101, .y = 35}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_green  = SDL.Rect_f32{ .pos = .{.x = 167, .y = 35}, .size = .{.x = 32, .y = 32} };
-    const brick_2x1_blue   = SDL.Rect_f32{ .pos = .{.x =   1, .y = 69}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_blue   = SDL.Rect_f32{ .pos = .{.x =  67, .y = 69}, .size = .{.x = 32, .y = 32} };
-    const brick_2x1_gray   = SDL.Rect_f32{ .pos = .{.x = 101, .y = 69}, .size = .{.x = 64, .y = 32} };
-    const brick_1x1_gray   = SDL.Rect_f32{ .pos = .{.x = 167, .y = 69}, .size = .{.x = 32, .y = 32} };
+    const Sprite_ = enum(u32) {
+        brick_2x1_purple,
+        brick_1x1_purple,
+        brick_2x1_red,
+        brick_1x1_red,
+        brick_2x1_yellow,
+        brick_1x1_yellow,
+        brick_2x1_green,
+        brick_1x1_green,
+        brick_2x1_blue,
+        brick_1x1_blue,
+        brick_2x1_gray,
+        brick_1x1_gray,
+        ball,
+        paddle,
 
-    const ball             = SDL.Rect_f32{ .pos = .{.x =  2, .y = 104}, .size = .{.x =  22, .y = 22} };
-    const paddle           = SDL.Rect_f32{ .pos = .{.x = 27, .y = 103}, .size = .{.x = 104, .y = 24} };
-    const tex_coords = [_]Vec2{
-        brick_2x1_purple.top_left(),
-        brick_2x1_purple.top_right(),
-        brick_2x1_purple.bot_left(),
-        brick_2x1_purple.bot_right(),
-        //
-        brick_1x1_purple.top_left(),
-        brick_1x1_purple.top_right(),
-        brick_1x1_purple.bot_left(),
-        brick_1x1_purple.bot_right(),
-        //
-        brick_2x1_red.top_left(),
-        brick_2x1_red.top_right(),
-        brick_2x1_red.bot_left(),
-        brick_2x1_red.bot_right(),
-        //
-        brick_1x1_red.top_left(),
-        brick_1x1_red.top_right(),
-        brick_1x1_red.bot_left(),
-        brick_1x1_red.bot_right(),
-        //
-        brick_2x1_yellow.top_left(),
-        brick_2x1_yellow.top_right(),
-        brick_2x1_yellow.bot_left(),
-        brick_2x1_yellow.bot_right(),
-        //
-        brick_1x1_yellow.top_left(),
-        brick_1x1_yellow.top_right(),
-        brick_1x1_yellow.bot_left(),
-        brick_1x1_yellow.bot_right(),
-        //
-        brick_2x1_green.top_left(),
-        brick_2x1_green.top_right(),
-        brick_2x1_green.bot_left(),
-        brick_2x1_green.bot_right(),
-        //
-        brick_1x1_green.top_left(),
-        brick_1x1_green.top_right(),
-        brick_1x1_green.bot_left(),
-        brick_1x1_green.bot_right(),
-        //
-        brick_2x1_blue.top_left(),
-        brick_2x1_blue.top_right(),
-        brick_2x1_blue.bot_left(),
-        brick_2x1_blue.bot_right(),
-        //
-        brick_1x1_blue.top_left(),
-        brick_1x1_blue.top_right(),
-        brick_1x1_blue.bot_left(),
-        brick_1x1_blue.bot_right(),
-        //
-        brick_2x1_gray.top_left(),
-        brick_2x1_gray.top_right(),
-        brick_2x1_gray.bot_left(),
-        brick_2x1_gray.bot_right(),
-        //
-        brick_1x1_gray.top_left(),
-        brick_1x1_gray.top_right(),
-        brick_1x1_gray.bot_left(),
-        brick_1x1_gray.bot_right(),
-        //
-        ball.top_left(),
-        ball.top_right(),
-        ball.bot_left(),
-        ball.bot_right(),
-        //
-        paddle.top_left(),
-        paddle.top_right(),
-        paddle.bot_left(),
-        paddle.bot_right(),
+        pub fn vert_index(sprite: Sprite_, corner: Corner) u32 {
+            return (@intFromEnum(sprite) * 4) + @intFromEnum(corner);
+        }
+
+        pub fn pos(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].pos;
+        }
+
+        pub fn size(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].size;
+        }
+        pub fn top_left(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].top_left();
+        }
+        pub fn top_right(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].top_right();
+        }
+        pub fn bot_left(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].bot_left();
+        }
+        pub fn bot_right(sprite: Sprite_) FVec {
+            return rects[@intFromEnum(sprite)].bot_right();
+        }
     };
-    const tex_coord_indexes = enum(u32) {
-        brick_2x1_purple_TOP_LEFT,
-        brick_2x1_purple_TOP_RIGHT,
-        brick_2x1_purple_BOT_LEFT,
-        brick_2x1_purple_BOT_RIGHT,
-        //
-        brick_1x1_purple_TOP_LEFT,
-        brick_1x1_purple_TOP_RIGHT,
-        brick_1x1_purple_BOT_LEFT,
-        brick_1x1_purple_BOT_RIGHT,
-        //
-        brick_2x1_red_TOP_LEFT,
-        brick_2x1_red_TOP_RIGHT,
-        brick_2x1_red_BOT_LEFT,
-        brick_2x1_red_BOT_RIGHT,
-        //
-        brick_1x1_red_TOP_LEFT,
-        brick_1x1_red_TOP_RIGHT,
-        brick_1x1_red_BOT_LEFT,
-        brick_1x1_red_BOT_RIGHT,
-        //
-        brick_2x1_yellow_TOP_LEFT,
-        brick_2x1_yellow_TOP_RIGHT,
-        brick_2x1_yellow_BOT_LEFT,
-        brick_2x1_yellow_BOT_RIGHT,
-        //
-        brick_1x1_yellow_TOP_LEFT,
-        brick_1x1_yellow_TOP_RIGHT,
-        brick_1x1_yellow_BOT_LEFT,
-        brick_1x1_yellow_BOT_RIGHT,
-        //
-        brick_2x1_green_TOP_LEFT,
-        brick_2x1_green_TOP_RIGHT,
-        brick_2x1_green_BOT_LEFT,
-        brick_2x1_green_BOT_RIGHT,
-        //
-        brick_1x1_green_TOP_LEFT,
-        brick_1x1_green_TOP_RIGHT,
-        brick_1x1_green_BOT_LEFT,
-        brick_1x1_green_BOT_RIGHT,
-        //
-        brick_2x1_blue_TOP_LEFT,
-        brick_2x1_blue_TOP_RIGHT,
-        brick_2x1_blue_BOT_LEFT,
-        brick_2x1_blue_BOT_RIGHT,
-        //
-        brick_1x1_blue_TOP_LEFT,
-        brick_1x1_blue_TOP_RIGHT,
-        brick_1x1_blue_BOT_LEFT,
-        brick_1x1_blue_BOT_RIGHT,
-        //
-        brick_2x1_gray_TOP_LEFT,
-        brick_2x1_gray_TOP_RIGHT,
-        brick_2x1_gray_BOT_LEFT,
-        brick_2x1_gray_BOT_RIGHT,
-        //
-        brick_1x1_gray_TOP_LEFT,
-        brick_1x1_gray_TOP_RIGHT,
-        brick_1x1_gray_BOT_LEFT,
-        brick_1x1_gray_BOT_RIGHT,
-        //
-        ball_TOP_LEFT,
-        ball_TOP_RIGHT,
-        ball_BOT_LEFT,
-        ball_BOT_RIGHT,
-        //
-        paddle_TOP_LEFT,
-        paddle_TOP_RIGHT,
-        paddle_BOT_LEFT,
-        paddle_BOT_RIGHT,
+    const rects = [_]Rect{
+        Rect{ .pos = .{.x =   1, .y =  1}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x =  67, .y =  1}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x = 101, .y =  1}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x = 167, .y =  1}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x =   1, .y = 35}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x =  67, .y = 35}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x = 101, .y = 35}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x = 167, .y = 35}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x =   1, .y = 69}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x =  67, .y = 69}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x = 101, .y = 69}, .size = .{.x = 64, .y = 32} },
+        Rect{ .pos = .{.x = 167, .y = 69}, .size = .{.x = 32, .y = 32} },
+        Rect{ .pos = .{.x =  2, .y = 104}, .size = .{.x =  22, .y = 22} },
+        Rect{ .pos = .{.x = 27, .y = 103}, .size = .{.x = 104, .y = 24} },
+    };
+    const tex_coords = [_]FVec{
+        Sprite_.brick_2x1_purple.top_left(),
+        Sprite_.brick_2x1_purple.top_right(),
+        Sprite_.brick_2x1_purple.bot_left(),
+        Sprite_.brick_2x1_purple.bot_right(),
+        
+        Sprite_.brick_1x1_purple.top_left(),
+        Sprite_.brick_1x1_purple.top_right(),
+        Sprite_.brick_1x1_purple.bot_left(),
+        Sprite_.brick_1x1_purple.bot_right(),
+        
+        Sprite_.brick_2x1_red.top_left(),
+        Sprite_.brick_2x1_red.top_right(),
+        Sprite_.brick_2x1_red.bot_left(),
+        Sprite_.brick_2x1_red.bot_right(),
+        
+        Sprite_.brick_1x1_red.top_left(),
+        Sprite_.brick_1x1_red.top_right(),
+        Sprite_.brick_1x1_red.bot_left(),
+        Sprite_.brick_1x1_red.bot_right(),
+        
+        Sprite_.brick_2x1_yellow.top_left(),
+        Sprite_.brick_2x1_yellow.top_right(),
+        Sprite_.brick_2x1_yellow.bot_left(),
+        Sprite_.brick_2x1_yellow.bot_right(),
+        
+        Sprite_.brick_1x1_yellow.top_left(),
+        Sprite_.brick_1x1_yellow.top_right(),
+        Sprite_.brick_1x1_yellow.bot_left(),
+        Sprite_.brick_1x1_yellow.bot_right(),
+        
+        Sprite_.brick_2x1_green.top_left(),
+        Sprite_.brick_2x1_green.top_right(),
+        Sprite_.brick_2x1_green.bot_left(),
+        Sprite_.brick_2x1_green.bot_right(),
+        
+        Sprite_.brick_1x1_green.top_left(),
+        Sprite_.brick_1x1_green.top_right(),
+        Sprite_.brick_1x1_green.bot_left(),
+        Sprite_.brick_1x1_green.bot_right(),
+        
+        Sprite_.brick_2x1_blue.top_left(),
+        Sprite_.brick_2x1_blue.top_right(),
+        Sprite_.brick_2x1_blue.bot_left(),
+        Sprite_.brick_2x1_blue.bot_right(),
+        
+        Sprite_.brick_1x1_blue.top_left(),
+        Sprite_.brick_1x1_blue.top_right(),
+        Sprite_.brick_1x1_blue.bot_left(),
+        Sprite_.brick_1x1_blue.bot_right(),
+        
+        Sprite_.brick_2x1_gray.top_left(),
+        Sprite_.brick_2x1_gray.top_right(),
+        Sprite_.brick_2x1_gray.bot_left(),
+        Sprite_.brick_2x1_gray.bot_right(),
+        
+        Sprite_.brick_1x1_gray.top_left(),
+        Sprite_.brick_1x1_gray.top_right(),
+        Sprite_.brick_1x1_gray.bot_left(),
+        Sprite_.brick_1x1_gray.bot_right(),
+        
+        Sprite_.ball.top_left(),
+        Sprite_.ball.top_right(),
+        Sprite_.ball.bot_left(),
+        Sprite_.ball.bot_right(),
+        
+        Sprite_.paddle.top_left(),
+        Sprite_.paddle.top_right(),
+        Sprite_.paddle.bot_left(),
+        Sprite_.paddle.bot_right(),
+    };
+    
+    const Corner = enum(u32) {
+        TOP_LEFT,
+        TOP_RIGHT,
+        BOT_LEFT,
+        BOT_RIGHT,
     };
     // zig fmt: on
 };
@@ -631,7 +648,7 @@ const Timekeeper = struct {
 
 const Paddle = struct {
     box: Rect,
-    src_rect: *const Rect,
+    sprite: Sprites.Sprite_,
 };
 
 const Collision = struct {
@@ -687,7 +704,7 @@ const Ball = struct {
     box: Rect,
     vel: FVec,
     launched: bool,
-    src_rect: *const SDL.Rect_f32,
+    sprite: Sprites.Sprite_,
 
     fn get_paddle_bounce_angle(ball_: Ball, paddle_: Paddle) f32 {
         const min_x = paddle_.box.pos.x - ball_.box.size.x;
@@ -701,7 +718,7 @@ const Ball = struct {
 
 const Brick = struct {
     box: Rect,
-    src_rect: *const SDL.Rect_f32,
+    sprite: Sprites.Sprite_,
 };
 
 fn fmt_sdl_drivers(write_buf: *BoundedArray(u8, 250), current_driver: [*:0]const u8, num_drivers: c_int, get_driver: *const fn (c_int) SDL.Error![*:0]const u8) anyerror![]const u8 {
@@ -738,10 +755,10 @@ fn load_records() !void {
     };
     var stream = try SDL.IOStream.from_mem(buf[0..8]);
     defer stream.close() catch {};
-    app_state.attempts = try stream.read_u32_le();
-    app_state.best_win = try stream.read_u32_le();
+    app.attempts = try stream.read_u32_le();
+    app.best_win = try stream.read_u32_le();
 
-    app_log.debug("loaded records:\n\tattempts = {d}\n\tbest win: {d}", .{ app_state.attempts, app_state.best_win });
+    app_log.debug("loaded records:\n\tattempts = {d}\n\tbest win: {d}", .{ app.attempts, app.best_win });
 }
 
 fn save_records() !void {
@@ -754,106 +771,106 @@ fn save_records() !void {
         total_time += 10;
         if (total_time > 10000) return error.save_best_score_ready_timeout;
     }
-    app_state.records_need_save = false;
+    app.records_need_save = false;
 
-    const new_best_win = if (app_state.won and app_state.score < app_state.best_win) app_state.score else app_state.best_win;
+    const new_best_win = if (app.won and app.score < app.best_win) app.score else app.best_win;
     var buf: [8:0]u8 = undefined;
     const stream = try SDL.IOStream.from_mem(buf[0..8]);
     defer stream.close() catch {};
-    try stream.write_u32_le(app_state.attempts);
+    try stream.write_u32_le(app.attempts);
     try stream.write_u32_le(new_best_win);
     try storage.write_file_from_buffer(records_storage_file_name, buf[0..8]);
-    app_log.debug("saved records:\n\tattempts = {d}\n\tbest win: {d}", .{ app_state.attempts, new_best_win });
+    app_log.debug("saved records:\n\tattempts = {d}\n\tbest win: {d}", .{ app.attempts, new_best_win });
 }
 
 fn reset_game() !void {
-    app_state.won = false;
-    app_state.records_need_save = false;
-    app_state.attempts += 1;
-    app_state.paddle = .{
+    app.won = false;
+    app.records_need_save = false;
+    app.attempts += 1;
+    app.paddle = .{
         .box = .{
             .pos = .{
-                .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprites.paddle.size.x * 0.5,
-                .y = Cast.num_cast(window_size.y, f32) - Sprites.paddle.size.y,
+                .x = Cast.num_cast(window_size.x, f32) * 0.5 - Sprite.paddle.size().x * 0.5,
+                .y = Cast.num_cast(window_size.y, f32) - Sprite.paddle.size().y,
             },
             .size = .{
-                .x = Sprites.paddle.size.x,
-                .y = Sprites.paddle.size.y,
+                .x = Sprite.paddle.size().x,
+                .y = Sprite.paddle.size().y,
             },
         },
-        .src_rect = &Sprites.paddle,
+        .sprite = .paddle,
     };
 
-    app_state.ball = .{
+    app.ball = .{
         .box = .{
             .pos = .{
-                .x = app_state.paddle.box.pos.x + app_state.paddle.box.size.x * 0.5,
-                .y = app_state.paddle.box.pos.y - Sprites.ball.size.y,
+                .x = app.paddle.box.pos.x + app.paddle.box.size.x * 0.5,
+                .y = app.paddle.box.pos.y - Sprite.ball.size().y,
             },
             .size = .{
-                .x = Sprites.ball.size.x,
-                .y = Sprites.ball.size.y,
+                .x = Sprite.ball.size().x,
+                .y = Sprite.ball.size().y,
             },
         },
         .vel = FVec.new(0, 0),
         .launched = false,
-        .src_rect = &Sprites.ball,
+        .sprite = .ball,
     };
 
-    app_state.bricks = .{};
+    app.bricks = .{};
     {
         const x = Cast.num_cast(window_size.x, f32) * 0.5;
-        const h = Sprites.brick_1x1_gray.size.y;
+        const h = Sprite.brick_1x1_gray.size().y;
         const gap = 5;
-        for ([_][2]*const SDL.Rect_f32{
-            .{ &Sprites.brick_1x1_purple, &Sprites.brick_2x1_purple },
-            .{ &Sprites.brick_1x1_red, &Sprites.brick_2x1_red },
-            .{ &Sprites.brick_1x1_yellow, &Sprites.brick_2x1_yellow },
-            .{ &Sprites.brick_1x1_green, &Sprites.brick_2x1_green },
-            .{ &Sprites.brick_1x1_blue, &Sprites.brick_2x1_blue },
-            .{ &Sprites.brick_1x1_gray, &Sprites.brick_2x1_gray },
-        }, 0..) |src_rects, row| {
+        for ([_][2]Sprites.Sprite_{
+            .{ Sprites.Sprite_.brick_1x1_purple, Sprites.Sprite_.brick_2x1_purple },
+            .{ Sprites.Sprite_.brick_1x1_red, Sprites.Sprite_.brick_2x1_red },
+            .{ Sprites.Sprite_.brick_1x1_yellow, Sprites.Sprite_.brick_2x1_yellow },
+            .{ Sprites.Sprite_.brick_1x1_green, Sprites.Sprite_.brick_2x1_green },
+            .{ Sprites.Sprite_.brick_1x1_blue, Sprites.Sprite_.brick_2x1_blue },
+            .{ Sprites.Sprite_.brick_1x1_gray, Sprites.Sprite_.brick_2x1_gray },
+        }, 0..) |sprites, row| {
             const y = gap + (h + gap) * (@as(f32, @floatFromInt(row)) + 1);
             var large = row % 2 == 0;
-            var src_rect = src_rects[@intFromBool(large)];
-            app_state.bricks.append(.{
+            var sprite = sprites[@intFromBool(large)];
+            app.bricks.append(Brick{
                 .box = .{ .pos = .{
-                    .x = x - src_rect.size.x * 0.5,
+                    .x = x - sprite.size().x * 0.5,
                     .y = y,
                 }, .size = .{
-                    .x = src_rect.size.x,
-                    .y = src_rect.size.y,
+                    .x = sprite.size().x,
+                    .y = sprite.size().y,
                 } },
-                .src_rect = src_rect,
+                .sprite = sprite,
             });
             var rel_x: f32 = 0;
             var count: usize = 0;
             while (count < 4) : (count += 1) {
-                rel_x += src_rect.size.x * 0.5 + gap;
+                rel_x += sprite.size().x * 0.5 + gap;
                 large = !large;
-                src_rect = src_rects[@intFromBool(large)];
-                rel_x += src_rect.size.x * 0.5;
+                sprite = sprites[@intFromBool(large)];
+                rel_x += sprite.size().x * 0.5;
                 for ([_]f32{ -1, 1 }) |sign| {
-                    app_state.bricks.append(.{
+                    app.bricks.append(Brick{
                         .box = .{
                             .pos = .{
-                                .x = x - src_rect.size.x * 0.5 + rel_x * sign,
+                                .x = x - sprite.size().x * 0.5 + rel_x * sign,
                                 .y = y,
                             },
                             .size = .{
-                                .x = src_rect.size.x,
-                                .y = src_rect.size.y,
+                                .x = sprite.size().x,
+                                .y = sprite.size().y,
                             },
                         },
-                        .src_rect = src_rect,
+                        .sprite = sprite,
                     });
                 }
             }
         }
     }
 
-    app_state.score = 0;
-    app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0xff, 0xff, 0xff, 0xff);
+    app.score = 0;
+    app.score_color = SDL.Color_RGBA_u8.new_rgba(0xff, 0xff, 0xff, 0xff);
 }
 
 fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
@@ -868,54 +885,54 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     }) = .initEmpty();
 
     // Update the game state.
-    while (app_state.timekeeper.consume()) {
+    while (app.timekeeper.consume()) {
         // Map the physical controller state to the virtual controller state.
 
-        app_state.prev_virtual_controller = app_state.virtual_controller;
-        app_state.virtual_controller.move_paddle_exact = 0;
+        app.prev_virtual_controller = app.virtual_controller;
+        app.virtual_controller.move_paddle_exact = 0;
 
-        app_state.virtual_controller.move_paddle_left =
-            app_state.phys_controller.k_left or
-            app_state.phys_controller.g_left or
-            app_state.phys_controller.g_leftx <= -0x4000;
-        app_state.virtual_controller.move_paddle_right =
-            app_state.phys_controller.k_right or
-            app_state.phys_controller.g_right or
-            app_state.phys_controller.g_leftx >= 0x4000;
-        app_state.virtual_controller.slow_paddle_movement =
-            app_state.phys_controller.k_lshift or
-            app_state.phys_controller.g_left_shoulder or
-            app_state.phys_controller.g_right_shoulder or
-            app_state.phys_controller.g_left_trigger >= 0x2000 or
-            app_state.phys_controller.g_right_trigger >= 0x2000;
-        app_state.virtual_controller.launch_ball =
-            app_state.phys_controller.k_space or
-            app_state.phys_controller.g_south or
-            app_state.phys_controller.g_east;
-        app_state.virtual_controller.reset_game =
-            app_state.phys_controller.k_r or
-            app_state.phys_controller.g_back or
-            app_state.phys_controller.g_start;
+        app.virtual_controller.move_paddle_left =
+            app.phys_controller.k_left or
+            app.phys_controller.g_left or
+            app.phys_controller.g_leftx <= -0x4000;
+        app.virtual_controller.move_paddle_right =
+            app.phys_controller.k_right or
+            app.phys_controller.g_right or
+            app.phys_controller.g_leftx >= 0x4000;
+        app.virtual_controller.slow_paddle_movement =
+            app.phys_controller.k_lshift or
+            app.phys_controller.g_left_shoulder or
+            app.phys_controller.g_right_shoulder or
+            app.phys_controller.g_left_trigger >= 0x2000 or
+            app.phys_controller.g_right_trigger >= 0x2000;
+        app.virtual_controller.launch_ball =
+            app.phys_controller.k_space or
+            app.phys_controller.g_south or
+            app.phys_controller.g_east;
+        app.virtual_controller.reset_game =
+            app.phys_controller.k_r or
+            app.phys_controller.g_back or
+            app.phys_controller.g_start;
 
-        if (!app_state.virtual_controller.lock_mouse) {
-            if (app_state.phys_controller.m_left and !app_state.prev_phys_controller.m_left) {
-                app_state.virtual_controller.lock_mouse = true;
-                try app_state.graphics.get_window(.MAIN).set_mouse_mode_relative(true);
+        if (!app.virtual_controller.lock_mouse) {
+            if (app.phys_controller.m_left and !app.prev_phys_controller.m_left) {
+                app.virtual_controller.lock_mouse = true;
+                try app.graphics.get_window(.MAIN).set_mouse_mode_relative(true);
             }
         } else {
-            if (app_state.phys_controller.k_escape and !app_state.prev_phys_controller.k_escape) {
-                app_state.virtual_controller.lock_mouse = false;
-                try app_state.graphics.get_window(.MAIN).set_mouse_mode_relative(false);
+            if (app.phys_controller.k_escape and !app.prev_phys_controller.k_escape) {
+                app.virtual_controller.lock_mouse = false;
+                try app.graphics.get_window(.MAIN).set_mouse_mode_relative(false);
             } else {
-                app_state.virtual_controller.launch_ball = app_state.virtual_controller.launch_ball or app_state.phys_controller.m_left;
-                app_state.virtual_controller.move_paddle_exact = app_state.phys_controller.m_xrel;
+                app.virtual_controller.launch_ball = app.virtual_controller.launch_ball or app.phys_controller.m_left;
+                app.virtual_controller.move_paddle_exact = app.phys_controller.m_xrel;
             }
         }
 
-        app_state.prev_phys_controller = app_state.phys_controller;
-        app_state.phys_controller.m_xrel = 0;
+        app.prev_phys_controller = app.phys_controller;
+        app.phys_controller.m_xrel = 0;
 
-        if (app_state.virtual_controller.reset_game and !app_state.prev_virtual_controller.reset_game) {
+        if (app.virtual_controller.reset_game and !app.prev_virtual_controller.reset_game) {
             try reset_game();
             return SDL.AppResult.CONTINUE;
         }
@@ -924,34 +941,34 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         {
             var paddle_vel_x: f32 = 0;
             var keyboard_gamepad_vel_x: f32 = 0;
-            if (app_state.virtual_controller.move_paddle_left) keyboard_gamepad_vel_x -= 10;
-            if (app_state.virtual_controller.move_paddle_right) keyboard_gamepad_vel_x += 10;
-            if (app_state.virtual_controller.slow_paddle_movement) keyboard_gamepad_vel_x *= 0.5;
+            if (app.virtual_controller.move_paddle_left) keyboard_gamepad_vel_x -= 10;
+            if (app.virtual_controller.move_paddle_right) keyboard_gamepad_vel_x += 10;
+            if (app.virtual_controller.slow_paddle_movement) keyboard_gamepad_vel_x *= 0.5;
             paddle_vel_x += keyboard_gamepad_vel_x;
-            var mouse_vel_x = app_state.virtual_controller.move_paddle_exact;
-            if (app_state.virtual_controller.slow_paddle_movement) mouse_vel_x *= 0.25;
+            var mouse_vel_x = app.virtual_controller.move_paddle_exact;
+            if (app.virtual_controller.slow_paddle_movement) mouse_vel_x *= 0.25;
             paddle_vel_x += mouse_vel_x;
-            app_state.paddle.box.pos.x = std.math.clamp(app_state.paddle.box.pos.x + paddle_vel_x, 0, window_size.x - app_state.paddle.box.size.x);
+            app.paddle.box.pos.x = std.math.clamp(app.paddle.box.pos.x + paddle_vel_x, 0, window_size.x - app.paddle.box.size.x);
         }
 
-        const previous_ball_y = app_state.ball.box.pos.y;
+        const previous_ball_y = app.ball.box.pos.y;
 
-        if (!app_state.ball.launched) {
+        if (!app.ball.launched) {
             // Stick the ball to the paddle.
-            app_state.ball.box.pos.x = app_state.paddle.box.pos.x + app_state.paddle.box.size.x * 0.5;
+            app.ball.box.pos.x = app.paddle.box.pos.x + app.paddle.box.size.x * 0.5;
 
-            if (app_state.virtual_controller.launch_ball and !app_state.prev_virtual_controller.launch_ball) {
+            if (app.virtual_controller.launch_ball and !app.prev_virtual_controller.launch_ball) {
                 // Launch the ball.
-                const angle = app_state.ball.get_paddle_bounce_angle(app_state.paddle);
-                app_state.ball.vel.x = @cos(angle) * 4;
-                app_state.ball.vel.y = @sin(angle) * 4;
-                app_state.ball.launched = true;
+                const angle = app.ball.get_paddle_bounce_angle(app.paddle);
+                app.ball.vel.x = @cos(angle) * 4;
+                app.ball.vel.y = @sin(angle) * 4;
+                app.ball.launched = true;
             }
         }
 
-        if (app_state.ball.launched) {
+        if (app.ball.launched) {
             // Check for and handle collisions using swept AABB collision detection.
-            var rem_vel: FVec = app_state.ball.vel;
+            var rem_vel: FVec = app.ball.vel;
             while (rem_vel.x != 0 or rem_vel.y != 0) {
                 var t: f32 = 1;
                 var sign_x: f32 = 0;
@@ -967,7 +984,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 if (rem_vel.x < 0) {
                     // Left wall
-                    const wall_t = -app_state.ball.box.pos.x * inv_rem_vel.x;
+                    const wall_t = -app.ball.box.pos.x * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = 1;
@@ -975,7 +992,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     }
                 } else if (rem_vel.x > 0) {
                     // Right wall
-                    const wall_t = (window_size.x - app_state.ball.box.size.x - app_state.ball.box.pos.x) * inv_rem_vel.x;
+                    const wall_t = (window_size.x - app.ball.box.size.x - app.ball.box.pos.x) * inv_rem_vel.x;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_x = -1;
@@ -984,7 +1001,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 }
                 if (rem_vel.y < 0) {
                     // Top wall
-                    const wall_t = -app_state.ball.box.pos.y * inv_rem_vel.y;
+                    const wall_t = -app.ball.box.pos.y * inv_rem_vel.y;
                     if (t - wall_t >= 0.001) {
                         t = wall_t;
                         sign_y = 1;
@@ -994,15 +1011,15 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                     // Paddle
                     const paddle_top: Rect = .{
                         .pos = .{
-                            .x = app_state.paddle.box.pos.x,
-                            .y = app_state.paddle.box.pos.y,
+                            .x = app.paddle.box.pos.x,
+                            .y = app.paddle.box.pos.y,
                         },
                         .size = .{
-                            .x = app_state.paddle.box.size.x,
+                            .x = app.paddle.box.size.x,
                             .y = 0,
                         },
                     };
-                    if (Collision.sweep_test(app_state.ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
+                    if (Collision.sweep_test(app.ball.box, rem_vel, paddle_top, FVec.ZERO)) |collision| {
                         if (t - collision.t >= 0.001) {
                             t = @min(0, collision.t);
                             sign_y = -1;
@@ -1014,17 +1031,17 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 // Bricks
                 const broad: Rect = .{
                     .pos = .{
-                        .x = @min(app_state.ball.box.pos.x, app_state.ball.box.pos.x + rem_vel.x),
-                        .y = @min(app_state.ball.box.pos.y, app_state.ball.box.pos.y + rem_vel.y),
+                        .x = @min(app.ball.box.pos.x, app.ball.box.pos.x + rem_vel.x),
+                        .y = @min(app.ball.box.pos.y, app.ball.box.pos.y + rem_vel.y),
                     },
                     .size = .{
-                        .x = @max(app_state.ball.box.size.x, app_state.ball.box.size.x + rem_vel.x),
-                        .y = @max(app_state.ball.box.size.y, app_state.ball.box.size.y + rem_vel.y),
+                        .x = @max(app.ball.box.size.x, app.ball.box.size.x + rem_vel.x),
+                        .y = @max(app.ball.box.size.y, app.ball.box.size.y + rem_vel.y),
                     },
                 };
-                for (app_state.bricks.slice(), 0..) |brick, i| {
+                for (app.bricks.slice(), 0..) |brick, i| {
                     if (Collision.intersects(broad, brick.box)) {
-                        if (Collision.sweep_test(app_state.ball.box, rem_vel, brick.box, FVec.ZERO)) |collision| {
+                        if (Collision.sweep_test(app.ball.box, rem_vel, brick.box, FVec.ZERO)) |collision| {
                             if (t - collision.t >= 0.001) {
                                 t = collision.t;
                                 sign_x = collision.sign_x;
@@ -1037,34 +1054,34 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
 
                 // Bounce the ball off the object it collided with (if any).
                 if (collidee == .paddle) {
-                    const angle = app_state.ball.get_paddle_bounce_angle(app_state.paddle);
+                    const angle = app.ball.get_paddle_bounce_angle(app.paddle);
                     const vel_factor = 1.05;
-                    app_state.ball.box.pos.x += rem_vel.x * t;
-                    app_state.ball.box.pos.y += rem_vel.y * t;
-                    const vel = @sqrt(app_state.ball.vel.x * app_state.ball.vel.x + app_state.ball.vel.y * app_state.ball.vel.y) * vel_factor;
-                    app_state.ball.vel.x = @cos(angle) * vel;
-                    app_state.ball.vel.y = @sin(angle) * vel;
+                    app.ball.box.pos.x += rem_vel.x * t;
+                    app.ball.box.pos.y += rem_vel.y * t;
+                    const vel = @sqrt(app.ball.vel.x * app.ball.vel.x + app.ball.vel.y * app.ball.vel.y) * vel_factor;
+                    app.ball.vel.x = @cos(angle) * vel;
+                    app.ball.vel.y = @sin(angle) * vel;
                     rem_vel.x *= (1 - t);
                     rem_vel.y *= (1 - t);
                     const remaining_vel = @sqrt(rem_vel.x * rem_vel.x + rem_vel.y * rem_vel.y) * vel_factor;
                     rem_vel.x = @cos(angle) * remaining_vel;
                     rem_vel.y = @sin(angle) * remaining_vel;
                 } else {
-                    app_state.ball.box.pos.x += rem_vel.x * t;
-                    app_state.ball.box.pos.y += rem_vel.y * t;
-                    app_state.ball.vel.x = std.math.copysign(app_state.ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
-                    app_state.ball.vel.y = std.math.copysign(app_state.ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
-                    rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), app_state.ball.vel.x);
-                    rem_vel.y = std.math.copysign(rem_vel.y * (1 - t), app_state.ball.vel.y);
+                    app.ball.box.pos.x += rem_vel.x * t;
+                    app.ball.box.pos.y += rem_vel.y * t;
+                    app.ball.vel.x = std.math.copysign(app.ball.vel.x, if (sign_x != 0) sign_x else rem_vel.x);
+                    app.ball.vel.y = std.math.copysign(app.ball.vel.y, if (sign_y != 0) sign_y else rem_vel.y);
+                    rem_vel.x = std.math.copysign(rem_vel.x * (1 - t), app.ball.vel.x);
+                    rem_vel.y = std.math.copysign(rem_vel.y * (1 - t), app.ball.vel.y);
                     if (collidee == .brick) {
-                        _ = app_state.bricks.swapRemove(collidee.brick);
+                        _ = app.bricks.swapRemove(collidee.brick);
                     }
                 }
 
                 // Enqueue an appropriate sound effect.
                 switch (collidee) {
                     .wall => {
-                        if (app_state.ball.box.pos.y < window_size.y) {
+                        if (app.ball.box.pos.y < window_size.y) {
                             sounds_to_play.insert(.hit_wall);
                         }
                     },
@@ -1072,9 +1089,9 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                         sounds_to_play.insert(.hit_paddle);
                     },
                     .brick => {
-                        if (app_state.bricks.len == 0) {
-                            app_state.won = true;
-                            app_state.records_need_save = true;
+                        if (app.bricks.len == 0) {
+                            app.won = true;
+                            app.records_need_save = true;
                             sounds_to_play.insert(.win);
                         } else {
                             sounds_to_play.insert(.hit_brick);
@@ -1085,33 +1102,33 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
             }
         }
 
-        if (previous_ball_y < window_size.y and app_state.ball.box.pos.y >= window_size.y) {
+        if (previous_ball_y < window_size.y and app.ball.box.pos.y >= window_size.y) {
             // The ball fell below the paddle.
-            if (app_state.bricks.len != 0) {
+            if (app.bricks.len != 0) {
                 sounds_to_play.insert(.lose);
-                app_state.records_need_save = true;
+                app.records_need_save = true;
             }
         }
 
         // Update score.
-        if (app_state.ball.launched) {
-            if (app_state.ball.box.pos.y < window_size.y) {
-                if (app_state.bricks.len != 0) {
-                    app_state.score +|= 1;
+        if (app.ball.launched) {
+            if (app.ball.box.pos.y < window_size.y) {
+                if (app.bricks.len != 0) {
+                    app.score +|= 1;
                 } else {
-                    app_state.best_win = @min(app_state.score, app_state.best_win);
+                    app.best_win = @min(app.score, app.best_win);
                 }
             }
-            if (app_state.score <= app_state.best_win and app_state.bricks.len == 0) {
-                app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
-            } else if (app_state.ball.box.pos.y >= window_size.y or app_state.score > app_state.best_win) {
-                app_state.score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
+            if (app.score <= app.best_win and app.bricks.len == 0) {
+                app.score_color = SDL.Color_RGBA_u8.new_rgba(0x52, 0xcc, 0x73, 0xff);
+            } else if (app.ball.box.pos.y >= window_size.y or app.score > app.best_win) {
+                app.score_color = SDL.Color_RGBA_u8.new_rgba(0xcc, 0x5c, 0x52, 0xff);
             }
         }
     }
 
     // Save score.
-    if (app_state.records_need_save) {
+    if (app.records_need_save) {
         try save_records();
     }
 
@@ -1125,16 +1142,16 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         var stream_index: usize = 0;
         var it = sounds_to_play.iterator();
         iterate_sounds: while (it.next()) |sound| {
-            const stream = find_available_stream: while (stream_index < app_state.audio_streams.len) {
+            const stream = find_available_stream: while (stream_index < app.audio_streams.len) {
                 defer stream_index += 1;
-                const stream = app_state.audio_streams[stream_index];
+                const stream = app.audio_streams[stream_index];
                 if (try stream.get_bytes_available_to_take_out() == 0) {
                     break :find_available_stream stream;
                 }
             } else {
                 break :iterate_sounds;
             };
-            const frame_size: usize = @intCast(app_state.sounds.spec.frame_size());
+            const frame_size: usize = @intCast(app.sounds.spec.frame_size());
             const start: usize, const end: usize = switch (sound) {
                 .hit_wall => Sounds.hit_wall,
                 .hit_paddle => Sounds.hit_paddle,
@@ -1142,20 +1159,40 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
                 .win => Sounds.win,
                 .lose => Sounds.lose,
             };
-            const data = app_state.sounds.data[(frame_size * start)..(frame_size * end)];
+            const data = app.sounds.data[(frame_size * start)..(frame_size * end)];
             try stream.put_in_audio_data(data);
         }
     }
 
     // Draw.
     {
-        const CLEAR_COLOR = SDL.Color_RGBA_u8.new(0x47, 0x5b, 0x8d, 0xff);
-        for (app_state.bricks.slice()) |brick| {
-            //CHECKPOINT chencge Brick, Ball, and Paddle defs to take sprite ids instead of raw coords
+        const CLEAR_COLOR = SDL.Color_RGBA_u8.new(0x47, 0x5b, 0x8d, 0xff).change_component_type_normalized(f32);
+        for (app.bricks.slice()) |brick| {
+            app.append_vertices(brick.box, brick.sprite, alloc);
         }
+        app.append_vertices(app.ball.box, app.ball.sprite, alloc);
+        app.append_vertices(app.paddle.box, app.paddle.sprite, alloc);
+        var upload = app.graphics.begin_upload_pass();
+        try upload.upload_to_index_buffer(app.index_buffer.zig_slice_entire_const(), .VERT_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_vertex_buffer(app.position_buffer.zig_slice_entire_const(), .VERTEX_POSITIONS, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_vertex_buffer(app.sprite_idx_buffer.zig_slice_entire_const(), .SPRITE_VERTEX_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
+        var cmd: CommandBuffer = try upload.end_upload_pass_and_start_command_buffer(true);
+        var render: RenderPass = try cmd.begin_render_pass(&.{
+            ColorTarget{
+                .target = .window(.MAIN),
+                .clear_color = CLEAR_COLOR,
+                .load_op = .CLEAR,
+            },
+        }, DepthTarget{});
+        var pipeline: RenderPassWithPipeline = try render.begin_render_pipeline_pass(.MAIN_PIPELINE);
+        pipeline.bind_all_resources_and_push_all_uniforms(0, &.{});
+        pipeline.draw_indexed_primitives(0, 0, app.index_buffer.get_len());
+        pipeline.end_pipeline_pass();
+        render.end_render_pass();
+        try cmd.submit_commands();
     }
 
-    app_state.timekeeper.produce(SDL.Time.get_performance_counter());
+    app.timekeeper.produce(SDL.Time.get_performance_counter());
 
     return SDL.AppResult.CONTINUE;
 }
@@ -1170,55 +1207,55 @@ fn handle_event(appstate: ?*anyopaque, event_: ?*SDL.Event) !SDL.AppResult {
         .KEY_DOWN, .KEY_UP => {
             const is_down = event.type == .KEY_DOWN;
             switch (event.keyboard.scancode) {
-                .LEFT => app_state.phys_controller.k_left = is_down,
-                .RIGHT => app_state.phys_controller.k_right = is_down,
-                .LSHIFT => app_state.phys_controller.k_lshift = is_down,
-                .SPACE => app_state.phys_controller.k_space = is_down,
-                .R => app_state.phys_controller.k_r = is_down,
-                .ESCAPE => app_state.phys_controller.k_escape = is_down,
+                .LEFT => app.phys_controller.k_left = is_down,
+                .RIGHT => app.phys_controller.k_right = is_down,
+                .LSHIFT => app.phys_controller.k_lshift = is_down,
+                .SPACE => app.phys_controller.k_space = is_down,
+                .R => app.phys_controller.k_r = is_down,
+                .ESCAPE => app.phys_controller.k_escape = is_down,
                 else => {},
             }
         },
         .MOUSE_BUTTON_DOWN, .MOUSE_BUTTON_UP => {
             const is_down = event.type == .MOUSE_BUTTON_DOWN;
             switch (event.mouse_button.button) {
-                .LEFT => app_state.phys_controller.m_left = is_down,
+                .LEFT => app.phys_controller.m_left = is_down,
                 else => {},
             }
         },
         .MOUSE_MOTION => {
-            app_state.phys_controller.m_xrel += event.mouse_motion.delta.x;
+            app.phys_controller.m_xrel += event.mouse_motion.delta.x;
         },
         .GAMEPAD_ADDED => {
-            if (app_state.gamepad == null) {
-                app_state.gamepad = try event.gamepad_device.controller_id.open_gamepad();
+            if (app.gamepad == null) {
+                app.gamepad = try event.gamepad_device.controller_id.open_gamepad();
             }
         },
         .GAMEPAD_REMOVED => {
-            if (app_state.gamepad) |pad| {
+            if (app.gamepad) |pad| {
                 pad.close();
-                app_state.gamepad = null;
+                app.gamepad = null;
             }
         },
         .GAMEPAD_BUTTON_DOWN, .GAMEPAD_BUTTON_UP => {
             const is_down = event.type == .GAMEPAD_BUTTON_DOWN;
             switch (event.gamepad_button.button) {
-                .DPAD_LEFT => app_state.phys_controller.g_left = is_down,
-                .DPAD_RIGHT => app_state.phys_controller.g_right = is_down,
-                .LEFT_SHOULDER => app_state.phys_controller.g_left_shoulder = is_down,
-                .RIGHT_SHOULDER => app_state.phys_controller.g_right_shoulder = is_down,
-                .SOUTH => app_state.phys_controller.g_south = is_down,
-                .EAST => app_state.phys_controller.g_east = is_down,
-                .BACK => app_state.phys_controller.g_back = is_down,
-                .START => app_state.phys_controller.g_start = is_down,
+                .DPAD_LEFT => app.phys_controller.g_left = is_down,
+                .DPAD_RIGHT => app.phys_controller.g_right = is_down,
+                .LEFT_SHOULDER => app.phys_controller.g_left_shoulder = is_down,
+                .RIGHT_SHOULDER => app.phys_controller.g_right_shoulder = is_down,
+                .SOUTH => app.phys_controller.g_south = is_down,
+                .EAST => app.phys_controller.g_east = is_down,
+                .BACK => app.phys_controller.g_back = is_down,
+                .START => app.phys_controller.g_start = is_down,
                 else => {},
             }
         },
         .GAMEPAD_AXIS_MOTION => {
             switch (event.gamepad_axis.axis) {
-                .LEFTX => app_state.phys_controller.g_leftx = event.gamepad_axis.value,
-                .LEFT_TRIGGER => app_state.phys_controller.g_left_trigger = event.gamepad_axis.value,
-                .RIGHT_TRIGGER => app_state.phys_controller.g_right_trigger = event.gamepad_axis.value,
+                .LEFTX => app.phys_controller.g_leftx = event.gamepad_axis.value,
+                .LEFT_TRIGGER => app.phys_controller.g_left_trigger = event.gamepad_axis.value,
+                .RIGHT_TRIGGER => app.phys_controller.g_right_trigger = event.gamepad_axis.value,
                 else => {},
             }
         },
@@ -1242,18 +1279,16 @@ fn app_quit(appstate: ?*anyopaque, result: anyerror!SDL.AppResult) void {
         },
     };
 
-    if (app_state.fully_initialized) {
-        if (app_state.gamepad) |pad| pad.close();
-        while (app_state.audio_streams.len != 0) {
-            app_state.audio_streams[app_state.audio_streams.len - 1].destroy();
-            app_state.audio_streams.len -= 1;
+    if (app.fully_initialized) {
+        if (app.gamepad) |pad| pad.close();
+        while (app.audio_streams.len != 0) {
+            app.audio_streams[app.audio_streams.len - 1].destroy();
+            app.audio_streams.len -= 1;
         }
-        app_state.audio_device.close();
-        app_state.sounds.destroy();
-        app_state.sprite_texture.destroy();
-        app_state.renderer.destroy();
-        app_state.window.destroy();
-        app_state.fully_initialized = false;
+        app.audio_device.close();
+        app.sounds.destroy();
+        app.graphics.destroy();
+        app.fully_initialized = false;
     }
 }
 
@@ -1262,19 +1297,19 @@ fn sdl_main_func(arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) c_i
 }
 
 fn sdl_init_func(appstate: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*:0]u8) callconv(.c) SDL.AppResult {
-    return app_init(appstate, arg_count, arg_list) catch |err| app_state.app_err.store(err);
+    return app_init(appstate, arg_count, arg_list) catch |err| app.app_err.store(err);
 }
 
 fn sdl_update_func(appstate: ?*anyopaque) callconv(.c) SDL.AppResult {
-    return app_update(appstate) catch |err| app_state.app_err.store(err);
+    return app_update(appstate) catch |err| app.app_err.store(err);
 }
 
 fn sdl_event_func(appstate: ?*anyopaque, event: ?*SDL.Event) callconv(.c) SDL.AppResult {
-    return handle_event(appstate, event) catch |err| app_state.app_err.store(err);
+    return handle_event(appstate, event) catch |err| app.app_err.store(err);
 }
 
 fn sdl_quit_func(appstate: ?*anyopaque, close_result: SDL.AppResult) callconv(.c) void {
-    app_quit(appstate, app_state.app_err.load() orelse close_result);
+    app_quit(appstate, app.app_err.load() orelse close_result);
 }
 
 fn BoundedArray(comptime T: type, comptime N: usize) type {

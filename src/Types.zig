@@ -1116,6 +1116,32 @@ pub inline fn type_has_method_with_signature(comptime TYPE: type, comptime NAME:
     return true;
 }
 
+pub fn type_is_instantiable(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .noreturn,
+        .@"opaque",
+        .frame,
+        .@"anyframe",
+        .type,
+        => false,
+        // All other type patterns are generally safe for @sizeOf / @alignOf
+        else => true,
+    };
+}
+
+pub fn real_type_of(t: anytype) type {
+    const T = @TypeOf(t);
+    return real_type(T);
+}
+
+pub fn real_type(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .comptime_int => u64,
+        .comptime_float => f64,
+        else => T,
+    };
+}
+
 // pub inline fn all_struct_fields_are_same_type(comptime T: type, comptime T_FIELD: type) bool {}
 
 pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {

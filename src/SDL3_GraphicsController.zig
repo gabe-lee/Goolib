@@ -2060,6 +2060,7 @@ pub fn GraphicsController(
             return self.index_buffers[@intFromEnum(name)];
         }
         pub inline fn get_indirect_draw_buffer(self: *const Controller, name: IndirectDrawBufferName) *GPU_Buffer {
+            assert_with_reason(INTERNAL.HAS_INDIRECT_BUFS, @src(), "no indirect dra buffers defined", .{});
             assert_with_reason(self.indirect_draw_buffers_init[@intFromEnum(name)], @src(), "indirect draw buffer `{s}` not initialized", .{@tagName(name)});
             return self.indirect_draw_buffers[@intFromEnum(name)];
         }
@@ -2079,8 +2080,6 @@ pub fn GraphicsController(
         pub fn get_window_texture_format(self: *Controller, window: WindowName) GPU_TextureFormat {
             return self.gpu.get_swapchain_texture_format(self.get_claimed_window(window));
         }
-
-
 
         pub const Fence = union(FenceKind) {
             NAMED: FenceName,
@@ -3029,12 +3028,12 @@ pub fn GraphicsController(
                     }
                 }
                 self.controller.upload_pass_active = false;
-                const cmd: CommandBuffer = if (ERRORS) ( //
+                var cmd: CommandBuffer = if (ERRORS) ( //
                     try self.controller.begin_command_buffer()) //
                     else self.controller.begin_command_buffer() catch |err| ERROR_MODE.panic(@src(), err);
                 var copy: CopyPassTransferOnly = if (ERRORS) ( //
-                    try CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd)) //
-                    else CommandBuffer._INTERNAL.begin_transfer_copy_pass(cmd) catch |err| ERROR_MODE.panic(@src(), err);
+                    try CommandBuffer._INTERNAL.begin_transfer_copy_pass(&cmd)) //
+                    else CommandBuffer._INTERNAL.begin_transfer_copy_pass(&cmd) catch |err| ERROR_MODE.panic(@src(), err);
                 self.controller.upload_pass_active = true;
                 for (self.controller.grow_and_copy_gpu_buffer_list.zig_slice_entire()) |grow| {
                     switch (grow.kind) {
@@ -3055,7 +3054,7 @@ pub fn GraphicsController(
                             const new_buf = self.controller.gpu.create_buffer(GPU_BufferCreateInfo{
                                 .size = grow.new_len,
                                 .props = .{},
-                                .usage = GPU_BufferUsageFlags.from_flag(.VERTEX),
+                                .usage = GPU_BufferUsageFlags.flag(.VERTEX),
                             }) catch |err| return ERROR_MODE.handle(@src(), err);
                             copy.pass.copy_from_gpu_buffer_to_gpu_buffer(.{ .buffer = old_buf, .offset = 0 }, .{ .buffer = new_buf, .offset = 0 }, grow.copy_len, cycle_gpu_buffers);
                             self.controller.vertex_buffer_byte_caps[grow.idx] = grow.new_len;
@@ -3067,7 +3066,7 @@ pub fn GraphicsController(
                             const new_buf = self.controller.gpu.create_buffer(GPU_BufferCreateInfo{
                                 .size = grow.new_len,
                                 .props = .{},
-                                .usage = GPU_BufferUsageFlags.from_flag(.INDEX),
+                                .usage = GPU_BufferUsageFlags.flag(.INDEX),
                             }) catch |err| return ERROR_MODE.handle(@src(), err);
                             copy.pass.copy_from_gpu_buffer_to_gpu_buffer(.{ .buffer = old_buf, .offset = 0 }, .{ .buffer = new_buf, .offset = 0 }, grow.copy_len, cycle_gpu_buffers);
                             self.controller.index_buffer_byte_caps[grow.idx] = grow.new_len;
@@ -3075,16 +3074,20 @@ pub fn GraphicsController(
                             self.controller.delete_buffers_list.append_one(DeleteBufferDetails{ .buf = old_buf }, self.controller.list_alloc);
                         },
                         .INDIRECT => {
-                            const old_buf = self.controller.indirect_draw_buffers[grow.idx];
-                            const new_buf = self.controller.gpu.create_buffer(GPU_BufferCreateInfo{
-                                .size = grow.new_len,
-                                .props = .{},
-                                .usage = GPU_BufferUsageFlags.from_flag(.INDIRECT),
-                            }) catch |err| return ERROR_MODE.handle(@src(), err);
-                            copy.pass.copy_from_gpu_buffer_to_gpu_buffer(.{ .buffer = old_buf, .offset = 0 }, .{ .buffer = new_buf, .offset = 0 }, grow.copy_len, cycle_gpu_buffers);
-                            self.controller.indirect_draw_buffer_byte_caps[grow.idx] = grow.new_len;
-                            self.controller.indirect_draw_buffers[grow.idx] = new_buf;
-                            self.controller.delete_buffers_list.append_one(DeleteBufferDetails{ .buf = old_buf }, self.controller.list_alloc);
+                            if (comptime self.controller.indirect_draw_buffers.len > 0) {
+                                const old_buf = self.controller.indirect_draw_buffers[grow.idx];
+                                const new_buf = self.controller.gpu.create_buffer(GPU_BufferCreateInfo{
+                                    .size = grow.new_len,
+                                    .props = .{},
+                                    .usage = GPU_BufferUsageFlags.flag(.INDIRECT),
+                                }) catch |err| return ERROR_MODE.handle(@src(), err);
+                                copy.pass.copy_from_gpu_buffer_to_gpu_buffer(.{ .buffer = old_buf, .offset = 0 }, .{ .buffer = new_buf, .offset = 0 }, grow.copy_len, cycle_gpu_buffers);
+                                self.controller.indirect_draw_buffer_byte_caps[grow.idx] = grow.new_len;
+                                self.controller.indirect_draw_buffers[grow.idx] = new_buf;
+                                self.controller.delete_buffers_list.append_one(DeleteBufferDetails{ .buf = old_buf }, self.controller.list_alloc);
+                            } else {
+                                assert_unreachable(@src(), "no indirect draw call buffers defined", .{});
+                            }
                         },
                     }
                 }
@@ -3875,7 +3878,7 @@ pub fn GraphicsController(
         };
 
         pub const CopyPassTransferOnly = struct {
-            cmd: CommandBuffer,
+            cmd: *CommandBuffer,
             pass: *GPU_CopyPass,
             valid: bool = false,
 
@@ -3892,19 +3895,19 @@ pub fn GraphicsController(
 
             pub fn copy_from_upload_buffer_to_gpu_texture(self: *CopyPassTransferOnly, source: TextureUploadInfo, dest: TextureRegion, cycle: bool) void {
                 _INTERNAL.assert_valid(self, @src());
-                self.pass.upload_from_transfer_buffer_to_gpu_texture(source.to_sdl(self.cmd), dest.to_sdl(&self.cmd), cycle);
+                self.pass.upload_from_transfer_buffer_to_gpu_texture(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), cycle);
             }
             pub fn copy_from_upload_buffer_to_gpu_buffer(self: *CopyPassTransferOnly, source: UploadTransferBufferLocation, dest: BufferRegion, cycle: bool) void {
                 _INTERNAL.assert_valid(self, @src());
-                self.pass.upload_from_transfer_buffer_to_gpu_buffer(source.to_sdl(self.cmd), dest.to_sdl(&self.cmd), cycle);
+                self.pass.upload_from_transfer_buffer_to_gpu_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd), cycle);
             }
             pub fn copy_from_gpu_texture_to_download_buffer(self: *CopyPassTransferOnly, source: TextureRegion, dest: TextureDownloadInfo) void {
                 _INTERNAL.assert_valid(self, @src());
-                self.pass.download_from_gpu_texture_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(&self.cmd));
+                self.pass.download_from_gpu_texture_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd));
             }
             pub fn copy_from_gpu_buffer_to_download_buffer(self: *CopyPassTransferOnly, source: BufferRegion, dest: DownloadTransferBufferLocation) void {
                 _INTERNAL.assert_valid(self, @src());
-                self.pass.download_from_gpu_buffer_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(&self.cmd));
+                self.pass.download_from_gpu_buffer_to_transfer_buffer(source.to_sdl(self.cmd), dest.to_sdl(self.cmd));
             }
             pub fn end_copy_pass(self: *CopyPassTransferOnly) void {
                 _INTERNAL.assert_valid(self, @src());
@@ -4390,6 +4393,14 @@ pub fn GraphicsController(
             pub const NUM_FRAGMENT_SHADERS = Types.enum_defined_field_count(FRAGMENT_SHADER_NAMES_ENUM);
             pub const CREATE_OPTIONS = GPU_OPTIONS;
 
+            pub const HAS_INDIRECT_BUFS = NUM_INDIRECT_BUFFERS > 0;
+            pub const HAS_INDEX_BUFS = NUM_INDEX_BUFFERS > 0;
+            pub const HAS_UPLOAD_BUFS = NUM_UPLOAD_TRANSFER_BUFFERS > 0;
+            pub const HAS_DOWNLOAD_BUFS = NUM_DOWNLOAD_TRANSFER_BUFFERS > 0;
+            pub const HAS_STORAGE_BUFS = NUM_STORAGE_BUFFERS > 0;
+            pub const HAS_FENCES = NUM_FENCES > 0;
+            pub const HAS_VERTEX_BUFFERS = NUM_VERTEX_BUFFERS > 0;
+
             pub const VERTEX_SHADER_DEFS = _VERTEX_SHADER_DEFS;
             pub const FRAGMENT_SHADER_DEFS = _FRAGMENT_SHADER_DEFS;
 
@@ -4803,7 +4814,7 @@ pub fn GraphicsController(
                 return GPU_BufferCreateInfo{
                     .props = self.props,
                     .size = self.max_element_count * SIZE,
-                    .usage = GPU_BufferUsageFlags.from_flag(.VERTEX),
+                    .usage = GPU_BufferUsageFlags.flag(.VERTEX),
                 };
             }
         };
@@ -4837,7 +4848,7 @@ pub fn GraphicsController(
                 return GPU_BufferCreateInfo{
                     .props = self.props,
                     .size = self.max_indices * SIZE,
-                    .usage = GPU_BufferUsageFlags.from_flag(.INDEX),
+                    .usage = GPU_BufferUsageFlags.flag(.INDEX),
                 };
             }
         };
@@ -4855,7 +4866,7 @@ pub fn GraphicsController(
                 return GPU_BufferCreateInfo{
                     .props = self.props,
                     .size = self.max_indirect_draw_calls * SIZE,
-                    .usage = GPU_BufferUsageFlags.from_flag(.INDIRECT),
+                    .usage = GPU_BufferUsageFlags.flag(.INDIRECT),
                 };
             }
         };
