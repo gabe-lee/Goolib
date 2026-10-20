@@ -52,6 +52,7 @@ pub const Search = @import("./Utils_Search.zig");
 pub const DataManipulation = @import("./Utils_DataManipulation.zig");
 pub const RecipeInference = @import("./Utils_RecipeInference.zig");
 pub const Traverser = @import("./Utils_Traverser.zig");
+pub const DebugPrint = @import("./Utils_DebugPrint.zig");
 
 comptime {
     if (build.is_test) {
@@ -65,6 +66,7 @@ comptime {
         _ = @import("./Utils_DataManipulation.zig");
         _ = @import("./Utils_RecipeInference.zig");
         _ = @import("./Utils_Traverser.zig");
+        _ = @import("./Utils_DebugPrint.zig");
     }
 }
 
@@ -1220,19 +1222,19 @@ test "first_n_bits_set" {
 }
 
 pub fn invalid_ptr(comptime T: type) *T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_const(comptime T: type) *const T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_many(comptime T: type) [*]T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_ptr_many_const(comptime T: type) [*]const T {
-    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (Types.type_is_instantiable(T)) @alignOf(T) else 1);
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
 pub fn invalid_slice(comptime T: type) []T {

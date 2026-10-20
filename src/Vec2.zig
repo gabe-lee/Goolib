@@ -215,7 +215,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn divide(self: Vec2, other: Vec2) Vec2 {
-            assert_with_reason(!@reduce(.Or, other.flat() == ZERO.flat), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.vec});
+            assert_with_reason(!@reduce(.Or, other.flat() == ZERO.flat()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other});
             return @bitCast(self.flat() / other.flat());
         }
 

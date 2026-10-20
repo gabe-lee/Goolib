@@ -6,28 +6,26 @@ struct SPRITE_VERTEX_DATA {
 };
 StructuredBuffer<SPRITE_VERTEX_DATA> SPRITE_VERTEX_DATA_BUFFER : register(t0, space0);
 
-cbuffer GLOBAL : register(b0, space1) {
-    // TOTAL = 16   USED = 8   WASTE = 8 (%50.00)
-    float2 pos_offset; // off    0  size    8
-    uint2 __pad__0;    // off    8  size    8
+cbuffer WINDOW_RENDER_INFO : register(b0, space1) {
+    // TOTAL = 16   USED = 16   WASTE = 0 (% 0.00)
+    float2 camera_offset; // off    0  size    8
+    float2 target_size;   // off    8  size    8
 };
 
 struct vertex_in_PACKED {
-    float3 in_loc0 : TEXCOORD0; // slot 0, off   0, arange _3_1
-    uint2  in_loc1 : TEXCOORD1; // slot 1, off   0, arange _1_1_1_1
+    float2 in_loc0 : TEXCOORD0; // slot 0, off   0, arange _2_2
+    uint   in_loc1 : TEXCOORD1; // slot 1, off   0, arange _1_1_1_1
 };
 
 struct vertex_in {
-    float3 position; // off   0 (slot 0, contract: VERTEX_POSITIONS)
-    uint sprite_id; // off   0 (slot 1, contract: SPRITE_VERTEX_INDEXES)
-    uint sprite_vertex; // off   4 (slot 1, contract: SPRITE_VERTEX_INDEXES)
+    float2 position; // off   0 (slot 0, contract: VERTEX_POSITIONS)
+    uint sprite_vertex; // off   0 (slot 1, contract: SPRITE_VERTEX_INDEXES)
 };
 
 vertex_in unpack_vertex_input(vertex_in_PACKED pck) {
     vertex_in v;
-    v.position = pck.in_loc0.xyz;
-    v.sprite_id = pck.in_loc1.x;
-    v.sprite_vertex = pck.in_loc1.y;
+    v.position = pck.in_loc0.xy;
+    v.sprite_vertex = pck.in_loc1.x;
     return v;
 }
 struct vert_to_frag {

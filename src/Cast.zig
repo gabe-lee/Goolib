@@ -445,7 +445,7 @@ pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
-    }, u8, if (PTR.child == u8) PTR.sentinel_ptr else null);
+    }, u8, if (PTR.child == u8) PTR.sentinel() else null);
 }
 pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
     const INFO = @typeInfo(POINTER_OR_SLICE);
@@ -457,7 +457,7 @@ pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
-    }, u8, if (PTR.child == u8) PTR.sentinel_ptr else null);
+    }, u8, if (PTR.child == u8) PTR.sentinel() else null);
 }
 
 pub fn bytes_cast(pointer_or_slice: anytype) ByteSliceSameProps(@TypeOf(pointer_or_slice)) {

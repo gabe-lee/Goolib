@@ -41,6 +41,8 @@ const Assert = Root.Assert;
 // const Enums = Root.Enums;
 // const EnumSet = Enums.EnumSet;
 const assert_with_reason = Assert.assert_with_reason;
+const DEBUG = std.debug.print;
+const DEBUG_VAL = Root.Utils.DebugPrint.debug_val;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
 pub const ShaderUtils = @import("./SDL3_GraphicsController_ShaderUtils.zig");
@@ -131,6 +133,25 @@ fn c_enum_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
         }
         pub fn from_c(c_integer: C_TYPE) ZIG_TYPE {
             return @enumFromInt(c_integer);
+        }
+    };
+}
+fn c_enum_conversions_compat(comptime ZIG_TYPE: type, comptime C_TYPE_INTER: type, comptime C_TYPE_FINAL: type) type {
+    assert_with_reason(Types.type_is_enum(ZIG_TYPE), @src(), "ZIG_TYPE not an enum", .{});
+    assert_with_reason(Types.type_is_int(C_TYPE_INTER), @src(), "C_TYPE not an integer", .{});
+    assert_with_reason(Types.type_is_int(C_TYPE_FINAL), @src(), "C_TYPE not an integer", .{});
+    return struct {
+        pub fn to_c_inter(self: ZIG_TYPE) C_TYPE_INTER {
+            return @intFromEnum(self);
+        }
+        pub fn from_c_inter(c_integer: C_TYPE_INTER) ZIG_TYPE {
+            return @enumFromInt(c_integer);
+        }
+        pub fn to_c(self: ZIG_TYPE) C_TYPE_FINAL {
+            return @intCast(@intFromEnum(self));
+        }
+        pub fn from_c(c_integer: C_TYPE_FINAL) ZIG_TYPE {
+            return @enumFromInt(@as(C_TYPE_INTER, @intCast(c_integer)));
         }
     };
 }
@@ -2242,10 +2263,17 @@ pub const Surface = extern struct {
     pub const to_c = c_non_opaque_conversions(Surface, C.SDL_Surface).to_c;
     pub const from_c = c_non_opaque_conversions(Surface, C.SDL_Surface).from_c;
 
+    pub fn pixel_byte_slice(self: *Surface) []u8 {
+        if (self.pixel_data == null) return Utils.invalid_slice(u8);
+        const ptr: [*]u8 = @ptrCast(@alignCast(self.pixel_data.?));
+        const px_size: c_uint = self.format.bytes_per_pixel_uint();
+        const total_size = @as(c_uint, @intCast(self.size.component_mult())) * px_size;
+        return ptr[0..total_size];
+    }
     pub fn pixel_slice(self: *Surface) []u8 {
         if (self.pixel_data == null) return Utils.invalid_slice(u8);
         const ptr: [*]u8 = @ptrCast(@alignCast(self.pixel_data.?));
-        const px_size = self.format.bytes_per_pixel();
+        const px_size: c_uint = self.format.bytes_per_pixel_uint();
         const total_size = @as(c_uint, @intCast(self.size.component_mult())) * px_size;
         return ptr[0..total_size];
     }
@@ -2958,7 +2986,7 @@ pub const DisplayModeData = extern struct {
     pub const External: type = C.SDL_DisplayModeData;
 };
 
-pub const PixelFormat = enum(C.SDL_PixelFormat) {
+pub const PixelFormat = enum(c_int) { //C.SDL_PixelFormat is c_uint, but vals are c_int. Weird binding gen issue, should be functionally the same
     UNKNOWN = C.SDL_PIXELFORMAT_UNKNOWN,
     INDEX_1_LSB = C.SDL_PIXELFORMAT_INDEX1LSB,
     INDEX_1_MSB = C.SDL_PIXELFORMAT_INDEX1MSB,
@@ -3057,12 +3085,20 @@ pub const PixelFormat = enum(C.SDL_PixelFormat) {
         return PackedLayout.from_c(C.SDL_PIXELLAYOUT(self.to_c()));
     }
 
-    pub fn bits_per_pixel(self: PixelFormat) c_uint {
-        return @intCast(C.SDL_BITSPERPIXEL(self.to_c()));
+    pub fn bits_per_pixel(self: PixelFormat) c_int {
+        return @intCast(C.SDL_BITSPERPIXEL(self.to_c_inter()));
     }
 
-    pub fn bytes_per_pixel(self: PixelFormat) c_uint {
-        return @intCast(C.SDL_BYTESPERPIXEL(self.to_c()));
+    pub fn bytes_per_pixel(self: PixelFormat) c_int {
+        return @intCast(C.SDL_BYTESPERPIXEL(self.to_c_inter()));
+    }
+
+    pub fn bits_per_pixel_uint(self: PixelFormat) c_uint {
+        return @intCast(self.bits_per_pixel());
+    }
+
+    pub fn bytes_per_pixel_uint(self: PixelFormat) c_uint {
+        return @intCast(self.bytes_per_pixel());
     }
 
     pub fn is_indexed(self: PixelFormat) bool {
@@ -3113,8 +3149,10 @@ pub const PixelFormat = enum(C.SDL_PixelFormat) {
         }
     };
 
-    pub const to_c = c_enum_conversions(PixelFormat, C.SDL_PixelFormat).to_c;
-    pub const from_c = c_enum_conversions(PixelFormat, C.SDL_PixelFormat).from_c;
+    pub const to_c = c_enum_conversions_compat(PixelFormat, c_int, C.SDL_PixelFormat).to_c;
+    pub const from_c = c_enum_conversions_compat(PixelFormat, c_int, C.SDL_PixelFormat).from_c;
+    pub const to_c_inter = c_enum_conversions_compat(PixelFormat, c_int, C.SDL_PixelFormat).to_c_inter;
+    pub const from_c_inter = c_enum_conversions_compat(PixelFormat, c_int, C.SDL_PixelFormat).from_c_inter;
     //TODO
     // pub extern fn SDL_GetPixelFormatName(format: SDL_PixelFormat) [*c]const u8;
     // pub extern fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: [*c]c_int, Rmask: [*c]Uint32, Gmask: [*c]Uint32, Bmask: [*c]Uint32, Amask: [*c]Uint32) bool;
@@ -7046,7 +7084,7 @@ pub const GPU_BufferCreateInfo = extern struct {
 pub const GPU_TextureCreateInfo = extern struct {
     type: GPU_TextureType = ._2D,
     format: GPU_TextureFormat = .INVALID,
-    usage: GPU_TextureUsageFlags = .blank(),
+    usage: GPU_TextureUsageFlags = .empty(),
     width: u32 = 0,
     height: u32 = 0,
     layer_count_or_depth: u32 = 1,
@@ -8070,8 +8108,12 @@ pub const GPU_CommandBuffer = opaque {
     pub fn push_compute_uniform_data(self: *GPU_CommandBuffer, slot_index: u32, data_ptr: *const anyopaque, data_len: u32) void {
         C.SDL_PushGPUComputeUniformData(self.to_c_ptr(), slot_index, data_ptr, @intCast(data_len));
     }
-    pub fn begin_render_pass(self: *GPU_CommandBuffer, color_targets: []const GPU_ColorTargetInfo, depth_stencil_target: GPU_DepthStencilTargetInfo) Error!*GPU_RenderPass {
-        return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c_ptr_const()));
+    pub fn begin_render_pass(self: *GPU_CommandBuffer, color_targets: []const GPU_ColorTargetInfo, opt_depth_stencil_target: ?GPU_DepthStencilTargetInfo) Error!*GPU_RenderPass {
+        if (opt_depth_stencil_target) |depth_stencil_target| {
+            return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), depth_stencil_target.to_c_ptr_const()));
+        } else {
+            return ptr_cast_or_fail_err(*GPU_RenderPass, C.SDL_BeginGPURenderPass(self.to_c_ptr(), @ptrCast(@alignCast(color_targets.ptr)), @intCast(color_targets.len), null));
+        }
     }
     pub fn begin_compute_pass(self: *GPU_CommandBuffer, storage_texture_bindings: []const GPU_StorageTextureReadWriteBinding, storage_buffer_bindings: []const GPU_StorageBufferReadWriteBinding) Error!*GPU_ComputePass {
         return ptr_cast_or_fail_err(*GPU_ComputePass, C.SDL_BeginGPUComputePass(self.to_c_ptr(), @ptrCast(@alignCast(storage_texture_bindings.ptr)), @intCast(storage_texture_bindings.len), @ptrCast(@alignCast(storage_buffer_bindings.ptr)), @intCast(storage_buffer_bindings.len)));
@@ -8092,9 +8134,7 @@ pub const GPU_CommandBuffer = opaque {
     }
     pub fn wait_and_aquire_swapchain_texture(self: *GPU_CommandBuffer, window: *Window) Error!GPU_SwapchainTexture {
         var tex: GPU_SwapchainTexture = undefined;
-        var tex_ptr: ?*C.SDL_GPUTexture = null;
-        try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), @ptrCast(&tex_ptr), &tex.w, &tex.h));
-        tex.texture = GPU_Texture.from_c_ptr(tex_ptr.?);
+        try ok_or_null_err(C.SDL_AcquireGPUSwapchainTexture(self.to_c_ptr(), window.to_c_ptr(), @ptrCast(&tex.texture), &tex.w, &tex.h));
         return tex;
     }
     pub fn submit_commands(self: *GPU_CommandBuffer) Error!void {
@@ -8109,7 +8149,7 @@ pub const GPU_CommandBuffer = opaque {
 };
 
 pub const GPU_SwapchainTexture = struct {
-    texture: *GPU_Texture,
+    texture: ?*GPU_Texture,
     w: u32,
     h: u32,
 };

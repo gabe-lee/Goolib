@@ -23,7 +23,7 @@
 const std = @import("std");
 const math = std.math;
 const Root = @import("./_root.zig");
-const SliceAdapter = Root.IList_SliceAdapter;
+// const SliceAdapter = Root.IList_SliceAdapter;
 const Types = Root.Types;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
@@ -31,9 +31,10 @@ const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
 const Flags = Root.Flags;
-const IList = Root.IList.IList;
-const List = Root.IList_List.List;
-const Range = Root.IList.Range;
+// const IList = Root.IList.IList;
+// const List = Root.IList_List.List;
+// const Range = Root.IList.Range;
+const ListAllocated = Root.GooListSlice.ListAllocated;
 const Color_ = Root.Color;
 const MathX = Root.Math;
 const Vec2 = Root.Vec2;
@@ -128,7 +129,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         major_stride: u32 = 0,
         owns_memory: bool = false,
 
-        pub const CellList = List(Cell);
+        pub const CellList = ListAllocated(Cell);
         pub const Cell = DEFINITION.CELL_TYPE;
         pub const CELL_BYTE_SIZE = @sizeOf(Cell);
         pub const ROW_COLUMN_ORDER = DEFINITION.ROW_COLUMN_ORDER;
@@ -139,7 +140,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         pub fn init(width: u32, height: u32, fill_value: ?Cell, alloc: Allocator) Self {
             const total = width * height;
             var self = Self{
-                .cells = CellList.init_capacity(total, alloc),
+                .cells = CellList.allocate_new(total, alloc),
                 .width = width,
                 .height = height,
                 .major_stride = if (ROW_COLUMN_ORDER == .ROW_MAJOR) width else height,

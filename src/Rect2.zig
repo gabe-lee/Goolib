@@ -130,5 +130,12 @@ pub fn define_rect2_type(comptime T: type) type {
                 .size = .new(num_cast(self.size.x, NEW_T), num_cast(self.size.y, NEW_T)),
             };
         }
+
+        pub fn normalize(self: T_Rect2, max_size: T_Vec2) T_Rect2 {
+            return T_Rect2{
+                .pos = self.pos.divide(max_size),
+                .size = self.size.divide(max_size),
+            };
+        }
     };
 }

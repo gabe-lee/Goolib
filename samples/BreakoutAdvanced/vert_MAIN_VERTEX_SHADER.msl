@@ -14,10 +14,10 @@ struct type_StructuredBuffer_SPRITE_VERTEX_DATA
     SPRITE_VERTEX_DATA _m0[1];
 };
 
-struct type_GLOBAL
+struct type_WINDOW_RENDER_INFO
 {
-    float2 pos_offset;
-    uint2 _pad_0;
+    float2 camera_offset;
+    float2 target_size;
 };
 
 struct main0_out
@@ -26,17 +26,11 @@ struct main0_out
     float4 gl_Position [[position]];
 };
 
-struct main0_in
-{
-    float3 in_var_TEXCOORD0 [[attribute(0)]];
-    uint2 in_var_TEXCOORD1 [[attribute(1)]];
-};
-
-vertex main0_out main0(main0_in in [[stage_in]], const device type_StructuredBuffer_SPRITE_VERTEX_DATA& SPRITE_VERTEX_DATA_BUFFER [[buffer(0)]])
+vertex main0_out main0(uint gl_VertexIndex [[vertex_id]])
 {
     main0_out out = {};
-    out.gl_Position = float4(in.in_var_TEXCOORD0, 1.0);
-    out.out_var_TEXCOORD0 = SPRITE_VERTEX_DATA_BUFFER._m0[(in.in_var_TEXCOORD1.x * 4u) + in.in_var_TEXCOORD1.y].texture_uv;
+    out.gl_Position = float4((float2(float((gl_VertexIndex << 1u) & 2u), float(gl_VertexIndex & 2u)) * float2(2.0, -2.0)) + float2(-1.0, 1.0), 0.0, 1.0);
+    out.out_var_TEXCOORD0 = float2(0.0);
     return out;
 }
 

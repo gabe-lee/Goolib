@@ -2,12 +2,6 @@
 Texture2D<float4> SPRITE_TEX : register(t0, space2);
 SamplerState PIXEL_SAMPLER : register(s0, space2);
 
-cbuffer GLOBAL : register(b0, space3) {
-    // TOTAL = 16   USED = 8   WASTE = 8 (%50.00)
-    float2 pos_offset; // off    0  size    8
-    uint2 __pad__0;    // off    8  size    8
-};
-
 struct vert_to_frag {
     float4 vert_pos;
     float2 tex_pos;

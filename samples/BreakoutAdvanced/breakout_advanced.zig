@@ -44,16 +44,15 @@ const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
 const GooListSlice = Goolib.GooListSlice;
-const ListU16 = GooListSlice.ListAllocated(u16);
-const SliceU16 = GooListSlice.SliceImmutable(u16);
-const ListFVec = GooListSlice.ListAllocated(FVec);
-const SliceFVec = GooListSlice.SliceImmutable(FVec);
-const ListU32 = GooListSlice.ListAllocated(u32);
-const SliceU32 = GooListSlice.SliceImmutable(u32);
+const ListU16 = GooListSlice.ListFullDefinition(u16, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+const ListFVec = GooListSlice.ListFullDefinition(FVec, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+const ListU32 = GooListSlice.ListFullDefinition(u32, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
 const Allocator = std.mem.Allocator;
 const alloc = std.heap.smp_allocator;
 
 const GraphicsModule = @import("./breakout_graphics.zig");
+const GraphicsControllerModule = Goolib.SDL3.GraphicsController;
+const ShaderCode = GraphicsControllerModule.ShaderCode;
 const GraphicsController = GraphicsModule.Controller;
 const AnyGPUBuffer = GraphicsController.AnyGPUBuffer;
 const BlitInfo = GraphicsController.BlitInfo;
@@ -115,12 +114,16 @@ const WindowInit = GraphicsController.WindowInit;
 const WindowName = GraphicsController.WindowName;
 
 const best_score_storage_org_name = "goolib_samples";
-const best_score_storage_app_name = "breakout";
+const best_score_storage_app_name = "breakout_advanced";
 const records_storage_file_name = "records";
 const attempts_storage_file_name = "attempts";
 const window_size: IVec = IVec.new(640, 480);
 
 const WindowFlags = SDL.WindowFlags.Flag;
+const DEBUG = std.debug.print;
+const DEBUG_VAL = Goolib.Utils.DebugPrint.debug_val;
+
+const assert_with_reason = Goolib.Assert.assert_with_reason;
 
 const AppState = struct {
     graphics: GraphicsController = undefined,
@@ -148,6 +151,9 @@ const AppState = struct {
     index_buffer: ListU16 = .{},
     position_buffer: ListFVec = .{},
     sprite_idx_buffer: ListU32 = .{},
+    validate_index_buffer: ListU16 = .{},
+    validate_position_buffer: ListFVec = .{},
+    validate_sprite_idx_buffer: ListU32 = .{},
 
     pub fn clear_vert_buffers(self: *AppState) void {
         self.index_buffer.clear();
@@ -158,20 +164,20 @@ const AppState = struct {
         self.index_buffer.grow_capacity_if_needed_for_n_more_elems(6, .GROW_BY_25_PERCENT, alloc_);
         self.position_buffer.grow_capacity_if_needed_for_n_more_elems(4, .GROW_BY_25_PERCENT, alloc_);
         self.sprite_idx_buffer.grow_capacity_if_needed_for_n_more_elems(4, .GROW_BY_25_PERCENT, alloc_);
-        const vert_start = self.position_buffer.get_len();
-        self.position_buffer.append_many_assume_cap(SliceFVec.from_slice_const_keep_data(&.{
+        const vert_start: u16 = self.position_buffer.get_len();
+        self.position_buffer.append_many_assume_cap(ListFVec.SliceConst.from_slice_const_keep_data(&.{
             rect.top_left(),
             rect.top_right(),
             rect.bot_left(),
             rect.bot_right(),
         }));
-        self.sprite_idx_buffer.append_many_assume_cap(SliceU32.from_slice_const_keep_data(&.{
+        self.sprite_idx_buffer.append_many_assume_cap(ListU32.SliceConst.from_slice_const_keep_data(&.{
             sprite.vert_index(.TOP_LEFT),
             sprite.vert_index(.TOP_RIGHT),
             sprite.vert_index(.BOT_LEFT),
             sprite.vert_index(.BOT_RIGHT),
         }));
-        self.index_buffer.append_many_assume_cap(SliceU16.from_slice_const_keep_data(&.{
+        self.index_buffer.append_many_assume_cap(ListU16.SliceConst.from_slice_const_keep_data(&.{
             vert_start, vert_start + 2, vert_start + 1, // top-left triangle
             vert_start + 1, vert_start + 2, vert_start + 3, // bot-right triangle
         }));
@@ -230,22 +236,22 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
     SDL.App.set_hint(SDL.HINT.RENDER_VSYNC, "1") catch {};
 
     const rgba_bmp_surface = make: {
-        const bmp_stream = try SDL.IOStream.from_mem(Sprites.bmp);
+        const bmp_stream = try SDL.IOStream.from_const_mem(Sprites.bmp[0..]);
         const bmp_surface = try SDL.Surface.load_from_bmp_iostream(bmp_stream, true);
-        const rgba_bmp_surface = try bmp_surface.convert_to_format(.RGBA_8888);
+        const rgba_bmp_surface = try bmp_surface.convert_to_format(.RGBA_32);
         bmp_surface.destroy();
         break :make rgba_bmp_surface;
     };
 
-    app.graphics = GraphicsController.create(.{
+    app.graphics = try GraphicsController.create(.{
         .vertex_shaders = .{
             VertexShaderInit{
                 .name = .MAIN_VERTEX_SHADER,
                 .code = switch (build.os.tag) {
-                    .linux => @embedFile("./vert_MAIN_VERTEX_SHADER.spv"),
-                    .windows => @embedFile("./vert_MAIN_VERTEX_SHADER.dxil"),
-                    .macos => @embedFile("./vert_MAIN_VERTEX_SHADER.msl"),
-                    else => @embedFile("./vert_MAIN_VERTEX_SHADER.spv"),
+                    .linux => ShaderCode.spirv_format(@embedFile("./vert_MAIN_VERTEX_SHADER.spv"), "main"),
+                    .windows => ShaderCode.dxil_format(@embedFile("./vert_MAIN_VERTEX_SHADER.dxil"), "main"),
+                    .macos => ShaderCode.msl_format(@embedFile("./vert_MAIN_VERTEX_SHADER.msl"), "main"),
+                    else => ShaderCode.spirv_format(@embedFile("./vert_MAIN_VERTEX_SHADER.spv"), "main"),
                 },
             },
         },
@@ -253,17 +259,18 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
             FragmentShaderInit{
                 .name = .MAIN_FRAGMENT_SHADER,
                 .code = switch (build.os.tag) {
-                    .linux => @embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"),
-                    .windows => @embedFile("./frag_MAIN_FRAGMENT_SHADER.dxil"),
-                    .macos => @embedFile("./frag_MAIN_FRAGMENT_SHADER.msl"),
-                    else => @embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"),
+                    .linux => ShaderCode.spirv_format(@embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"), "main"),
+                    .windows => ShaderCode.dxil_format(@embedFile("./frag_MAIN_FRAGMENT_SHADER.dxil"), "main"),
+                    .macos => ShaderCode.msl_format(@embedFile("./frag_MAIN_FRAGMENT_SHADER.msl"), "main"),
+                    else => ShaderCode.spirv_format(@embedFile("./frag_MAIN_FRAGMENT_SHADER.spv"), "main"),
                 },
             },
         },
         .uniforms_init = UniformCollection{
-            .GLOBAL = .{
-                .pos_offset = FVec.new(0, 0),
-            },
+            .WINDOW_RENDER_INFO = .init(.{
+                .target_size = FVec.new_any(window_size.x, window_size.y),
+                .camera_offset = FVec.new_any(0, 0),
+            }),
         },
         .render_pipeline_init = &.{
             RenderPipeInit{
@@ -278,9 +285,6 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
                 .title = "Breakout Sample Advanced",
                 .flags = .flags(&.{
                     WindowFlags.RESIZABLE,
-                    WindowFlags.KEYBOARD_GRABBED,
-                    WindowFlags.INPUT_FOCUS,
-                    WindowFlags.MOUSE_GRABBED,
                 }),
             },
         },
@@ -306,7 +310,29 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
         .init_upload_buffers = &.{
             UploadBufferInit{
                 .name = .MAIN_UPLOAD_BUFFER,
-                .max_byte_size = @max(400 * @sizeOf(GraphicsModule.VertexIn), 2500 * 4),
+                .max_byte_size = 128000,
+            },
+        },
+        .init_download_buffers = &.{
+            DownloadBufferInit{
+                .name = .MAIN_DOWNLOAD_BUFFER,
+                .max_byte_size = 128000,
+            },
+        },
+        .init_index_buffers = &.{
+            IndexBufferInit{
+                .name = .VERT_INDEXES,
+                .max_indices = 512,
+            },
+        },
+        .init_vertex_buffers = &.{
+            VertexBufferInit{
+                .name = .VERTEX_POSITIONS,
+                .max_element_count = 512,
+            },
+            VertexBufferInit{
+                .name = .SPRITE_VERTEX_INDEXES,
+                .max_element_count = 512,
             },
         },
         .internal_lists_alloc = std.heap.smp_allocator,
@@ -321,12 +347,19 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
         SDL.GPU_Device.get_driver_name_by_index,
     )});
     {
-        var upload = app.graphics.begin_upload_pass();
-        try upload.upload_to_texture(rgba_bmp_surface.pixel_slice(), .SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 1, .MAIN_UPLOAD_BUFFER);
-        upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
-        upload = app.graphics.begin_upload_pass();
-        try upload.upload_to_storage_buffer(Sprites.tex_coords[0..], .SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER);
-        upload.end_upload_pass_then_create_and_submit_new_command_buffer_and_immediately_wait_on_fence(false);
+        const verify_rgba_surface = try rgba_bmp_surface.duplicate();
+        defer verify_rgba_surface.destroy();
+        var verify_sprite_data: [Sprites.tex_coords.len]GraphicsModule.SpriteData = undefined;
+        const upload: UploadPass = app.graphics.begin_upload_pass();
+        try upload.upload_to_texture_no_type_check(rgba_bmp_surface.pixel_byte_slice(), .SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_storage_buffer_no_type_check(Sprites.tex_coords[0..], .SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER);
+        const command: CommandBuffer = try upload.end_upload_pass_and_start_command_buffer(true);
+        const download: DownloadPass = try command.lock_command_buffer_and_begin_download_pass();
+        _ = try download.download_from_texture_no_type_check(.SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, verify_rgba_surface.pixel_byte_slice(), .MAIN_DOWNLOAD_BUFFER);
+        _ = try download.download_from_storage_buffer(.SPRITE_VERTEX_DATA, 0, @intCast(Sprites.tex_coords.len), verify_sprite_data[0..], .MAIN_DOWNLOAD_BUFFER);
+        try download.end_download_pass_submit_command_buffer_and_immedieately_wait_on_fence_to_complete_downloads();
+        assert_with_reason(std.mem.eql(u8, rgba_bmp_surface.pixel_byte_slice(), verify_rgba_surface.pixel_byte_slice()), @src(), "tex data did not transfer correctly", .{});
+        assert_with_reason(std.mem.eql(u8, std.mem.sliceAsBytes(verify_sprite_data[0..]), std.mem.sliceAsBytes(Sprites.tex_coords[0..])), @src(), "sprite data did not transfer correctly", .{});
     }
 
     {
@@ -339,6 +372,7 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
     app.audio_device = try SDL.AudioDeviceID.DEFAULT_PLAYBACK_DEVICE.open_device(.spec(&app.sounds.spec));
     errdefer app.audio_device.close();
 
+    app.audio_streams = app.audio_streams_buf[0..0];
     errdefer while (app.audio_streams.len != 0) {
         app.audio_streams[app.audio_streams.len - 1].destroy();
         if (app.audio_streams.len != 0) app.audio_streams.len -= 1;
@@ -420,6 +454,7 @@ const Sprites = struct {
             return rects[@intFromEnum(sprite)].bot_right();
         }
     };
+    const tex_dimensions = FVec.new(200, 128);
     const rects = [_]Rect{
         Rect{ .pos = .{.x =   1, .y =  1}, .size = .{.x = 64, .y = 32} },
         Rect{ .pos = .{.x =  67, .y =  1}, .size = .{.x = 32, .y = 32} },
@@ -436,76 +471,76 @@ const Sprites = struct {
         Rect{ .pos = .{.x =  2, .y = 104}, .size = .{.x =  22, .y = 22} },
         Rect{ .pos = .{.x = 27, .y = 103}, .size = .{.x = 104, .y = 24} },
     };
-    const tex_coords = [_]FVec{
-        Sprite_.brick_2x1_purple.top_left(),
-        Sprite_.brick_2x1_purple.top_right(),
-        Sprite_.brick_2x1_purple.bot_left(),
-        Sprite_.brick_2x1_purple.bot_right(),
-        
-        Sprite_.brick_1x1_purple.top_left(),
-        Sprite_.brick_1x1_purple.top_right(),
-        Sprite_.brick_1x1_purple.bot_left(),
-        Sprite_.brick_1x1_purple.bot_right(),
-        
-        Sprite_.brick_2x1_red.top_left(),
-        Sprite_.brick_2x1_red.top_right(),
-        Sprite_.brick_2x1_red.bot_left(),
-        Sprite_.brick_2x1_red.bot_right(),
-        
-        Sprite_.brick_1x1_red.top_left(),
-        Sprite_.brick_1x1_red.top_right(),
-        Sprite_.brick_1x1_red.bot_left(),
-        Sprite_.brick_1x1_red.bot_right(),
-        
-        Sprite_.brick_2x1_yellow.top_left(),
-        Sprite_.brick_2x1_yellow.top_right(),
-        Sprite_.brick_2x1_yellow.bot_left(),
-        Sprite_.brick_2x1_yellow.bot_right(),
-        
-        Sprite_.brick_1x1_yellow.top_left(),
-        Sprite_.brick_1x1_yellow.top_right(),
-        Sprite_.brick_1x1_yellow.bot_left(),
-        Sprite_.brick_1x1_yellow.bot_right(),
-        
-        Sprite_.brick_2x1_green.top_left(),
-        Sprite_.brick_2x1_green.top_right(),
-        Sprite_.brick_2x1_green.bot_left(),
-        Sprite_.brick_2x1_green.bot_right(),
-        
-        Sprite_.brick_1x1_green.top_left(),
-        Sprite_.brick_1x1_green.top_right(),
-        Sprite_.brick_1x1_green.bot_left(),
-        Sprite_.brick_1x1_green.bot_right(),
-        
-        Sprite_.brick_2x1_blue.top_left(),
-        Sprite_.brick_2x1_blue.top_right(),
-        Sprite_.brick_2x1_blue.bot_left(),
-        Sprite_.brick_2x1_blue.bot_right(),
-        
-        Sprite_.brick_1x1_blue.top_left(),
-        Sprite_.brick_1x1_blue.top_right(),
-        Sprite_.brick_1x1_blue.bot_left(),
-        Sprite_.brick_1x1_blue.bot_right(),
-        
-        Sprite_.brick_2x1_gray.top_left(),
-        Sprite_.brick_2x1_gray.top_right(),
-        Sprite_.brick_2x1_gray.bot_left(),
-        Sprite_.brick_2x1_gray.bot_right(),
-        
-        Sprite_.brick_1x1_gray.top_left(),
-        Sprite_.brick_1x1_gray.top_right(),
-        Sprite_.brick_1x1_gray.bot_left(),
-        Sprite_.brick_1x1_gray.bot_right(),
-        
-        Sprite_.ball.top_left(),
-        Sprite_.ball.top_right(),
-        Sprite_.ball.bot_left(),
-        Sprite_.ball.bot_right(),
-        
-        Sprite_.paddle.top_left(),
-        Sprite_.paddle.top_right(),
-        Sprite_.paddle.bot_left(),
-        Sprite_.paddle.bot_right(),
+    const tex_coords = [_]GraphicsModule.SpriteData{
+        .init(.{.texture_uv = Sprite_.brick_2x1_purple.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_purple.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_purple.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_purple.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_purple.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_purple.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_purple.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_purple.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_2x1_red.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_red.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_red.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_red.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_red.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_red.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_red.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_red.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_2x1_yellow.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_yellow.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_yellow.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_yellow.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_yellow.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_yellow.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_yellow.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_yellow.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_2x1_green.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_green.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_green.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_green.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_green.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_green.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_green.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_green.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_2x1_blue.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_blue.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_blue.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_blue.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_blue.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_blue.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_blue.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_blue.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_2x1_gray.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_gray.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_gray.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_2x1_gray.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.brick_1x1_gray.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_gray.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_gray.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.brick_1x1_gray.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.ball.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.ball.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.ball.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.ball.bot_right().divide(tex_dimensions)}),
+
+        .init(.{.texture_uv = Sprite_.paddle.top_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.paddle.top_right().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.paddle.bot_left().divide(tex_dimensions)}),
+        .init(.{.texture_uv = Sprite_.paddle.bot_right().divide(tex_dimensions)}),
     };
     
     const Corner = enum(u32) {
@@ -1167,28 +1202,35 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
     // Draw.
     {
         const CLEAR_COLOR = SDL.Color_RGBA_u8.new(0x47, 0x5b, 0x8d, 0xff).change_component_type_normalized(f32);
+        app.clear_vert_buffers();
         for (app.bricks.slice()) |brick| {
             app.append_vertices(brick.box, brick.sprite, alloc);
         }
         app.append_vertices(app.ball.box, app.ball.sprite, alloc);
         app.append_vertices(app.paddle.box, app.paddle.sprite, alloc);
+        DEBUG_VAL("vertex positions cpu", app.position_buffer.zig_slice_entire_const());
+        DEBUG_VAL("vertex sprite data cpu", app.sprite_idx_buffer.zig_slice_entire_const());
+        DEBUG_VAL("index data cpu", app.index_buffer.zig_slice_entire_const());
         var upload = app.graphics.begin_upload_pass();
         try upload.upload_to_index_buffer(app.index_buffer.zig_slice_entire_const(), .VERT_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
-        try upload.upload_to_vertex_buffer(app.position_buffer.zig_slice_entire_const(), .VERTEX_POSITIONS, 0, .MAIN_UPLOAD_BUFFER);
-        try upload.upload_to_vertex_buffer(app.sprite_idx_buffer.zig_slice_entire_const(), .SPRITE_VERTEX_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_vertex_buffer_no_type_check(app.position_buffer.zig_slice_entire_const(), .VERTEX_POSITIONS, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_vertex_buffer_no_type_check(app.sprite_idx_buffer.zig_slice_entire_const(), .SPRITE_VERTEX_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
         var cmd: CommandBuffer = try upload.end_upload_pass_and_start_command_buffer(true);
-        var render: RenderPass = try cmd.begin_render_pass(&.{
+        var can_render: ?RenderPass = try cmd.begin_render_pass(&.{
             ColorTarget{
                 .target = .window(.MAIN),
                 .clear_color = CLEAR_COLOR,
                 .load_op = .CLEAR,
             },
-        }, DepthTarget{});
-        var pipeline: RenderPassWithPipeline = try render.begin_render_pipeline_pass(.MAIN_PIPELINE);
-        pipeline.bind_all_resources_and_push_all_uniforms(0, &.{});
-        pipeline.draw_indexed_primitives(0, 0, app.index_buffer.get_len());
-        pipeline.end_pipeline_pass();
-        render.end_render_pass();
+        }, null);
+        if (can_render) |*render| {
+            var pipeline: RenderPassWithPipeline = render.begin_render_pipeline_pass(.MAIN_PIPELINE);
+            pipeline.bind_all_resources_and_push_all_uniforms(0, &.{});
+            pipeline.bind_index_buffer(.VERT_INDEXES, 0);
+            pipeline.draw_indexed_primitives(0, 0, app.index_buffer.get_len());
+            pipeline.end_pipeline_pass();
+            render.end_render_pass();
+        }
         try cmd.submit_commands();
     }
 
@@ -1258,6 +1300,14 @@ fn handle_event(appstate: ?*anyopaque, event_: ?*SDL.Event) !SDL.AppResult {
                 .RIGHT_TRIGGER => app.phys_controller.g_right_trigger = event.gamepad_axis.value,
                 else => {},
             }
+        },
+        .WINDOW_RESIZED => {
+            const win_event = event.window;
+            const render_info: *GraphicsModule.WindowRenderInfo = &app.graphics.uniforms.WINDOW_RENDER_INFO;
+            const new_width: i32 = win_event.data_1;
+            const new_height: i32 = win_event.data_2;
+            render_info.get_ptr(.target_size).x = @floatFromInt(new_width);
+            render_info.get_ptr(.target_size).y = @floatFromInt(new_height);
         },
         else => {},
     }

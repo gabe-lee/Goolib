@@ -1,12 +1,7 @@
 
+
 Texture2D<float4> SPRITE_TEX : register(t0, space2);
 SamplerState PIXEL_SAMPLER : register(s0, space2);
-
-cbuffer GLOBAL : register(b0, space3) {
-    // TOTAL = 16   USED = 8   WASTE = 8 (%50.00)
-    float2 pos_offset; // off    0  size    8
-    uint2 __pad__0;    // off    8  size    8
-};
 
 struct vert_to_frag {
     float4 vert_pos;
@@ -40,6 +35,7 @@ fragment_out_PACKED pack_fragment_output(fragment_out f) {
 fragment_out_PACKED main(vert_to_frag_PACKED pck) {
     vert_to_frag frag_in = unpack_frag_input(pck);
     fragment_out frag_out;
-    frag_out.color = SPRITE_TEX.Sample(PIXEL_SAMPLER, frag_in.tex_pos);
+    // frag_out.color = SPRITE_TEX.Sample(PIXEL_SAMPLER, frag_in.tex_pos);
+    frag_out.color = float4(1.0f, 0.0f, 0.0f, 1.0f); // Solid Red
     return pack_fragment_output(frag_out);
 }

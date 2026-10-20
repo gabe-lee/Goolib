@@ -26,6 +26,7 @@ const build = @import("builtin");
 
 /// std imports
 const Allocator = std.mem.Allocator;
+const math = std.math;
 const DEBUG = std.debug.print;
 
 /// Goolib imports
@@ -45,3 +46,5 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
+
+const DEBUG_VAL = Root.Uitls.DebugPrint.debug_val;

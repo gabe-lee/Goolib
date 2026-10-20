@@ -56,7 +56,9 @@ pub const INDIRECT_BUFFER_NAMES = enum(u8) {};
 pub const UPLOAD_BUFFER_NAMES = enum(u8) {
     MAIN_UPLOAD_BUFFER,
 };
-pub const DOWNLOAD_BUFFER_NAMES = enum(u8) {};
+pub const DOWNLOAD_BUFFER_NAMES = enum(u8) {
+    MAIN_DOWNLOAD_BUFFER,
+};
 pub const VERTEX_BUFFER_NAMES = enum(u8) {
     VERTEX_POSITIONS,
     SPRITE_VERTEX_INDEXES,
@@ -71,7 +73,7 @@ pub const FRAGMENT_OUTPUT_STRUCT_NAMES = enum(u8) {
     FRAGMENT_OUT,
 };
 pub const UNIFORM_NAMES = enum(u8) {
-    GLOBAL,
+    WINDOW_RENDER_INFO,
 };
 pub const SAMPLER_NAMES = enum(u8) {
     PIXEL_SAMPLER,
@@ -93,7 +95,7 @@ pub const RENDER_PIPELINE_NAMES = enum(u8) {
 };
 pub const MAIN_PIPE_COLOR_TARGETS = [_]SDL.GPU_ColorTargetDescription{
     SDL.GPU_ColorTargetDescription{
-        .format = .R8G8B8A8_UNORM,
+        .format = .B8G8R8A8_UNORM,
         .blend_state = .{},
     },
 };
@@ -135,13 +137,15 @@ pub const FragmentOut = ShaderUtilsModule.FragmentShaderOutputStruct(
     },
     1000,
 );
-pub const Global = ShaderUtilsModule.UniformOrStorageStruct(
+pub const WindowRenderInfo = ShaderUtilsModule.UniformOrStorageStruct(
     enum {
-        pos_offset,
+        camera_offset,
+        target_size,
     },
     .INCLUDE_LAYOUT_COMMENTS_IN_SHADER_STUB,
     &.{
-        .uniform_field(.pos_offset, GPUType.GPU_f32_2),
+        .uniform_field(.camera_offset, GPUType.GPU_f32_2),
+        .uniform_field(.target_size, GPUType.GPU_f32_2),
     },
     100000,
 );
@@ -191,7 +195,7 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
     },
     UNIFORM_NAMES,
     .{
-        .uniform_struct_def(.GLOBAL, Global),
+        .uniform_struct_def(.WINDOW_RENDER_INFO, WindowRenderInfo),
     },
     SAMPLER_NAMES,
     .{
@@ -217,7 +221,7 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
             .input_type = .VERTEX_IN,
             .output_type = .VERT_TO_FRAG,
             .resources_to_link = &.{
-                .uniform(.GLOBAL),
+                .uniform(.WINDOW_RENDER_INFO),
                 .storage_buffer(.SPRITE_VERTEX_DATA),
             },
         },
@@ -229,7 +233,6 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
             .input_type = .VERT_TO_FRAG,
             .output_type = .FRAGMENT_OUT,
             .resources_to_link = &.{
-                .uniform(.GLOBAL),
                 .sampled_texture(.SPRITE_TEX, .PIXEL_SAMPLER),
             },
         },
@@ -243,7 +246,10 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
             .num_color_targets = @intCast(MAIN_PIPE_COLOR_TARGETS.len),
             .color_target_descriptions = @ptrCast(&MAIN_PIPE_COLOR_TARGETS[0]),
         },
-        .rasterizer_options = .{},
+        .rasterizer_options = .{
+            .cull_mode = .NONE,
+        },
+        .primitive_type = .TRIANGLE_LIST,
     }},
     .{},
     10000,

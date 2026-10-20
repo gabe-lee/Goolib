@@ -1168,12 +1168,15 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self.data_len = @min(self.data_len, self.root_cap);
         }
         inline fn incr_root_offset(self: *ListSelf, count: IDX) void {
+            assert_with_reason(HAS_ROOT_OFFSET, @src(), "no root offet", .{});
             self.root_offset += count;
         }
         inline fn decr_root_offset(self: *ListSelf, count: IDX) void {
+            assert_with_reason(HAS_ROOT_OFFSET, @src(), "no root offet", .{});
             self.root_offset -= count;
         }
         inline fn set_root_offset(self: *ListSelf, offset: IDX) void {
+            assert_with_reason(HAS_ROOT_OFFSET, @src(), "no root offet", .{});
             self.root_offset = offset;
         }
         pub inline fn get_unused_space(self: ListSelf) IDX {
@@ -1267,11 +1270,19 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //****************
         // SLICE MOVEMENT
         //****************
+        fn incr_slice_start_unchecked(self: *ListSelf, count: IDX) void {
+            assert_reference(@src());
+            self.slice_offset += count;
+        }
         pub fn incr_slice_start(self: *ListSelf, count: IDX) void {
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
             self.slice_offset += count;
             self.decr_len(count);
+        }
+        fn decr_slice_start_unchecked(self: *ListSelf, count: IDX) void {
+            assert_reference(@src());
+            self.slice_offset -= count;
         }
         pub fn decr_slice_start(self: *ListSelf, count: IDX) void {
             assert_reference(@src());
@@ -1292,12 +1303,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn slide_slice_lower(self: *ListSelf, count: IDX) void {
             assert_reference(@src());
             self.assert_count_less_equal_slice_offset(count, @src());
-            self.decr_root_offset(count);
+            self.decr_slice_start_unchecked(count);
         }
         pub fn slide_slice_higher(self: *ListSelf, count: IDX) void {
             assert_reference(@src());
             self.assert_count_less_equal_data_unused_space(count, @src());
-            self.incr_root_offset(count);
+            self.incr_slice_start_unchecked(count);
         }
         pub fn split_off_slice_from_start(self: *ListSelf, count: IDX) Slice {
             assert_reference(@src());
@@ -1310,7 +1321,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 .data_len = count,
                 .slice_offset = self.get_slice_offset(),
             };
-            self.incr_root_offset(count);
+            self.incr_slice_start_unchecked(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -1324,7 +1335,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 .data_len = count,
                 .slice_offset = self.get_slice_offset(),
             };
-            self.incr_root_offset(count);
+            self.incr_slice_start_unchecked(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -1357,7 +1368,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
             const new_slice = self.zig_slice(0, count);
-            self.incr_root_offset(count);
+            self.incr_slice_start_unchecked(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -1365,7 +1376,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             assert_reference(@src());
             self.assert_count_less_equal_len(count, @src());
             const new_slice = self.zig_slice_const(0, count);
-            self.incr_root_offset(count);
+            self.incr_slice_start_unchecked(count);
             self.decr_len_unchecked(count);
             return new_slice;
         }
@@ -1923,7 +1934,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //*********
         // COPY TO
         //*********
-        pub fn copy_self_range_to_dest_range(self: ListSelf, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_start: anytype) void {
+        pub fn copy_self_range_to_dest_range(self: ListSelf, self_start: IDX, self_end_exclusive: IDX, dest_: anytype, dest_start_: anytype) void {
             self.assert_valid_range(self_start, self_end_exclusive, @src());
             if (comptime @sizeOf(ELEM) == 0) return;
             var remaining_count: IDX = self_end_exclusive - self_start;
@@ -1931,8 +1942,10 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const DEST = @TypeOf(dest);
             DEST.assert_mutable(@src());
+            const DEST_IDX = DEST.GOOLIB_LIST_DEF.IDX;
+            const dest_start = num_cast(dest_start_, DEST_IDX);
             dest.assert_idx_plus_count_less_equal_len(@intCast(dest_start), @intCast(remaining_count), @src());
-            const dest_end_exclusive: real_type_of(dest_start) = real_cast(dest_start) + num_cast(remaining_count, real_type_of(dest_start));
+            const dest_end_exclusive: DEST_IDX = dest_start + num_cast(remaining_count, DEST_IDX);
             dest.assert_valid_idx_or_len(@intCast(dest_end_exclusive), @src());
             if (comptime (FIELD_LAYOUT == .WHOLE_STRUCTS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .WHOLE_STRUCTS) or (FIELD_LAYOUT == .SPLIT_FIELDS and DEST.GOOLIB_LIST_DEF.FIELD_LAYOUT == .SPLIT_FIELDS)) {
                 var remaining_self = self.slice_const(self_start, self_end_exclusive);
