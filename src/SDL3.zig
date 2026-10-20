@@ -41,8 +41,12 @@ const Assert = Root.Assert;
 // const Enums = Root.Enums;
 // const EnumSet = Enums.EnumSet;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 const DEBUG = std.debug.print;
 const DEBUG_VAL = Root.Utils.DebugPrint.debug_val;
+
+const LITTLE_ENDIAN = build.cpu.arch.endian() == .little;
+const define_color_type = Root.Color.define_color_type;
 
 pub const GraphicsController = @import("./SDL3_GraphicsController.zig");
 pub const ShaderUtils = @import("./SDL3_GraphicsController_ShaderUtils.zig");
@@ -3158,6 +3162,101 @@ pub const PixelFormat = enum(c_int) { //C.SDL_PixelFormat is c_uint, but vals ar
     // pub extern fn SDL_GetMasksForPixelFormat(format: SDL_PixelFormat, bpp: [*c]c_int, Rmask: [*c]Uint32, Gmask: [*c]Uint32, Bmask: [*c]Uint32, Amask: [*c]Uint32) bool;
     // pub extern fn SDL_GetPixelFormatForMasks(bpp: c_int, Rmask: Uint32, Gmask: Uint32, Bmask: Uint32, Amask: Uint32) SDL_PixelFormat;
     // pub extern fn SDL_GetPixelFormatDetails(format: SDL_PixelFormat) [*c]const SDL_PixelFormatDetails;
+
+    pub fn struct_type(comptime format: PixelFormat) type {
+        return switch (comptime format) {
+            .ARGB_8888, .XRGB_8888 => if (LITTLE_ENDIAN) PixelStruct.BGRA_U_8888 else PixelStruct.ARGB_U_8888,
+            .RGBA_8888, .RGBX_8888 => if (LITTLE_ENDIAN) PixelStruct.ABGR_U_8888 else PixelStruct.RGBA_U_8888,
+            .ABGR_8888, .XBGR_8888 => if (LITTLE_ENDIAN) PixelStruct.RGBA_U_8888 else PixelStruct.ABGR_U_8888,
+            .BGRA_8888, .BGRX_8888 => if (LITTLE_ENDIAN) PixelStruct.ARGB_U_8888 else PixelStruct.BGRA_U_8888,
+            .XRGB_4444 => PixelStruct.Opaque16,
+            .XBGR_4444 => PixelStruct.Opaque16,
+            .XRGB_1555 => PixelStruct.Opaque16,
+            .XBGR_1555 => PixelStruct.Opaque16,
+            .ARGB_4444 => PixelStruct.Opaque16,
+            .RGBA_4444 => PixelStruct.Opaque16,
+            .ABGR_4444 => PixelStruct.Opaque16,
+            .BGRA_4444 => PixelStruct.Opaque16,
+            .ARGB_1555 => PixelStruct.Opaque16,
+            .RGBA_5551 => PixelStruct.Opaque16,
+            .ABGR_1555 => PixelStruct.Opaque16,
+            .BGRA_5551 => PixelStruct.Opaque16,
+            .RGB_565 => PixelStruct.Opaque16,
+            .BGR_565 => PixelStruct.Opaque16,
+            .INDEX_8 => PixelStruct.Opaque8,
+            .RGB_332 => PixelStruct.Opaque8,
+            .XRGB_2101010 => PixelStruct.Opaque32,
+            .XBGR_2101010 => PixelStruct.Opaque32,
+            .ARGB_2101010 => PixelStruct.Opaque32,
+            .ABGR_2101010 => PixelStruct.Opaque32,
+            .RGB_24 => PixelStruct.Opaque24,
+            .BGR_24 => PixelStruct.Opaque24,
+            else => assert_unreachable(@src(), "format `{s}` has no defined struct layout", .{@tagName(format)}),
+        };
+    }
+};
+
+pub const PixelStruct = struct {
+    // SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+    // SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+    // SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UINT
+    // SDL_PIXELFORMAT_RGBA32
+    // (On Little-Endian: SDL_PIXELFORMAT_ABGR8888)
+    pub const RGBA_U_8888 = Root.Color.define_color_type(u8, .RGBA);
+    // SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM
+    // SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB
+    // SDL_PIXELFORMAT_BGRA32
+    // (On Little-Endian: SDL_PIXELFORMAT_ARGB8888)
+    pub const BGRA_U_8888 = Root.Color.define_color_type(u8, .BGRA);
+    // SDL_GPU_TEXTUREFORMAT_R8G8B8A8_SNORM
+    // SDL_GPU_TEXTUREFORMAT_R8G8B8A8_INT
+    pub const RGBA_I_8888 = Root.Color.define_color_type(i8, .RGBA);
+    // SDL_PIXELFORMAT_RGB24
+    pub const RGB_U_888 = Root.Color.define_color_type(u8, .RGBA);
+    // SDL_PIXELFORMAT_BGR24
+    pub const BGR_U_888 = Root.Color.define_color_type(u8, .BGR);
+    // SDL_GPU_TEXTUREFORMAT_R8G8_UNORM
+    // SDL_GPU_TEXTUREFORMAT_R8G8_UINT
+    pub const RG_U_88 = Root.Color.define_color_type(u8, .RG);
+    // SDL_GPU_TEXTUREFORMAT_R8G8_SNORM
+    // SDL_GPU_TEXTUREFORMAT_R8G8_INT
+    pub const RG_I_88 = Root.Color.define_color_type(i8, .RG);
+    // SDL_GPU_TEXTUREFORMAT_R8_UNORM
+    // SDL_GPU_TEXTUREFORMAT_A8_UNORM
+    // SDL_GPU_TEXTUREFORMAT_R8_UINT
+    pub const R_U_8 = Root.Color.define_color_type(u8, .R);
+    pub const ABGR_U_8888 = Root.Color.define_color_type(u8, .ABGR);
+    pub const ARGB_U_8888 = Root.Color.define_color_type(u8, .ARGB);
+
+    pub const Opaque16 = extern struct {
+        raw: u16,
+    };
+    pub const Opaque8 = extern struct {
+        raw: u8,
+    };
+    pub const Opaque24 = extern struct {
+        raw: [3]u8,
+    };
+    pub const Opaque32 = extern struct {
+        raw: u32,
+    };
+    pub const D16 = extern struct {
+        depth: u16,
+    };
+    pub const D8 = extern struct {
+        depth: u8,
+    };
+    pub const D_U_32 = extern struct {
+        depth: u32,
+    };
+    pub const D_U_16 = extern struct {
+        depth: u16,
+    };
+    pub const D_F_32 = extern struct {
+        depth: f32,
+    };
+
+    pub const NotImplemented = void;
 };
 
 pub const DisplayMode = extern struct {
@@ -8454,6 +8553,59 @@ pub const GPU_TextureFormat = enum(C.SDL_GPUTextureFormat) {
             .D32_FLOAT_S8_UINT,
             => true,
             else => false,
+        };
+    }
+
+    pub fn struct_type(comptime format: GPU_TextureFormat) type {
+        return switch (comptime format) {
+            .A8_UNORM => define_color_type(u8, .A),
+            .R8_UNORM, .R8_UINT => define_color_type(u8, .R),
+            .R8G8_UNORM, .R8G8_UINT => define_color_type(u8, .RG),
+            .R8G8B8A8_UNORM, .R8G8B8A8_UINT, .R8G8B8A8_UNORM_SRGB => define_color_type(u8, .RGBA),
+            .R16_UNORM, .R16_UINT => define_color_type(u16, .R),
+            .R16G16_UNORM, .R16G16_UINT => define_color_type(u16, .RG),
+            .R16G16B16A16_UNORM, .R16G16B16A16_UINT => define_color_type(u16, .RGBA),
+            .R10G10B10A2_UNORM => PixelStruct.Opaque32,
+            .B5G6R5_UNORM => PixelStruct.Opaque16,
+            .B5G5R5A1_UNORM => PixelStruct.Opaque16,
+            .B4G4R4A4_UNORM => PixelStruct.Opaque16,
+            .B8G8R8A8_UNORM, .B8G8R8A8_UNORM_SRGB => define_color_type(u8, .BGRA),
+
+            .R8_SNORM => define_color_type(i8, .R),
+            .R8G8_SNORM => define_color_type(i8, .RG),
+            .R8G8B8A8_SNORM => define_color_type(i8, .RGBA),
+            .R16_SNORM => define_color_type(i16, .R),
+            .R16G16_SNORM => define_color_type(i16, .RG),
+            .R16G16B16A16_SNORM => define_color_type(i16, .RGBA),
+
+            .R16_FLOAT => define_color_type(f16, .R),
+            .R16G16_FLOAT => define_color_type(f16, .RG),
+            .R16G16B16A16_FLOAT => define_color_type(f16, .RGBA),
+            .R32_FLOAT => define_color_type(f32, .R),
+            .R32G32_FLOAT => define_color_type(f32, .RG),
+            .R32G32B32A32_FLOAT => define_color_type(f32, .RGBA),
+            .R11G11B10_UFLOAT => PixelStruct.Opaque32,
+
+            .R32_UINT => define_color_type(u32, .R),
+            .R32G32_UINT => define_color_type(u32, .RG),
+            .R32G32B32A32_UINT => define_color_type(u32, .RGBA),
+
+            .R8_INT => define_color_type(i8, .R),
+            .R8G8_INT => define_color_type(i8, .RG),
+            .R8G8B8A8_INT => define_color_type(i8, .RGBA),
+            .R16_INT => define_color_type(i16, .R),
+            .R16G16_INT => define_color_type(i16, .RG),
+            .R16G16B16A16_INT => define_color_type(i16, .RGBA),
+            .R32_INT => define_color_type(i32, .R),
+            .R32G32_INT => define_color_type(i32, .RG),
+            .R32G32B32A32_INT => define_color_type(i32, .RGBA),
+
+            .D16_UNORM => PixelStruct.D_U_16,
+            .D24_UNORM => PixelStruct.Opaque24,
+            .D32_FLOAT => PixelStruct.D_F_32,
+            .D24_UNORM_S8_UINT => PixelStruct.Opaque32,
+
+            else => assert_unreachable(@src(), "format `{s}` has no defined struct layout", .{@tagName(format)}),
         };
     }
 };

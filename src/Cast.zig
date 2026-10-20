@@ -548,3 +548,105 @@ pub fn name_cast(val: anytype, comptime ENUM_TYPE_FOR_INT: ?type) []const u8 {
         },
     }
 }
+
+pub fn ChangePtrElemSameAttrs(
+    comptime source: type,
+    comptime size: std.builtin.Type.Pointer.Size,
+    comptime child: type,
+) type {
+    const info = @typeInfo(source).pointer;
+    @Pointer(size, .{
+        .@"addrspace" = info.address_space,
+        .@"align" = info.alignment,
+        .@"allowzero" = info.is_allowzero,
+        .@"const" = info.is_const,
+        .@"volatile" = info.is_volatile,
+    }, child, null);
+}
+pub fn ChangePtrElemSameAttrsDiffAlign(
+    comptime source: type,
+    comptime size: std.builtin.Type.Pointer.Size,
+    comptime child: type,
+    comptime alignment: usize,
+) type {
+    const info = @typeInfo(source).pointer;
+    @Pointer(size, .{
+        .@"addrspace" = info.address_space,
+        .@"align" = alignment,
+        .@"allowzero" = info.is_allowzero,
+        .@"const" = info.is_const,
+        .@"volatile" = info.is_volatile,
+    }, child, null);
+}
+
+pub fn PtrAsBytes(comptime PTR: type) type {
+    const pointer = @typeInfo(PTR).pointer;
+    switch (pointer.size) {
+        .one, .c, .many => {
+            const size = @sizeOf(pointer.child);
+            return ChangePtrElemSameAttrs(PTR, .one, [size]u8);
+        },
+        .slice => {
+            return ChangePtrElemSameAttrs(PTR, .slice, u8);
+        },
+    }
+}
+
+/// Given a pointer to a single item or slice, returns a slice of the underlying bytes, preserving pointer attributes.
+///
+/// As a special case, a many-item pointer is interpeted as a single-item pointer
+pub fn ptr_as_bytes(ptr: anytype) PtrAsBytes(@TypeOf(ptr)) {
+    const PTR = @typeInfo(@TypeOf(ptr)).pointer;
+    switch (PTR.size) {
+        .one, .c, .many => return @ptrCast(@alignCast(ptr)),
+        .slice => {
+            const ptr_adjust: ChangePtrElemSameAttrs(PTR, .many, u8) = @ptrCast(@alignCast(ptr.ptr));
+            const size = @sizeOf(PTR.child) * ptr.len;
+            return ptr_adjust[0..size];
+        },
+    }
+}
+
+fn ElemsAsBytes(comptime Slice: type) type {
+    return ChangePtrElemSameAttrs(Slice, .slice, u8);
+}
+
+pub fn elems_as_bytes(slice: anytype) ElemsAsBytes(@TypeOf(slice)) {
+    const Slice = @TypeOf(slice);
+
+    if (@sizeOf(std.meta.Elem(Slice)) == 0) return &[0]u8{};
+
+    if (slice.len == 0 and std.meta.sentinel(Slice) == null) return &[0]u8{};
+
+    const cast_target = ChangePtrElemSameAttrs(Slice, .many, u8);
+
+    return @as(cast_target, @ptrCast(slice))[0 .. slice.len * @sizeOf(std.meta.Elem(Slice))];
+}
+
+fn BytesAsElems(comptime T: type, comptime BYTES_SLICE: type) type {
+    return ChangePtrElemSameAttrs(BYTES_SLICE, .slice, T);
+}
+
+fn BytesAsElemsAligned(comptime T: type, comptime BYTES_SLICE: type) type {
+    return ChangePtrElemSameAttrsDiffAlign(BYTES_SLICE, .slice, T, @alignOf(T));
+}
+
+pub fn bytes_as_elems(comptime T: type, bytes: anytype) BytesAsElems(T, @TypeOf(bytes)) {
+    if (bytes.len == 0 or @sizeOf(T) == 0) {
+        return &[0]T{};
+    }
+
+    const cast_target = ChangePtrElemSameAttrs(@TypeOf(bytes), .many, T);
+
+    return @as(cast_target, @ptrCast(bytes))[0..@divExact(bytes.len, @sizeOf(T))];
+}
+
+pub fn bytes_as_elems_aligned(comptime T: type, bytes: anytype) BytesAsElems(T, @TypeOf(bytes)) {
+    if (bytes.len == 0 or @sizeOf(T) == 0) {
+        return &[0]T{};
+    }
+
+    const cast_target = ChangePtrElemSameAttrsDiffAlign(@TypeOf(bytes), .many, T, @alignOf(T));
+
+    return @as(cast_target, @ptrCast(@alignCast(bytes)))[0..@divExact(bytes.len, @sizeOf(T))];
+}

@@ -441,48 +441,6 @@ pub fn array_or_slice_equal(a: anytype, b: anytype) bool {
     return true;
 }
 
-fn CopyPtrAttrs(
-    comptime source: type,
-    comptime size: std.builtin.Type.Pointer.Size,
-    comptime child: type,
-) type {
-    const info = @typeInfo(source).pointer;
-    @Pointer(size, .{
-        .@"addrspace" = info.address_space,
-        .@"align" = info.alignment,
-        .@"allowzero" = info.is_allowzero,
-        .@"const" = info.is_const,
-        .@"volatile" = info.is_volatile,
-    }, child, null);
-}
-
-fn PtrAsBytes(comptime PTR: type) type {
-    const pointer = @typeInfo(PTR).pointer;
-    switch (pointer.size) {
-        .one, .c, .many => {
-            const size = @sizeOf(pointer.child);
-            return CopyPtrAttrs(PTR, .one, [size]u8);
-        },
-        .slice => {
-            return CopyPtrAttrs(PTR, .slice, u8);
-        },
-    }
-}
-
-/// Given a pointer to a single item or slice, returns a slice of the underlying bytes, preserving pointer attributes.
-///
-/// As a special case, a many-item pointer is interpeted as a single-item pointer
-pub fn ptr_as_bytes(ptr: anytype) PtrAsBytes(@TypeOf(ptr)) {
-    const PTR = @typeInfo(@TypeOf(ptr)).pointer;
-    switch (PTR.size) {
-        .one, .c, .many => return @ptrCast(@alignCast(ptr)),
-        .slice => {
-            const ptr_adjust: CopyPtrAttrs(PTR, .many, u8) = @ptrCast(@alignCast(ptr.ptr));
-            const size = @sizeOf(PTR.child) * ptr.len;
-            return ptr_adjust[0..size];
-        },
-    }
-}
 
 pub const CopyLenKind = enum(u8) {
     ENTIRE_SOURCE_TO_DEST,

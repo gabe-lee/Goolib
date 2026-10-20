@@ -81,7 +81,6 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
             }
             return self;
         }
-        
 
         pub fn claim(self: *Self) *T {
             if (NEEDS_LOCK) {
