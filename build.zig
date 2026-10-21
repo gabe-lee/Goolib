@@ -47,17 +47,17 @@ pub fn build(b: *std.Build) void {
         "emscripten_pthreads",
         "Build with pthreads support when targeting Emscripten (default: false)",
     ) orelse false;
-    var system_include_path = b.option(
+    const system_include_path = b.option(
         std.Build.LazyPath,
         "system_include_path",
         "System header search path for cross-compiling",
     );
-    var system_framework_path = b.option(
+    const system_framework_path = b.option(
         std.Build.LazyPath,
         "system_framework_path",
         "System framework search path for cross-compiling",
     );
-    var library_path = b.option(
+    const library_path = b.option(
         std.Build.LazyPath,
         "library_path",
         "Library search path for cross-compiling",
@@ -80,6 +80,7 @@ pub fn build(b: *std.Build) void {
     var macos = false;
     var emscripten = false;
     var msvc = false; // Assume mingw-w64 as the default for Windows
+    var glibc_2_x: u8 = 0;
     var musl = false; // Assume glibc as the default for Linux
     switch (target.result.os.tag) {
         .windows => {
@@ -91,16 +92,13 @@ pub fn build(b: *std.Build) void {
             if (b.lazyImport(@This(), "sdl_linux_deps")) |build_zig| {
                 linux_deps_values = LinuxDepsValues.fromBuildZig(b, build_zig);
             }
+            if (target.result.os.versionRange().gnuLibCVersion()) |v| {
+                if (v.major == 2) glibc_2_x = @min(v.minor, 255);
+            }
             musl = target.result.abi.isMusl();
         },
         .macos => {
             macos = true;
-            if (@hasField(std.Build, "sysroot") and b.sysroot != null) { // TODO: Remove after 0.17
-                const sysroot = b.sysroot.?;
-                system_include_path = system_include_path orelse .{ .cwd_relative = b.pathJoin(&.{ sysroot, "usr/include" }) };
-                system_framework_path = system_framework_path orelse .{ .cwd_relative = b.pathJoin(&.{ sysroot, "System/Library/Frameworks" }) };
-                library_path = library_path orelse .{ .cwd_relative = "/usr/lib" }; // ???
-            }
             if (!target.query.isNative() and (system_include_path == null or system_framework_path == null or library_path == null)) {
                 std.log.err("'-Dsystem_include_path', '-Dsystem_framework_path' and '-Dlibrary_path' are required when building SDL for non-native macOS targets", .{});
                 std.process.exit(1);
@@ -108,10 +106,6 @@ pub fn build(b: *std.Build) void {
         },
         .emscripten => {
             emscripten = true;
-            if (@hasField(std.Build, "sysroot") and b.sysroot != null) { // TODO: Remove after 0.17
-                const sysroot = b.sysroot.?;
-                system_include_path = system_include_path orelse .{ .cwd_relative = b.pathJoin(&.{ sysroot, "include" }) };
-            }
             if (system_include_path == null) {
                 std.log.err("'-Dsystem_include_path' is required when building SDL for Emscripten", .{});
                 std.process.exit(1);
@@ -170,16 +164,16 @@ pub fn build(b: *std.Build) void {
             .HAVE_MEMCMP = windows or linux or macos or emscripten,
             .HAVE_WCSLEN = windows or linux or macos or emscripten,
             .HAVE_WCSNLEN = windows or linux or macos or emscripten,
-            .HAVE_WCSLCPY = macos,
-            .HAVE_WCSLCAT = macos,
+            .HAVE_WCSLCPY = (linux and glibc_2_x >= 38) or macos,
+            .HAVE_WCSLCAT = (linux and glibc_2_x >= 38) or macos,
             .HAVE_WCSSTR = windows or linux or macos or emscripten,
             .HAVE_WCSCMP = windows or linux or macos or emscripten,
             .HAVE_WCSNCMP = windows or linux or macos or emscripten,
             .HAVE_WCSTOL = windows or linux or macos or emscripten,
             .HAVE_STRLEN = windows or linux or macos or emscripten,
             .HAVE_STRNLEN = windows or linux or macos or emscripten,
-            .HAVE_STRLCPY = (linux and musl) or macos or emscripten,
-            .HAVE_STRLCAT = (linux and musl) or macos or emscripten,
+            .HAVE_STRLCPY = (linux and (musl or glibc_2_x >= 38)) or macos or emscripten,
+            .HAVE_STRLCAT = (linux and (musl or glibc_2_x >= 38)) or macos or emscripten,
             .HAVE_STRPBRK = windows or linux or macos or emscripten,
             .HAVE__STRREV = windows,
             .HAVE_INDEX = linux or macos or emscripten,
@@ -260,7 +254,7 @@ pub fn build(b: *std.Build) void {
             .HAVE_FOPEN64 = (windows and !msvc) or (linux and !musl) or emscripten,
             .HAVE_FSEEKO = (windows and !msvc) or linux or macos or emscripten,
             .HAVE_FSEEKO64 = (windows and !msvc) or (linux and !musl) or emscripten,
-            .HAVE_MEMFD_CREATE = linux,
+            .HAVE_MEMFD_CREATE = (linux and glibc_2_x >= 27),
             .HAVE_POSIX_FALLOCATE = linux or emscripten,
             .HAVE_SIGACTION = linux or macos or emscripten,
             .HAVE_SIGTIMEDWAIT = linux or emscripten,
@@ -316,7 +310,7 @@ pub fn build(b: *std.Build) void {
             .HAVE_SHELLSCALINGAPI_H = windows,
             .USE_POSIX_SPAWN = false,
             .HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR = macos,
-            .HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR_NP = linux or macos or emscripten,
+            .HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR_NP = (linux and glibc_2_x >= 29) or macos or emscripten,
             .SDL_DISABLE_DLOPEN_NOTES = false,
             .SDL_DEFAULT_ASSERT_LEVEL_CONFIGURED = false,
             .SDL_DEFAULT_ASSERT_LEVEL = null,
