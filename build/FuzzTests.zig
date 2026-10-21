@@ -17,7 +17,7 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
     b.installArtifact(fuzztest);
 
     const run_fuzztest = b.addRunArtifact(fuzztest);
-    if (b.args) |args| run_fuzztest.addArgs(args);
+    run_fuzztest.addPassthruArgs();
     run_fuzztest.step.dependOn(b.getInstallStep());
 
     const run_fuzztest_cmd = b.step("fuzztest", "Run all (or one) library fuzz tests");

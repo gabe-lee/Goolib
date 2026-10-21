@@ -18,7 +18,7 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
     b.installArtifact(layout);
 
     const run_layout = b.addRunArtifact(layout);
-    if (b.args) |args| run_layout.addArgs(args);
+    run_layout.addPassthruArgs();
     run_layout.step.dependOn(b.getInstallStep());
 
     const run_layout_cmd = b.step("layout", "Run the immediate-mode layout sample app");

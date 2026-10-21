@@ -17,7 +17,8 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
     b.installArtifact(benchtest);
 
     const run_benchtest = b.addRunArtifact(benchtest);
-    if (b.args) |args| run_benchtest.addArgs(args);
+    run_benchtest.addPassthruArgs();
+
     run_benchtest.step.dependOn(b.getInstallStep());
 
     const run_benchtest_cmd = b.step("benchtest", "Run all (or one) library bench tests");

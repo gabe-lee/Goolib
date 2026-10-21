@@ -1524,8 +1524,8 @@ fn pack_vertex_locations(comptime input_types: []const GPUType) PackedVertexLayo
     }
 
     // Pack chunks
-    var location_states: [MAX_LOCATIONS]VertexLocationState = [_]VertexLocationState{.{}} ** MAX_LOCATIONS;
-    var location_base_types: [MAX_LOCATIONS]?BaseType = [_]?BaseType{null} ** MAX_LOCATIONS;
+    var location_states: [MAX_LOCATIONS]VertexLocationState = @splat(.{});
+    var location_base_types: [MAX_LOCATIONS]?BaseType = @splat(null);
     var active_locations: usize = 0;
 
     // Temporary storage for location assignment per chunk

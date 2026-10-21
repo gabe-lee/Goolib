@@ -72,10 +72,10 @@ pub const LayoutDirection = enum(u3) {
     BOTTOM_TO_TOP__RIGHT_TO_LEFT = 0b111,
 
     pub inline fn primary_axis(self: LayoutDirection) Axis {
-        return @enumFromInt(@as(u1, @intCast((@intFromEnum(self) >> 2) & 0b1)));
+        return @fromBackingInt(@intCast(@as(u1, @intCast((@backingInt(self) >> 2) & 0b1))));
     }
     pub inline fn secondary_axis(self: LayoutDirection) Axis {
-        return @enumFromInt(@as(u1, 1) ^ @as(u1, @intCast((@intFromEnum(self) >> 2) & 0b1)));
+        return @fromBackingInt(@intCast(@as(u1, 1) ^ @as(u1, @intCast((@backingInt(self) >> 2) & 0b1))));
     }
     // pub inline fn relative_to_axis(self: LayoutDirection, comptime AXIS: Axis) AxisRelative {
     //     switch (comptime AXIS) {
@@ -94,10 +94,10 @@ pub const LayoutDirection = enum(u3) {
     // }
 
     pub inline fn x_dir(self: LayoutDirection) XDir {
-        return @enumFromInt(@as(u1, @intCast((@intFromEnum(self) >> 1) & 0b1)));
+        return @fromBackingInt(@intCast(@as(u1, @intCast((@backingInt(self) >> 1) & 0b1))));
     }
     pub inline fn y_dir(self: LayoutDirection) YDir {
-        return @enumFromInt(@as(u1, @intCast(@intFromEnum(self) & 0b1)));
+        return @fromBackingInt(@intCast(@as(u1, @intCast(@backingInt(self) & 0b1))));
     }
 };
 
@@ -145,7 +145,7 @@ pub const AlignX = enum(u2) {
     JUSTIFY = 3,
 
     inline fn generic(self: AlignX) Align {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 };
 
@@ -156,7 +156,7 @@ pub const AlignY = enum(u2) {
     JUSTIFY = 3,
 
     inline fn generic(self: AlignY) Align {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 };
 
@@ -356,9 +356,9 @@ const LocalAlign = enum(u2) {
                     .MIDDLE => return LocalAlign.CENTER,
                     .END => return LocalAlign.END,
                 },
-                else => return @enumFromInt(@intFromEnum(parent_child_ALLA)),
+                else => return @fromBackingInt(@intCast(@backingInt(parent_child_ALLA))),
             },
-            else => return @enumFromInt(@intFromEnum(child_ALLA)),
+            else => return @fromBackingInt(@intCast(@backingInt(child_ALLA))),
         }
     }
 };
@@ -884,7 +884,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             }
 
             fn DEBUG_PRINT(self: AxisLine, idx: ?IDX, ptr: ?*AxisLine, comptime INDENT: comptime_int) void {
-                const IND = "  " ** INDENT;
+                const IND: [INDENT * 2]u8 = @splat(' ');
                 const IND2 = IND ++ "  ";
                 var idx_buf: [16]u8 = undefined;
                 var ptr_buf: [32]u8 = undefined;

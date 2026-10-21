@@ -19,7 +19,7 @@ pub fn sub_build(b: *std.Build, goolib: *std.Build.Module, opts: Options) void {
     b.installArtifact(breakout);
 
     const run_breakout = b.addRunArtifact(breakout);
-    if (b.args) |args| run_breakout.addArgs(args);
+    run_breakout.addPassthruArgs();
     run_breakout.step.dependOn(b.getInstallStep());
 
     const run_breakout_cmd = b.step("breakout_advanced", "Run the advanced breakout sample app");
