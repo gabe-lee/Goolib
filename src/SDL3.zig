@@ -2003,19 +2003,19 @@ pub const Renderer = opaque {
         return vec;
     }
     pub fn set_draw_color(self: *Renderer, color: Color_RGBA_u8) Error!void {
-        return ok_or_fail_err(C.SDL_SetRenderDrawColor(self.to_c_ptr(), color.get_x(), color.get_y(), color.get_z(), color.get_w()));
+        return ok_or_fail_err(C.SDL_SetRenderDrawColor(self.to_c_ptr(), color.x, color.y, color.z, color.w));
     }
     pub fn set_draw_color_float(self: *Renderer, color: Color_RGBA_f32) Error!void {
-        return ok_or_fail_err(C.SDL_SetRenderDrawColorFloat(self.to_c_ptr(), color.get_x(), color.get_y(), color.get_z(), color.get_w()));
+        return ok_or_fail_err(C.SDL_SetRenderDrawColorFloat(self.to_c_ptr(), color.x, color.y, color.z, color.w));
     }
     pub fn get_draw_color(self: *Renderer) Error!Color_RGBA_u8 {
         var color = Color_RGBA_u8{};
-        try ok_or_null_err(C.SDL_GetRenderDrawColor(self.to_c_ptr(), color.x_ptr(), color.y_ptr(), color.z_ptr(), color.w_ptr()));
+        try ok_or_null_err(C.SDL_GetRenderDrawColor(self.to_c_ptr(), &color.x, &color.y, &color.z, &color.w));
         return color;
     }
     pub fn get_draw_color_float(self: *Renderer) Error!Color_RGBA_f32 {
         var color = Color_RGBA_f32{};
-        try ok_or_null_err(C.SDL_GetRenderDrawColorFloat(self.to_c_ptr(), color.x_ptr(), color.y_ptr(), color.z_ptr(), color.w_ptr()));
+        try ok_or_null_err(C.SDL_GetRenderDrawColorFloat(self.to_c_ptr(), &color.x, &color.y, &color.z, &color.w));
         return color;
     }
     pub fn set_draw_color_scale(self: *Renderer, scale: f32) Error!void {
@@ -7734,6 +7734,8 @@ pub const GPU_BlitInfo = extern struct {
 
     pub const to_c_ptr = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).to_c_ptr;
     pub const from_c_ptr = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).from_c_ptr;
+    pub const to_c_ptr_const = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).to_c_ptr_const;
+    pub const from_c_ptr_const = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).from_c_ptr_const;
     pub const to_c = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).to_c;
     pub const from_c = c_non_opaque_conversions(GPU_BlitInfo, C.SDL_GPUBlitInfo).from_c;
 };
@@ -8223,8 +8225,8 @@ pub const GPU_CommandBuffer = opaque {
     pub fn generate_mipmaps_for_texture(self: *GPU_CommandBuffer, texture: *GPU_Texture) void {
         C.SDL_GenerateMipmapsForGPUTexture(self.to_c_ptr(), texture.to_c_ptr());
     }
-    pub fn blit_texture(self: *GPU_CommandBuffer, blit_info: *GPU_BlitInfo) void {
-        C.SDL_BlitGPUTexture(self.to_c_ptr(), blit_info.to_c_ptr());
+    pub fn blit_texture(self: *GPU_CommandBuffer, blit_info: *const GPU_BlitInfo) void {
+        C.SDL_BlitGPUTexture(self.to_c_ptr(), blit_info.to_c_ptr_const());
     }
     pub fn aquire_swapchain_texture(self: *GPU_CommandBuffer, window: *Window) Error!GPU_SwapchainTexture {
         var tex: GPU_SwapchainTexture = undefined;

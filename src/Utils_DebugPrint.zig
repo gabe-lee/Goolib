@@ -23,14 +23,27 @@
 
 const std = @import("std");
 
+pub const TypeNameMode = enum {
+    FULL_TYPE_NAME,
+    TYPE_NAME_NO_GENERICS,
+    LOCAL_TYPE_NAME,
+    LOCAL_TYPE_NAME_NO_GENERICS,
+};
+
+pub const OffsetMode = enum {
+    NO_OFFSET,
+    LOCAL_OFFSET,
+    TOTAL_OFFSET,
+};
+
 const DEFAULT_DEPTH_LIMIT = 32;
 const INDENT_STR = "  ";
 
 pub fn debug_val(name: ?[]const u8, value: anytype) void {
-    debug_val_internal(name, value, 0, 32, .TYPE_NAME_NO_GENERICS);
+    debug_val_internal(name, value, 0, 32, .TYPE_NAME_NO_GENERICS, .NO_OFFSET, 0);
 }
-pub fn debug_val_advanced(name: ?[]const u8, value: anytype, depth_limit: usize, comptime TYPE_NAME_MODE: TypeNameMode) void {
-    debug_val_internal(name, value, 0, depth_limit, TYPE_NAME_MODE);
+pub fn debug_val_advanced(name: ?[]const u8, value: anytype, depth_limit: usize, comptime TYPE_NAME_MODE: TypeNameMode, comptime OFFSET_MODE: OffsetMode) void {
+    debug_val_internal(name, value, 0, depth_limit, TYPE_NAME_MODE, OFFSET_MODE, 0);
 }
 
 fn indent(ind: usize) void {
@@ -40,23 +53,35 @@ fn indent(ind: usize) void {
     }
 }
 
-fn debug_val_internal(name: ?[]const u8, value: anytype, ind: usize, depth_limit: usize, comptime TMODE: TypeNameMode) void {
+fn debug_val_internal(name: ?[]const u8, value: anytype, ind: usize, depth_limit: usize, comptime TMODE: TypeNameMode, comptime OMODE: OffsetMode, offset: usize) void {
     if (ind > depth_limit) {
         indent(ind);
+        switch (OMODE) {
+            .NO_OFFSET => {},
+            .LOCAL_OFFSET, .TOTAL_OFFSET => {
+                std.debug.print("{x:_>4}_ ", .{offset});
+            },
+        }
         if (name) |n| std.debug.print("{s} = ", .{n});
         std.debug.print("... <MORE ITEMS>\n", .{});
         return;
     }
 
     indent(ind);
+    switch (OMODE) {
+        .NO_OFFSET => {},
+        .LOCAL_OFFSET, .TOTAL_OFFSET => {
+            std.debug.print("{x:_>4}_ ", .{offset});
+        },
+    }
     if (name) |n| {
         std.debug.print("{s} = ", .{n});
     }
 
-    print_payload(value, ind, depth_limit, TMODE);
+    print_payload(value, ind, depth_limit, TMODE, OMODE, offset);
 }
 
-fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE: TypeNameMode) void {
+fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE: TypeNameMode, comptime OMODE: OffsetMode, offset: usize) void {
     const T = @TypeOf(value);
     const info = @typeInfo(T);
 
@@ -67,8 +92,13 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                 return;
             }
             std.debug.print("{s}{{\n", .{type_name(TMODE, T)});
+            const base_off: usize = switch (comptime OMODE) {
+                .NO_OFFSET => 0,
+                .LOCAL_OFFSET => 0,
+                .TOTAL_OFFSET => offset,
+            };
             inline for (s_info.fields) |field| {
-                debug_val_internal(field.name, @field(value, field.name), ind + 1, depth_limit, TMODE);
+                debug_val_internal(field.name, @field(value, field.name), ind + 1, depth_limit, TMODE, OMODE, base_off + @offsetOf(T, field.name));
             }
             indent(ind);
             std.debug.print("}}\n", .{});
@@ -80,10 +110,15 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                     return;
                 }
                 std.debug.print("{s}{{\n", .{type_name(TMODE, T)});
+                const base_off: usize = switch (comptime OMODE) {
+                    .NO_OFFSET => 0,
+                    .LOCAL_OFFSET => 0,
+                    .TOTAL_OFFSET => offset,
+                };
                 switch (value) {
                     inline else => |payload| {
                         const active_tag_name = @tagName(value);
-                        debug_val_internal(active_tag_name, payload, ind + 1, depth_limit, TMODE);
+                        debug_val_internal(active_tag_name, payload, ind + 1, depth_limit, TMODE, OMODE, base_off);
                     },
                 }
                 indent(ind);
@@ -102,15 +137,25 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
             std.debug.print(".{s}\n", .{@tagName(value)});
         },
         .optional => {
+            const base_off: usize = switch (comptime OMODE) {
+                .NO_OFFSET => 0,
+                .LOCAL_OFFSET => 0,
+                .TOTAL_OFFSET => offset,
+            };
             if (value) |unwrapped| {
-                print_payload(unwrapped, ind, depth_limit, TMODE);
+                print_payload(unwrapped, ind, depth_limit, TMODE, OMODE, base_off);
             } else {
                 std.debug.print("null\n", .{});
             }
         },
         .error_union => {
+            const base_off: usize = switch (comptime OMODE) {
+                .NO_OFFSET => 0,
+                .LOCAL_OFFSET => 0,
+                .TOTAL_OFFSET => offset,
+            };
             if (value) |payload| {
-                print_payload(payload, ind, depth_limit, TMODE);
+                print_payload(payload, ind, depth_limit, TMODE, OMODE, base_off);
             } else |err| {
                 std.debug.print("error.{s}\n", .{@errorName(err)});
             }
@@ -128,10 +173,17 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                             std.debug.print("0x{x} -> [{s}]{s}{s}{{}}\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
                         } else {
                             std.debug.print("0x{x} -> [{s}]{s}{s}{{\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                            var off: usize = switch (comptime OMODE) {
+                                .NO_OFFSET => 0,
+                                .LOCAL_OFFSET => 0,
+                                .TOTAL_OFFSET => offset,
+                            };
+
                             for (value, 0..) |item, i| {
                                 var buf: [32]u8 = undefined;
                                 const idx_name = std.fmt.bufPrint(&buf, "[{d}]", .{i}) catch "[?]";
-                                debug_val_internal(idx_name, item, ind + 1, depth_limit, TMODE);
+                                debug_val_internal(idx_name, item, ind + 1, depth_limit, TMODE, OMODE, off);
+                                off += @sizeOf(p_info.child);
                             }
                             indent(ind);
                             std.debug.print("}}\n", .{});
@@ -159,12 +211,18 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                                 std.debug.print("0x{x} -> [*:]{s}{s}{{}}\n", .{ if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
                             } else {
                                 std.debug.print("0x{x} -> [*:]{s}{s}{{\n", .{ if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                                var off: usize = switch (comptime OMODE) {
+                                    .NO_OFFSET => 0,
+                                    .LOCAL_OFFSET => 0,
+                                    .TOTAL_OFFSET => offset,
+                                };
                                 while (v != sentinel) {
                                     var buf: [32]u8 = undefined;
                                     const idx_name = std.fmt.bufPrint(&buf, "[{d}]", .{i}) catch "[?]";
-                                    debug_val_internal(idx_name, v, ind + 1, depth_limit, TMODE);
+                                    debug_val_internal(idx_name, v, ind + 1, depth_limit, TMODE, OMODE, off);
                                     i += 1;
                                     v = value[i];
+                                    off += @sizeOf(p_info.child);
                                 }
                                 indent(ind);
                                 std.debug.print("}}\n", .{});
@@ -184,10 +242,16 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                     std.debug.print("[{d}]{s}{{}}\n", .{ a_info.len, type_name(TMODE, a_info.child) });
                 } else {
                     std.debug.print("[{d}]{s}{{\n", .{ a_info.len, type_name(TMODE, a_info.child) });
+                    var off: usize = switch (comptime OMODE) {
+                        .NO_OFFSET => 0,
+                        .LOCAL_OFFSET => 0,
+                        .TOTAL_OFFSET => offset,
+                    };
                     for (value, 0..) |item, i| {
                         var buf: [32]u8 = undefined;
                         const idx_name = std.fmt.bufPrint(&buf, "[{d}]", .{i}) catch "[?]";
-                        debug_val_internal(idx_name, item, ind + 1, depth_limit, TMODE);
+                        debug_val_internal(idx_name, item, ind + 1, depth_limit, TMODE, OMODE, off);
+                        off += @sizeOf(a_info.child);
                     }
                     indent(ind);
                     std.debug.print("}}\n", .{});
@@ -196,10 +260,16 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
         },
         .vector => |v_info| {
             std.debug.print("@Vector({d}, {s}){{\n", .{ v_info.len, type_name(TMODE, v_info.child) });
+            var off: usize = switch (comptime OMODE) {
+                .NO_OFFSET => 0,
+                .LOCAL_OFFSET => 0,
+                .TOTAL_OFFSET => offset,
+            };
             inline for (0..v_info.len) |i| {
                 var buf: [32]u8 = undefined;
                 const idx_name = std.fmt.bufPrint(&buf, "[{d}]", .{i}) catch "[?]";
-                debug_val_internal(idx_name, value[i], ind + 1, depth_limit, TMODE);
+                debug_val_internal(idx_name, value[i], ind + 1, depth_limit, TMODE, OMODE, off);
+                off += @sizeOf(v_info.child);
             }
             indent(ind);
             std.debug.print("}}\n", .{});
@@ -309,13 +379,6 @@ fn local_type_name(comptime T: type) []const u8 {
         return raw_name[start..];
     }
 }
-
-pub const TypeNameMode = enum {
-    FULL_TYPE_NAME,
-    TYPE_NAME_NO_GENERICS,
-    LOCAL_TYPE_NAME,
-    LOCAL_TYPE_NAME_NO_GENERICS,
-};
 
 pub fn type_name(comptime mode: TypeNameMode, comptime T: type) []const u8 {
     return switch (comptime mode) {

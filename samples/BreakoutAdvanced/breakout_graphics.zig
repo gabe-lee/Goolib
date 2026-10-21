@@ -251,6 +251,5 @@ pub const Controller = GraphicsControllerModule.GraphicsController(
         },
         .primitive_type = .TRIANGLE_LIST,
     }},
-    .{},
     10000,
 );

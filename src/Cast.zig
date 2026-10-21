@@ -555,7 +555,7 @@ pub fn ChangePtrElemSameAttrs(
     comptime child: type,
 ) type {
     const info = @typeInfo(source).pointer;
-    @Pointer(size, .{
+    return @Pointer(size, .{
         .@"addrspace" = info.address_space,
         .@"align" = info.alignment,
         .@"allowzero" = info.is_allowzero,
@@ -570,7 +570,7 @@ pub fn ChangePtrElemSameAttrsDiffAlign(
     comptime alignment: usize,
 ) type {
     const info = @typeInfo(source).pointer;
-    @Pointer(size, .{
+    return @Pointer(size, .{
         .@"addrspace" = info.address_space,
         .@"align" = alignment,
         .@"allowzero" = info.is_allowzero,

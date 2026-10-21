@@ -62,8 +62,6 @@ const BufferRegion = GraphicsController.BufferRegion;
 const ColorTarget = GraphicsController.ColorTarget;
 const CommandBuffer = GraphicsController.CommandBuffer;
 const CopyDownloadDetails = GraphicsController.CopyDownloadDetails;
-const CopyPassGPUOnly = GraphicsController.CopyPassGPUOnly;
-const CopyPassTransferOnly = GraphicsController.CopyPassTransferOnly;
 const CopyUploadDetails = GraphicsController.CopyUploadDetails;
 const CreateOptions = GraphicsController.CreateOptions;
 const DeleteBufferDetails = GraphicsController.DeleteBufferDetails;
@@ -83,10 +81,8 @@ const IndexBufferInit = GraphicsController.IndexBufferInit;
 const IndexBufferName = GraphicsController.IndexBufferName;
 const IndirectDrawBufferInit = GraphicsController.IndirectDrawBufferInit;
 const IndirectDrawBufferName = GraphicsController.IndirectDrawBufferName;
-const PendingFinalDownloadHandle = GraphicsController.PendingFinalDownloadHandle;
 const QueuedDownloadCopy = GraphicsController.QueuedDownloadCopy;
 const RenderPass = GraphicsController.RenderPass;
-const RenderPassWithPipeline = GraphicsController.RenderPassWithPipeline;
 const RenderPipeInit = GraphicsController.RenderPipeInit;
 const RenderPipelineName = GraphicsController.RenderPipelineName;
 const SamplerInit = GraphicsController.SamplerInit;
@@ -122,6 +118,7 @@ const window_size: IVec = IVec.new(640, 480);
 const WindowFlags = SDL.WindowFlags.Flag;
 const DEBUG = std.debug.print;
 const DEBUG_VAL = Goolib.Utils.DebugPrint.debug_val;
+const DEBUG_VAL_ADV = Goolib.Utils.DebugPrint.debug_val_advanced;
 
 const assert_with_reason = Goolib.Assert.assert_with_reason;
 
@@ -351,17 +348,16 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
         defer verify_rgba_surface.destroy();
         var verify_sprite_data: [Sprites.tex_coords.len]GraphicsModule.SpriteData = undefined;
         const upload: UploadPass = app.graphics.begin_upload_pass();
-        try upload.upload_to_texture_no_type_check(rgba_bmp_surface.pixel_byte_slice(), .SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, .MAIN_UPLOAD_BUFFER);
-        try upload.upload_to_storage_buffer_no_type_check(Sprites.tex_coords[0..], .SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_texture_no_type_check(.SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, .MAIN_UPLOAD_BUFFER, rgba_bmp_surface.pixel_byte_slice());
+        try upload.upload_to_storage_buffer_no_type_check(.SPRITE_VERTEX_DATA, 0, .MAIN_UPLOAD_BUFFER, Sprites.tex_coords[0..]);
         const command: CommandBuffer = try upload.end_upload_pass_and_start_command_buffer(true);
-        const download: DownloadPass = try command.lock_command_buffer_and_begin_download_pass();
-        _ = try download.download_from_texture_no_type_check(.SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, verify_rgba_surface.pixel_byte_slice(), .MAIN_DOWNLOAD_BUFFER);
-        _ = try download.download_from_storage_buffer(.SPRITE_VERTEX_DATA, 0, @intCast(Sprites.tex_coords.len), verify_sprite_data[0..], .MAIN_DOWNLOAD_BUFFER);
+        const download: DownloadPass = try command.begin_download_pass();
+        _ = try download.download_from_texture_no_type_check(.SPRITE_TEX, .new(0, 0, 0), .new(@intCast(rgba_bmp_surface.size.x), @intCast(rgba_bmp_surface.size.y), 1), 0, 0, .MAIN_DOWNLOAD_BUFFER, verify_rgba_surface.pixel_byte_slice());
+        _ = try download.download_from_storage_buffer(.SPRITE_VERTEX_DATA, 0, @intCast(Sprites.tex_coords.len), .MAIN_DOWNLOAD_BUFFER, verify_sprite_data[0..]);
         try download.end_download_pass_submit_command_buffer_and_immedieately_wait_on_fence_to_complete_downloads();
         assert_with_reason(std.mem.eql(u8, rgba_bmp_surface.pixel_byte_slice(), verify_rgba_surface.pixel_byte_slice()), @src(), "tex data did not transfer correctly", .{});
         assert_with_reason(std.mem.eql(u8, std.mem.sliceAsBytes(verify_sprite_data[0..]), std.mem.sliceAsBytes(Sprites.tex_coords[0..])), @src(), "sprite data did not transfer correctly", .{});
     }
-
     {
         const stream = try SDL.IOStream.from_const_mem(Sounds.wav[0..Sounds.wav.len]);
         app.sounds = try stream.load_wav(true);
@@ -405,6 +401,10 @@ pub fn app_init(app_opq: ?*?*anyopaque, arg_count: c_int, arg_list: ?[*:null]?[*
 
     app.fully_initialized = true;
     errdefer comptime unreachable;
+
+    // const pos_type = GraphicsModule.VertexIn.SlotType(.VERTEX_POSITIONS);
+    // const pos_val: pos_type = std.mem.zeroes(pos_type);
+    // DEBUG_VAL_ADV("position type", pos_val, 16, .TYPE_NAME_NO_GENERICS, .TOTAL_OFFSET);
 
     return SDL.AppResult.CONTINUE;
 }
@@ -1208,30 +1208,42 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         }
         app.append_vertices(app.ball.box, app.ball.sprite, alloc);
         app.append_vertices(app.paddle.box, app.paddle.sprite, alloc);
-        DEBUG_VAL("vertex positions cpu", app.position_buffer.zig_slice_entire_const());
-        DEBUG_VAL("vertex sprite data cpu", app.sprite_idx_buffer.zig_slice_entire_const());
-        DEBUG_VAL("index data cpu", app.index_buffer.zig_slice_entire_const());
+        app.validate_position_buffer.grow_capacity_if_needed(app.position_buffer.get_len(), .GROW_EXACT_NEEDED, alloc);
+        app.validate_position_buffer.set_len(app.position_buffer.get_len());
+        app.validate_index_buffer.grow_capacity_if_needed(app.index_buffer.get_len(), .GROW_EXACT_NEEDED, alloc);
+        app.validate_index_buffer.set_len(app.index_buffer.get_len());
+        app.validate_sprite_idx_buffer.grow_capacity_if_needed(app.sprite_idx_buffer.get_len(), .GROW_EXACT_NEEDED, alloc);
+        app.validate_sprite_idx_buffer.set_len(app.sprite_idx_buffer.get_len());
         var upload = app.graphics.begin_upload_pass();
-        try upload.upload_to_index_buffer(app.index_buffer.zig_slice_entire_const(), .VERT_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
-        try upload.upload_to_vertex_buffer_no_type_check(app.position_buffer.zig_slice_entire_const(), .VERTEX_POSITIONS, 0, .MAIN_UPLOAD_BUFFER);
-        try upload.upload_to_vertex_buffer_no_type_check(app.sprite_idx_buffer.zig_slice_entire_const(), .SPRITE_VERTEX_INDEXES, 0, .MAIN_UPLOAD_BUFFER);
+        try upload.upload_to_index_buffer(.VERT_INDEXES, 0, .MAIN_UPLOAD_BUFFER, app.index_buffer.zig_slice_entire_const());
+        try upload.upload_to_vertex_buffer_no_type_check(.VERTEX_POSITIONS, 0, .MAIN_UPLOAD_BUFFER, app.position_buffer.zig_slice_entire_const());
+        try upload.upload_to_vertex_buffer_no_type_check(.SPRITE_VERTEX_INDEXES, 0, .MAIN_UPLOAD_BUFFER, app.sprite_idx_buffer.zig_slice_entire_const());
         var cmd: CommandBuffer = try upload.end_upload_pass_and_start_command_buffer(true);
-        var can_render: ?RenderPass = try cmd.begin_render_pass(&.{
-            ColorTarget{
-                .target = .window(.MAIN),
-                .clear_color = CLEAR_COLOR,
-                .load_op = .CLEAR,
+        const can_render: ?RenderPass = try cmd.begin_render_pass(
+            .MAIN_PIPELINE,
+            &.{
+                ColorTarget{
+                    .target = .window(.MAIN),
+                    .clear_color = CLEAR_COLOR,
+                    .load_op = .CLEAR,
+                },
             },
-        }, null);
-        if (can_render) |*render| {
-            var pipeline: RenderPassWithPipeline = render.begin_render_pipeline_pass(.MAIN_PIPELINE);
-            pipeline.bind_all_resources_and_push_all_uniforms(0, &.{});
-            pipeline.bind_index_buffer(.VERT_INDEXES, 0);
-            pipeline.draw_indexed_primitives(0, 0, app.index_buffer.get_len());
-            pipeline.end_pipeline_pass();
+            null,
+        );
+        if (can_render) |render| {
+            render.bind_all_resources_and_push_all_uniforms(0, &.{});
+            render.bind_index_buffer(.VERT_INDEXES, 0);
+            render.draw_indexed_primitives(0, 0, app.index_buffer.get_len());
             render.end_render_pass();
         }
-        try cmd.submit_commands();
+        const download = try cmd.begin_download_pass();
+        _ = try download.download_from_vertex_buffer_no_type_check(.VERTEX_POSITIONS, 0, @intCast(app.position_buffer.get_len()), .MAIN_DOWNLOAD_BUFFER, app.validate_position_buffer.zig_slice(0, app.position_buffer.get_len()));
+        _ = try download.download_from_vertex_buffer_no_type_check(.SPRITE_VERTEX_INDEXES, 0, @intCast(app.sprite_idx_buffer.get_len()), .MAIN_DOWNLOAD_BUFFER, app.validate_sprite_idx_buffer.zig_slice(0, app.sprite_idx_buffer.get_len()));
+        _ = try download.download_from_index_buffer_no_type_check(.VERT_INDEXES, 0, @intCast(app.index_buffer.get_len()), .MAIN_DOWNLOAD_BUFFER, app.validate_index_buffer.zig_slice(0, app.index_buffer.get_len()));
+        try download.end_download_pass_submit_command_buffer_and_immedieately_wait_on_fence_to_complete_downloads();
+        assert_with_reason(std.mem.eql(u8, std.mem.sliceAsBytes(app.position_buffer.zig_slice_entire_const()), std.mem.sliceAsBytes(app.validate_position_buffer.zig_slice_entire_const())), @src(), "vert position data did not transfer correctly", .{});
+        assert_with_reason(std.mem.eql(u8, std.mem.sliceAsBytes(app.sprite_idx_buffer.zig_slice_entire_const()), std.mem.sliceAsBytes(app.validate_sprite_idx_buffer.zig_slice_entire_const())), @src(), "vert sprite idx data did not transfer correctly", .{});
+        assert_with_reason(std.mem.eql(u8, std.mem.sliceAsBytes(app.index_buffer.zig_slice_entire_const()), std.mem.sliceAsBytes(app.validate_index_buffer.zig_slice_entire_const())), @src(), "vert index data did not transfer correctly", .{});
     }
 
     app.timekeeper.produce(SDL.Time.get_performance_counter());
