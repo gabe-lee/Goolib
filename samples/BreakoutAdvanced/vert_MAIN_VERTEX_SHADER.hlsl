@@ -48,19 +48,9 @@ vert_to_frag_PACKED main(vertex_in_PACKED pck) {
     vertex_in vert_in = unpack_vertex_input(pck);
     vert_to_frag vert_out;
     float2 viewport_pos = vert_in.position - camera_offset;
-    float2 ndc_pos = ((viewport_pos / target_size) * 2.0f) - 1.0f;
+    float2 ndc_pos = float2(((viewport_pos.x / target_size.x) * 2.0f) - 1.0f, 1.0f - ((viewport_pos.y / target_size.y) * 2.0f));
     vert_out.vert_pos = float4(ndc_pos, 0.0f, 1.0f);
     SPRITE_VERTEX_DATA sprite_tex_pos = SPRITE_VERTEX_DATA_BUFFER[vert_in.sprite_vertex];
     vert_out.tex_pos = sprite_tex_pos.texture_uv;
     return pack_vertex_output(vert_out);
 }
-
-// vert_to_frag_PACKED main(uint vert_id : SV_VertexID) {
-//     vert_to_frag_PACKED pck;
-    
-//     // Generate a fullscreen triangle purely from the vertex ID (0, 1, 2)
-//     float2 grid = float2((vert_id << 1) & 2, vert_id & 2);
-//     pck.reg0 = float4(grid * float2(2.0f, -2.0f) + float2(-1.0f, 1.0f), 0.0f, 1.0f);
-//     pck.reg1 = float2(0.0f, 0.0f);
-//     return pck;
-// }

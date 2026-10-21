@@ -4725,6 +4725,8 @@ pub fn GraphicsController(
                     controller.indirect_draw_buffer_byte_caps[buf_idx] = sdl_info.size;
                 }
             }
+            // UNIFORMS
+            controller.uniforms = options.uniforms_init;
             // GROW MODES
             controller.cycle_unmapped_upload_buffers = options.cycle_unmapped_transfer_buffers_on_first_map_of_pass;
             controller.index_buffer_grow_mode = options.index_buffer_grow_mode;

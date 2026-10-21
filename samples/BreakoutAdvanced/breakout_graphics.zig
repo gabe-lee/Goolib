@@ -96,7 +96,15 @@ pub const RENDER_PIPELINE_NAMES = enum(u8) {
 pub const MAIN_PIPE_COLOR_TARGETS = [_]SDL.GPU_ColorTargetDescription{
     SDL.GPU_ColorTargetDescription{
         .format = .B8G8R8A8_UNORM,
-        .blend_state = .{},
+        .blend_state = .{
+            .enable_blend = true,
+            .color_blend_op = .ADD,
+            .alpha_blend_op = .ADD,
+            .src_color_blendfactor = .SRC_ALPHA,
+            .dst_color_blendfactor = .ONE_MINUS_SRC_ALPHA,
+            .src_alpha_blendfactor = .SRC_ALPHA,
+            .dst_alpha_blendfactor = .ONE_MINUS_SRC_ALPHA,
+        },
     },
 };
 pub const VertexIn = ShaderUtilsModule.VertexShaderInputStruct(
