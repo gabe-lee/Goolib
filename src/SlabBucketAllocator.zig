@@ -48,7 +48,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 
 const GROW_BUCKET_AMOUNT = 8;
-const NO_ALLOC = void{};
+const NO_ALLOC = {};
 
 pub const ThreadingMode = enum(u8) {
     single_threaded,

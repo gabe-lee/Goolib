@@ -255,7 +255,7 @@
 //     PER_PARAMETER_INDEX_GENERATION_INT_POWER: PowerOf2,
 
 //     pub inline fn no_index_generations() GenerationSetting {
-//         return GenerationSetting{ .NO_INDEX_GENERATIONS = void{} };
+//         return GenerationSetting{ .NO_INDEX_GENERATIONS = {} };
 //     }
 //     pub inline fn per_parameter_index_generation_int_power(power: PowerOf2) GenerationSetting {
 //         return GenerationSetting{ .PER_PARAMETER_INDEX_GENERATION_INT_POWER = power };
@@ -567,9 +567,9 @@
 //             pub const UpdateTriggerLength: type = update_length_int;
 //             pub const PayloadId: type = func_payload_int;
 //             pub const META_FREE_LEN = if (INCLUDE_META) PowerOf2.align_value_forward(PowerOf2.USIZE_POWER, num_cast(NUM_CATEGORIES_NO_META, usize)) >> PowerOf2.USIZE_BITS_SHIFT;
-//             pub var meta_memory: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]Index else void = if (INCLUDE_META) @splat(0) else void{};
-//             pub var meta_dependants: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]UpdateSlice else void = if (INCLUDE_META) @splat(.{}) else void{};
-//             pub var meta_free: if (INCLUDE_META) [META_FREE_LEN]usize else void = if (INCLUDE_META) @splat(0) else void{};
+//             pub var meta_memory: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]Index else void = if (INCLUDE_META) @splat(0) else {};
+//             pub var meta_dependants: if (INCLUDE_META) [NUM_CATEGORIES_NO_META]UpdateSlice else void = if (INCLUDE_META) @splat(.{}) else {};
+//             pub var meta_free: if (INCLUDE_META) [META_FREE_LEN]usize else void = if (INCLUDE_META) @splat(0) else {};
 //             pub var meta_meta = if (INCLUDE_META) build: {
 //                 const blocks_needed = MetaList.blocks_needed(NUM_CATEGORIES_NO_META);
 //                 var out_mem: [blocks_needed]usize = @splat(0);
@@ -592,7 +592,7 @@
 //                     bit_list.set(n, fill);
 //                 }
 //                 break :build out_mem;
-//             } else void{};
+//             } else {};
 //             pub var categories: [NUM_CATEGORIES]Category = @splat(Category{});
 
 //             // UPDATE QUEUE
@@ -737,11 +737,11 @@
 //             };
 //             pub const FunctionDependants = UpdatePackageNoFunc;
 //             pub const FuncDependantList = List(FunctionDependants);
-//             pub var func_dependants: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]FuncDependantList else void = if (TRACK_FUNC_DEPENDANTS) @splat(.{}) else void{};
-//             pub var func_dep_allocs: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]Allocator else void = if (TRACK_FUNC_DEPENDANTS) @splat(DummyAllocator.allocator_panic_free_noop) else void{};
+//             pub var func_dependants: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]FuncDependantList else void = if (TRACK_FUNC_DEPENDANTS) @splat(.{}) else {};
+//             pub var func_dep_allocs: if (TRACK_FUNC_DEPENDANTS) [NUM_FUNCS]Allocator else void = if (TRACK_FUNC_DEPENDANTS) @splat(DummyAllocator.allocator_panic_free_noop) else {};
 //             pub var update_funcs: [NUM_FUNCS]*const UpdateFunction = undefined;
 //             pub var funcs_init: [NUM_FUNCS]bool = @splat(false);
-//             pub var func_gens: if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) [NUM_FUNCS]GenId else void = if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) @splat(0) else void{};
+//             pub var func_gens: if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) [NUM_FUNCS]GenId else void = if (USE_GENERATIONS and SETTINGS.ALLOW_FUNCTION_DELETION) @splat(0) else {};
 
 //             // DELETE QUEUE
 //             pub const LARGEST_TYPE_SIZE = largest_category_type_size_const;
@@ -1066,7 +1066,7 @@
 //                 const DEFS = @TypeOf(output_defs);
 //                 const INS = @TypeOf(inputs);
 //                 INTERNAL.assert_with_reason(Types.type_is_struct(INS), @src(), "`inputs` must be a struct type where each field is a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)`, got type `{s}`", .{@typeName(INS)});
-//                 INTERNAL.assert_with_reason(@typeInfo(INS).@"struct".fields.len <= INTERNAL.MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum number possible ({d})", .{ @typeInfo(INS).@"struct".fields.len, INTERNAL.MAX_INPUTS });
+//                 INTERNAL.assert_with_reason(@typeInfo(INS).@"struct".field_names.len <= INTERNAL.MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum number possible ({d})", .{ @typeInfo(INS).@"struct".field_names.len, INTERNAL.MAX_INPUTS });
 //                 INTERNAL.assert_with_reason(Types.type_is_struct_with_all_fields_same_type(DEFS, ParamReadOnlyDef), @src(), "`output_defs` must be a struct type where each field is a `ParamReadOnlyDef`, got type `{s}`", .{@typeName(DEFS)});
 //                 INTERNAL.assert_with_reason(Types.type_is_struct(OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` must be a struct type, got type `{s}`", .{@typeName(OUTPUT_STRUCT)});
 //                 INTERNAL.assert_with_reason(Types.two_structs_have_exact_same_field_names_and_order(DEFS, OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` and the type of `output_defs` must have the same number of fields, and all fields have the same names in the same order", .{});
@@ -1074,8 +1074,8 @@
 //                     const cat_idx = @intFromEnum(@field(output_defs, def_field.name).category);
 //                     INTERNAL.assert_with_reason(IDForType(@field(out_field.type, "TYPE")) == CATEGORY_TYPE_IDS[cat_idx], @src(), "field `{s}` on output struct must be type `ParamReadOnly(<category type for category {s}>)`, got type `{s}`", .{ def_field.name, name_cast(cat_idx, CategoryName), @typeName(def_field.type) });
 //                 }
-//                 const inputs_flat: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = build: {
-//                     var flat: [@typeInfo(INS).@"struct".fields.len]ParamReadOnlyOpaque = undefined;
+//                 const inputs_flat: [@typeInfo(INS).@"struct".field_names.len]ParamReadOnlyOpaque = build: {
+//                     var flat: [@typeInfo(INS).@"struct".field_names.len]ParamReadOnlyOpaque = undefined;
 //                     inline for (@typeInfo(INS).@"struct".fields, 0..) |field, f| {
 //                         assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` on the input struct is not a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)` (missing declaration `const TYPE: type = <param type>`)", .{field.name});
 //                         assert_with_reason(field.type == ParamReadOnly(@field(field.type, "TYPE")) or field.type == ParamReadWrite(@field(field.type, "TYPE")) or field.type == ParamUpdateInput(@field(field.type, "TYPE")), @src(), "field `{s}` on the input struct is not a `ParamReadOnly(T)` or `ParamReadWrite(T)` or `ParamUpdateInput(T)`, got type `{s}`", .{ field.name, @typeName(field.type) });
@@ -1083,15 +1083,15 @@
 //                     }
 //                     break :build flat;
 //                 };
-//                 const defs_flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyDef = build: {
-//                     var flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyDef = undefined;
+//                 const defs_flat: [@typeInfo(DEFS).@"struct".field_names.len]ParamReadOnlyDef = build: {
+//                     var flat: [@typeInfo(DEFS).@"struct".field_names.len]ParamReadOnlyDef = undefined;
 //                     inline for (@typeInfo(DEFS).@"struct".fields, 0..) |field, f| {
 //                         assert_with_reason(field.type == ParamReadOnlyDef, @src(), "field `{s}` on the output def struct is not a `ParamReadOnlyDef`", .{field.name});
 //                         flat[f] = @field(output_defs, field.name);
 //                     }
 //                     break :build flat;
 //                 };
-//                 var outputs_flat: [@typeInfo(DEFS).@"struct".fields.len]ParamReadOnlyOpaque = undefined;
+//                 var outputs_flat: [@typeInfo(DEFS).@"struct".field_names.len]ParamReadOnlyOpaque = undefined;
 //                 create_new_derived_param_set_internal(update_function, inputs_flat[0..], defs_flat[0..], outputs_flat[0..], _mutex_key, false);
 //                 var out_struct: OUTPUT_STRUCT = undefined;
 //                 inline for (@typeInfo(OUTPUT_STRUCT).@"struct".fields, 0..) |field, f| {
@@ -1551,7 +1551,7 @@
 //         ///   - each field is a `ParamReadOnly(<param type>)`
 //         pub fn make_read_only_param_struct(read_only_params_opaque: []const ParamReadOnlyOpaque, comptime STRUCT: type) STRUCT {
 //             INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `ParamReadOnly(T)`, got type `{s}`", .{@typeName(STRUCT)});
-//             INTERNAL.assert_with_reason(read_only_params_opaque.len == @typeInfo(STRUCT).@"struct".fields.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_only_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".fields.len, read_only_params_opaque.len });
+//             INTERNAL.assert_with_reason(read_only_params_opaque.len == @typeInfo(STRUCT).@"struct".field_names.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_only_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".field_names.len, read_only_params_opaque.len });
 //             var object: STRUCT = undefined;
 //             inline for (@typeInfo(STRUCT).@"struct".fields, 0..) |field, f| {
 //                 INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
@@ -1569,7 +1569,7 @@
 //         ///   - each field is a `ParamReadWrite(<param type>)`
 //         pub fn make_read_write_param_struct(read_write_params_opaque: []const ParamReadWriteOpaque, comptime STRUCT: type) STRUCT {
 //             INTERNAL.assert_with_reason(Types.type_is_struct(STRUCT), @src(), "type `STRUCT` must be a struct type where each field is a `ParamReadOnly(T)`, got type `{s}`", .{@typeName(STRUCT)});
-//             INTERNAL.assert_with_reason(read_write_params_opaque.len == @typeInfo(STRUCT).@"struct".fields.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".fields.len, read_write_params_opaque.len });
+//             INTERNAL.assert_with_reason(read_write_params_opaque.len == @typeInfo(STRUCT).@"struct".field_names.len, @src(), "type `STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(STRUCT).@"struct".field_names.len, read_write_params_opaque.len });
 //             var object: STRUCT = undefined;
 //             inline for (@typeInfo(STRUCT).@"struct".fields, 0..) |field, f| {
 //                 INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
@@ -1650,7 +1650,7 @@
 //             ///   - each field is a `ParamUpdateInput(<param type>)`
 //             pub fn make_input_struct(self: UpdateInterface, comptime IN_STRUCT: type) IN_STRUCT {
 //                 INTERNAL.assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type where each field is a `ParamUpdateInput(T)`, got type `{s}`", .{@typeName(IN_STRUCT)});
-//                 INTERNAL.assert_with_reason(self.inputs.len == @typeInfo(IN_STRUCT).@"struct".fields.len, @src(), "type `IN_STRUCT` must have exactly the same number of fields as `self.inputs.len`, got fields {d} != inputs {d}", .{ @typeInfo(IN_STRUCT).@"struct".fields.len, self.inputs.len });
+//                 INTERNAL.assert_with_reason(self.inputs.len == @typeInfo(IN_STRUCT).@"struct".field_names.len, @src(), "type `IN_STRUCT` must have exactly the same number of fields as `self.inputs.len`, got fields {d} != inputs {d}", .{ @typeInfo(IN_STRUCT).@"struct".field_names.len, self.inputs.len });
 //                 var object: IN_STRUCT = undefined;
 //                 inline for (@typeInfo(IN_STRUCT).@"struct".fields, 0..) |field, f| {
 //                     INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid input parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});
@@ -1668,7 +1668,7 @@
 //             ///   - each field is a `ParamUpdateOutput(<param type>)`
 //             pub fn make_output_struct(self: UpdateInterface, comptime OUT_STRUCT: type) OUT_STRUCT {
 //                 INTERNAL.assert_with_reason(Types.type_is_struct(OUT_STRUCT), @src(), "type `OUT_STRUCT` must be a struct type where each field is a `ParamUpdateOutput(T)`, got type `{s}`", .{@typeName(OUT_STRUCT)});
-//                 INTERNAL.assert_with_reason(self.outputs.len == @typeInfo(OUT_STRUCT).@"struct".fields.len, @src(), "type `OUT_STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(OUT_STRUCT).@"struct".fields.len, self.outputs.len });
+//                 INTERNAL.assert_with_reason(self.outputs.len == @typeInfo(OUT_STRUCT).@"struct".field_names.len, @src(), "type `OUT_STRUCT` must have exactly the same number of fields as `read_write_params_opaque.len`, got fields {d} != inputs {d}", .{ @typeInfo(OUT_STRUCT).@"struct".field_names.len, self.outputs.len });
 //                 var object: OUT_STRUCT = undefined;
 //                 inline for (@typeInfo(OUT_STRUCT).@"struct".fields, 0..) |field, f| {
 //                     INTERNAL.assert_with_reason(Types.type_has_decl_with_type(field.type, "TYPE", type), @src(), "field `{s}` is not a valid output parameter field (missing const declaration `pub const TYPE = <param type>;`)", .{field.name});

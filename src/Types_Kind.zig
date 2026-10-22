@@ -43,34 +43,34 @@ const Type = std.builtin.Type;
 const TypeId = std.builtin.TypeId;
 /// This is an alternative representation of `std.builtin.TypeId`
 pub const Kind = enum(std.meta.Tag(TypeId)) {
-    TYPE = @intFromEnum(TypeId.type),
-    VOID = @intFromEnum(TypeId.void),
-    BOOL = @intFromEnum(TypeId.bool),
-    NO_RETURN = @intFromEnum(TypeId.noreturn),
-    INT = @intFromEnum(TypeId.int),
-    FLOAT = @intFromEnum(TypeId.float),
-    POINTER = @intFromEnum(TypeId.pointer),
-    ARRAY = @intFromEnum(TypeId.array),
-    STRUCT = @intFromEnum(TypeId.@"struct"),
-    COMPTIME_FLOAT = @intFromEnum(TypeId.comptime_float),
-    COMPTIME_INT = @intFromEnum(TypeId.comptime_int),
-    UNDEFINED = @intFromEnum(TypeId.undefined),
-    NULL = @intFromEnum(TypeId.null),
-    OPTIONAL = @intFromEnum(TypeId.optional),
-    ERROR_UNION = @intFromEnum(TypeId.error_union),
-    ERROR_SET = @intFromEnum(TypeId.error_set),
-    ENUM = @intFromEnum(TypeId.@"enum"),
-    UNION = @intFromEnum(TypeId.@"union"),
-    FUNCTION = @intFromEnum(TypeId.@"fn"),
-    OPAQUE = @intFromEnum(TypeId.@"opaque"),
-    FRAME = @intFromEnum(TypeId.frame),
-    ANYFRAME = @intFromEnum(TypeId.@"anyframe"),
-    VECTOR = @intFromEnum(TypeId.vector),
-    ENUM_LITERAL = @intFromEnum(TypeId.enum_literal),
+    TYPE = @backingInt(TypeId.type),
+    VOID = @backingInt(TypeId.void),
+    BOOL = @backingInt(TypeId.bool),
+    NO_RETURN = @backingInt(TypeId.noreturn),
+    INT = @backingInt(TypeId.int),
+    FLOAT = @backingInt(TypeId.float),
+    POINTER = @backingInt(TypeId.pointer),
+    ARRAY = @backingInt(TypeId.array),
+    STRUCT = @backingInt(TypeId.@"struct"),
+    COMPTIME_FLOAT = @backingInt(TypeId.comptime_float),
+    COMPTIME_INT = @backingInt(TypeId.comptime_int),
+    UNDEFINED = @backingInt(TypeId.undefined),
+    NULL = @backingInt(TypeId.null),
+    OPTIONAL = @backingInt(TypeId.optional),
+    ERROR_UNION = @backingInt(TypeId.error_union),
+    ERROR_SET = @backingInt(TypeId.error_set),
+    ENUM = @backingInt(TypeId.@"enum"),
+    UNION = @backingInt(TypeId.@"union"),
+    FUNCTION = @backingInt(TypeId.@"fn"),
+    OPAQUE = @backingInt(TypeId.@"opaque"),
+    FRAME = @backingInt(TypeId.frame),
+    ANYFRAME = @backingInt(TypeId.@"anyframe"),
+    VECTOR = @backingInt(TypeId.vector),
+    ENUM_LITERAL = @backingInt(TypeId.enum_literal),
 
     pub inline fn get_kind(comptime T: type) Kind {
-        const int = @intFromEnum(@typeInfo(T));
-        return @enumFromInt(int);
+        const int = @backingInt(@typeInfo(T));
+        return @fromBackingInt(@intCast(int));
     }
     pub inline fn type_is_same_kind(comptime K: Kind, comptime T: type) bool {
         return get_kind(T) == K;
@@ -201,13 +201,13 @@ pub const KindInfo = union(Kind) {
     ENUM_LITERAL: void,
 
     pub inline fn kind(comptime K: KindInfo) Kind {
-        return @enumFromInt(@intFromEnum(K));
+        return @fromBackingInt(@intCast(@backingInt(K)));
     }
     pub inline fn get_kind_info(comptime T: type) KindInfo {
         const INFO = comptime @typeInfo(T);
-        const int = comptime @intFromEnum(@typeInfo(T));
-        const id_tag: TypeId = comptime @enumFromInt(int);
-        const kind_tag: Kind = comptime @enumFromInt(int);
+        const int = comptime @backingInt(@typeInfo(T));
+        const id_tag: TypeId = comptime @fromBackingInt(@intCast(int));
+        const kind_tag: Kind = comptime @fromBackingInt(@intCast(int));
         return @unionInit(KindInfo, @tagName(kind_tag), @field(INFO, @tagName(id_tag)));
     }
     pub inline fn type_is_same_kind(comptime K: KindInfo, comptime T: type) bool {
@@ -345,13 +345,13 @@ pub const KindInfo = union(Kind) {
     pub inline fn field_count(comptime K: KindInfo) usize {
         switch (K) {
             .STRUCT => |S| {
-                return S.fields.len;
+                return S.field_names.len;
             },
             .UNION => |U| {
-                return U.fields.len;
+                return U.field_names.len;
             },
             .ENUM => |E| {
-                return E.fields.len;
+                return E.field_names.len;
             },
             else => assert_unreachable(@src(), "kind was not a struct, union, or enum, has no field count, got kind `{s}`", .{@tagName(K)}),
         }

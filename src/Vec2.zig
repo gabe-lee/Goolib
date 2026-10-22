@@ -51,7 +51,7 @@ pub const Axis = enum(u1) {
     Y = 1,
 
     pub fn opposite(self: Axis) Axis {
-        return @enumFromInt(@intFromEnum(self) ^ @as(u1, 1));
+        return @fromBackingInt(@intCast(@backingInt(self) ^ @as(u1, 1)));
     }
     pub fn OPPOSITE(comptime self: Axis) Axis {
         switch (comptime self) {
@@ -129,16 +129,19 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub inline fn get(self: Vec2, comptime AXIS: Axis) T {
-            return self.flat()[@intFromEnum(AXIS)];
+            return self.to_vec()[@backingInt(AXIS)];
         }
         pub inline fn set(self: *Vec2, comptime AXIS: Axis, val: T) void {
-            var f = self.flat();
-            f[@intFromEnum(AXIS)] = val;
-            self.* = @bitCast(f);
+            var f = self.to_vec();
+            f[@backingInt(AXIS)] = val;
+            self.* = .from_vec(f);
         }
 
-        pub inline fn flat(self: Vec2) VEC {
-            return @bitCast(self);
+        pub inline fn to_vec(self: Vec2) VEC {
+            return .{ self.x, self.y };
+        }
+        pub inline fn from_vec(vec: VEC) Vec2 {
+            return .{ .x = vec[0], .y = vec[1] };
         }
 
         pub fn change_component_type(self: Vec2, comptime NEW_T: type) define_vec2_type(NEW_T) {
@@ -154,31 +157,31 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn swizzle(self: Vec2, new_x: Axis, new_y: Axis) Vec2 {
-            const vec = self.flat();
-            return Vec2{ .x = vec[@intFromEnum(new_x)], .y = vec[@intFromEnum(new_y)] };
+            const vec = self.to_vec();
+            return Vec2{ .x = vec[@backingInt(new_x)], .y = vec[@backingInt(new_y)] };
         }
 
         pub fn inverse(self: Vec2) Vec2 {
-            return @bitCast(ONE.flat() / self.flat());
+            return .from_vec(ONE.to_vec() / self.to_vec());
         }
 
         pub fn ceil(self: Vec2) Vec2 {
             if (IS_INT) return self;
-            return @bitCast(@ceil(self.flat()));
+            return .from_vec(@ceil(self.to_vec()));
         }
 
         pub fn floor(self: Vec2) Vec2 {
             if (IS_INT) return self;
-            return @bitCast(@floor(self.flat()));
+            return .from_vec(@floor(self.to_vec()));
         }
 
         pub fn round(self: Vec2) Vec2 {
             if (IS_INT) return self;
-            return @bitCast(@round(self.flat()));
+            return .from_vec(@round(self.to_vec()));
         }
 
         pub fn dot_product(self: Vec2, other: Vec2) T {
-            const products = self.flat() * other.flat();
+            const products = self.to_vec() * other.to_vec();
             return @reduce(.Add, products);
         }
         pub inline fn dot(self: Vec2, other: Vec2) T {
@@ -203,26 +206,26 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn add(self: Vec2, other: Vec2) Vec2 {
-            return @bitCast(self.flat() + other.flat());
+            return .from_vec(self.to_vec() + other.to_vec());
         }
 
         pub fn subtract(self: Vec2, other: Vec2) Vec2 {
-            return @bitCast(self.flat() - other.flat());
+            return .from_vec(self.to_vec() - other.to_vec());
         }
 
         pub fn multiply(self: Vec2, other: Vec2) Vec2 {
-            return @bitCast(self.flat() * other.flat());
+            return .from_vec(self.to_vec() * other.to_vec());
         }
 
         pub fn divide(self: Vec2, other: Vec2) Vec2 {
-            assert_with_reason(!@reduce(.Or, other.flat() == ZERO.flat()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other});
-            return @bitCast(self.flat() / other.flat());
+            assert_with_reason(!@reduce(.Or, other.to_vec() == ZERO.to_vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other});
+            return .from_vec(self.to_vec() / other.to_vec());
         }
 
         pub fn scale(self: Vec2, val: anytype) Vec2 {
             const v = real_cast(val);
             const val_vec: @Vector(LEN, @TypeOf(v)) = @splat(val);
-            return @bitCast(MathX.upgrade_multiply_out(self.flat(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_multiply_out(self.to_vec(), val_vec, VEC));
         }
         pub fn inverse_scale(self: Vec2, val: anytype) Vec2 {
             if (@TypeOf(val) == bool) {
@@ -232,7 +235,7 @@ pub fn define_vec2_type(comptime T: type) type {
             }
             const v = real_cast(val);
             const val_vec: @Vector(LEN, @TypeOf(v)) = @splat(v);
-            return @bitCast(MathX.upgrade_divide_out(self.flat(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_divide_out(self.to_vec(), val_vec, VEC));
         }
 
         pub fn add_scale(self: Vec2, add_vec: Vec2, scale_add_vec_by: anytype) Vec2 {
@@ -244,14 +247,14 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn squared(self: Vec2) Vec2 {
-            return @bitCast(self.flat() * self.flat());
+            return .from_vec(self.to_vec() * self.to_vec());
         }
 
         pub fn component_sum(self: Vec2) T {
-            return @reduce(.Add, self.flat());
+            return @reduce(.Add, self.to_vec());
         }
         pub fn component_mult(self: Vec2) T {
-            return @reduce(.Mul, self.flat());
+            return @reduce(.Mul, self.to_vec());
         }
 
         pub fn distance_to(self: Vec2, other: Vec2) T {
@@ -276,13 +279,13 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn length_using_squares(self_squared: Vec2) T {
-            assert_with_reason(@reduce(.And, self_squared.flat() >= ZERO.flat()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
             const sum = self_squared.component_sum();
             return num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
         }
 
         pub fn normalize(self: Vec2) Vec2 {
-            assert_with_reason(@reduce(.Or, self.flat() != ZERO.flat()), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
+            assert_with_reason(@reduce(.Or, self.to_vec() != ZERO.to_vec()), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
             const len = self.length();
             return self.inverse_scale(len);
         }
@@ -293,14 +296,14 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn normalize_using_squares(self: Vec2, self_squared: Vec2) Vec2 {
-            assert_with_reason(@reduce(.And, self_squared.flat() >= ZERO.flat()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
             const sum = self_squared.component_sum();
             const len = num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
             return self.inverse_scale(len);
         }
 
         pub fn normalize_may_be_zero(self: Vec2, comptime zero_behavior: NormalizeZero) Vec2 {
-            if (@reduce(.And, self.flat() == ZERO.flat())) {
+            if (@reduce(.And, self.to_vec() == ZERO.to_vec())) {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
@@ -397,10 +400,10 @@ pub fn define_vec2_type(comptime T: type) type {
                 const per = real_cast(percent);
                 break :get @as(@Vector(LEN, @TypeOf(per)), @splat(per));
             };
-            const nums = MathX.upgrade_3_numbers_for_math(p1.flat(), p2.flat(), delta);
+            const nums = MathX.upgrade_3_numbers_for_math(p1.to_vec(), p2.to_vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
             const result = @mulAdd(TU, nums.c, nums.b, @mulAdd(TU, -nums.c, nums.a, nums.a));
-            return @bitCast(num_cast(result, VEC));
+            return .from_vec(num_cast(result, VEC));
         }
 
         pub fn lerp(p1: Vec2, p2: Vec2, percent: anytype) Vec2 {
@@ -858,19 +861,19 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn as_3x1_matrix_column_fill_1(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 1 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_1x3_matrix_row_fill_1(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 1, 3, .ROW_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 1 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_3x1_matrix_column_fill_0(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 0 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_1x3_matrix_row_fill_0(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 1, 3, .ROW_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 0 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
 
         pub fn apply_affine_matrix_transform(self: Vec2, matrix: anytype) Vec2 {

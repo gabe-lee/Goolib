@@ -45,9 +45,9 @@ pub fn define_generational_id_type(comptime gen_bits: comptime_int, comptime id_
         raw: Raw,
 
         const Self = @This();
-        pub const Gen = meta.Int(.unsigned, gen_bits);
-        pub const Id = meta.Int(.unsigned, id_bits);
-        pub const Raw = meta.Int(.unsigned, total_bits);
+        pub const Gen = @Int(.unsigned, gen_bits);
+        pub const Id = @Int(.unsigned, id_bits);
+        pub const Raw = @Int(.unsigned, total_bits);
 
         pub const GEN_CLEAR: Raw = math.maxInt(Id);
         pub const GEN_ONE: Raw = 1 << id_bits;

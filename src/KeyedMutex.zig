@@ -45,11 +45,11 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
         const SelfMutex = @This();
 
         mutex: if (ENABLE) std.Thread.Mutex else void = .{},
-        key_owner: if (ENABLE and SHOULD_ASSERT) usize else void = if (ENABLE and SHOULD_ASSERT) 0 else void{},
-        thread_locked_on: if (ENABLE and SHOULD_ASSERT) u32 else void = if (ENABLE and SHOULD_ASSERT) 0 else void{},
+        key_owner: if (ENABLE and SHOULD_ASSERT) usize else void = if (ENABLE and SHOULD_ASSERT) 0 else {},
+        thread_locked_on: if (ENABLE and SHOULD_ASSERT) u32 else void = if (ENABLE and SHOULD_ASSERT) 0 else {},
 
-        var thread_id_counter: if (ENABLE and SHOULD_ASSERT) u32 else void = if (ENABLE and SHOULD_ASSERT) 1 else void{};
-        threadlocal var this_thread_id: if (ENABLE and SHOULD_ASSERT) ?u32 else void = if (ENABLE and SHOULD_ASSERT) null else void{};
+        var thread_id_counter: if (ENABLE and SHOULD_ASSERT) u32 else void = if (ENABLE and SHOULD_ASSERT) 1 else {};
+        threadlocal var this_thread_id: if (ENABLE and SHOULD_ASSERT) ?u32 else void = if (ENABLE and SHOULD_ASSERT) null else {};
 
         pub fn lock(self: *SelfMutex) Key {
             if (ENABLE) {
@@ -66,7 +66,7 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
                 }
                 return Key{
                     .ptr = self,
-                    .id = if (SHOULD_ASSERT) self.key_owner else void{},
+                    .id = if (SHOULD_ASSERT) self.key_owner else {},
                 };
             } else {
                 return .{};
@@ -86,7 +86,7 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
                     }
                     return Key{
                         .ptr = self,
-                        .id = if (SHOULD_ASSERT) self.key_owner else void{},
+                        .id = if (SHOULD_ASSERT) self.key_owner else {},
                     };
                 }
                 return null;
@@ -139,8 +139,8 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
         };
 
         pub const Key = struct {
-            ptr: if (ENABLE) ?*SelfMutex else void = if (ENABLE) null else void{},
-            id: if (ENABLE and SHOULD_ASSERT) usize else void = if (ENABLE and SHOULD_ASSERT) 0 else void{},
+            ptr: if (ENABLE) ?*SelfMutex else void = if (ENABLE) null else {},
+            id: if (ENABLE and SHOULD_ASSERT) usize else void = if (ENABLE and SHOULD_ASSERT) 0 else {},
 
             /// Returns the new key (or same if key already has the same mutex pointer), and a bool
             /// descibing whether the lock was needed

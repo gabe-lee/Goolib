@@ -210,7 +210,7 @@ pub const Count = union(enum) {
     MIN_MAX: struct { usize, usize },
 
     pub fn all_items() Count {
-        return Count{ .ALL = void{} };
+        return Count{ .ALL = {} };
     }
     pub fn exactly_one_item() Count {
         return Count{ .EXACT = 1 };

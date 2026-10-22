@@ -146,11 +146,11 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
         tick_accumulator: if (CONFIG.TICK_ACCUMULATOR_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.TICK_ACCUMULATOR_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
         recent_deltas_list: if (CONFIG.RECENT_DELTAS_LIST_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.TIME_AVERAGER_LIST_LEN_IF_NOT_PROVIDED) = if (CONFIG.RECENT_DELTAS_LIST_GETSET_TYPE != null) undefined else LocalGetSetArray(CONFIG.INTEGER_TYPE, CONFIG.TIME_AVERAGER_LIST_LEN_IF_NOT_PROVIDED){ .arr = @splat(0) },
         recent_deltas_idx: CONFIG.INTEGER_TYPE = 0,
-        locked_mode_min_updates_remaining: if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) usize else void = if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) 0 else void{},
+        locked_mode_min_updates_remaining: if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) usize else void = if (!CONFIG.LOCKED_MODE_MIN_UPDATES_PER_FRAME_IS_ALWAYS_1) 0 else {},
         recent_deltas_average_residual: if (CONFIG.RECENT_DELTAS_AVERAGE_RESIDUAL_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.RECENT_DELTAS_AVERAGE_RESIDUAL_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
         recent_deltas_sum: if (CONFIG.RECENT_DELTAS_SUM_GETSET_TYPE) |TYPE| TYPE.unrwap_type() else LocalGetSet(CONFIG.INTEGER_TYPE) = if (CONFIG.RECENT_DELTAS_SUM_GETSET_TYPE != null) undefined else LocalGetSet(CONFIG.INTEGER_TYPE){ .val = 0 },
         should_resync: bool = false,
-        debug_info: if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo else void = if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo{} else void{},
+        debug_info: if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo else void = if (CONFIG.INCLUDE_DEBUG_INFO) DebugInfo{} else {},
 
         pub const DebugInfo = struct {
             num_times_time_added: u64 = 0,
@@ -309,7 +309,7 @@ pub fn FrameTimingManager(comptime CONFIG: FrameTimingManagerConfig) type {
             self.recent_deltas_sum.set(new_average_sum);
             self.recent_deltas_idx += 1;
             self.recent_deltas_idx %= recent_deltas_list_len;
-            const old_delta_ticks = if (CONFIG.INCLUDE_DEBUG_INFO) delta_ticks else void{};
+            const old_delta_ticks = if (CONFIG.INCLUDE_DEBUG_INFO) delta_ticks else {};
             delta_ticks = new_average_sum / recent_deltas_list_len;
             var new_residual = self.recent_deltas_average_residual.get();
             new_residual += new_average_sum % recent_deltas_list_len;

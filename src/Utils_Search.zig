@@ -130,7 +130,7 @@
 // pub fn ResultItem(comptime DATA_IDX: type, comptime SEARCH_ELEM: type, comptime INCLUDE: ResultsIncludeMode) type {
 //     return struct {
 //         data_idx: DATA_IDX = undefined,
-//         search_val: if (INCLUDE == .IDX_AND_SEARCH_VAL) SEARCH_ELEM else void = if (INCLUDE == .IDX_AND_SEARCH_VAL) undefined else void{},
+//         search_val: if (INCLUDE == .IDX_AND_SEARCH_VAL) SEARCH_ELEM else void = if (INCLUDE == .IDX_AND_SEARCH_VAL) undefined else {},
 
 //         pub fn new(data_idx: DATA_IDX, search_val: SEARCH_ELEM) @This() {
 //             var this = @This(){
@@ -186,7 +186,7 @@
 //             data_start: self.DATA_CONTAINER_IDX = 0,
 //             data_end_exclusive: self.DATA_CONTAINER_IDX,
 //             search_params: self.SEARCH_PARAM_CONTAINER,
-//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) void{} else undefined,
+//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) {} else undefined,
 
 //             pub fn data_only(inputs: @This()) SearchInputsDataOnly(self) {
 //                 return SearchInputsDataOnly(self){
@@ -205,7 +205,7 @@
 //             data_end_exclusive: self.DATA_CONTAINER_IDX,
 //             search_params: self.SEARCH_PARAM_CONTAINER,
 //             results_buffer: self.RESULT_CONTAINER,
-//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) void{} else undefined,
+//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) {} else undefined,
 //             results_alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
 
 //             pub fn data_only(inputs: @This()) SearchInputsDataOnly(self) {
@@ -223,7 +223,7 @@
 //             data: self.DATA_CONTAINER,
 //             data_start: self.DATA_CONTAINER_IDX = 0,
 //             data_end_exclusive: self.DATA_CONTAINER_IDX,
-//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) void{} else undefined,
+//             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) {} else undefined,
 //         };
 //     }
 

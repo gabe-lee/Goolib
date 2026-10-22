@@ -57,7 +57,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
         const Pool = @This();
 
         ptr: [*]T = Utils.invalid_ptr_many(T),
-        ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else void{},
+        ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else {},
         free_list: FreeList = .{},
         len: IDX = 0,
         cap: IDX = 0,
@@ -111,7 +111,7 @@ pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED:
                     },
                     .free_count = 0,
                 },
-                .ptr_2 = if (HAS_SECONDARY) secondary_buffer.ptr else void{},
+                .ptr_2 = if (HAS_SECONDARY) secondary_buffer.ptr else {},
             };
         }
 
@@ -350,7 +350,7 @@ pub fn SimplePoolOpaque(comptime IDX: type, comptime MEMSET_CLAIMED: ?[]const u8
         const Pool = @This();
 
         ptr: [*]u8 = @ptrCast(Utils.invalid_ptr_many(u8)),
-        ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else void{},
+        ptr_2: if (HAS_SECONDARY) [*]SECONDARY_LIST.?.elem_type else void = if (HAS_SECONDARY) @ptrCast(Utils.invalid_ptr_many(SECONDARY_LIST.?.elem_type)) else {},
         free_list: FreeList = .{},
         len: IDX = 0,
         cap: IDX = 0,

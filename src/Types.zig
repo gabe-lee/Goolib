@@ -37,7 +37,7 @@ const MathX = Root.Math;
 const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
-pub const StructFieldAttr = Type.StructField.Attributes;
+pub const StructFieldAttr = Type.Struct.FieldAttributes;
 pub const UnionFieldAttr = Type.UnionField.Attributes;
 
 pub const Type = std.builtin.Type;
@@ -68,7 +68,7 @@ pub fn FloatSizeForMaxIntExact(comptime INT: type) type {
 
 pub fn SmallestUnsignedIntWithAtLeastNBits(comptime N: anytype) type {
     const LIMIT = @min(256, 1 << N);
-    const POW: MathX.PowerOf2 = @enumFromInt(LIMIT);
+    const POW: MathX.PowerOf2 = @fromBackingInt(@intCast(LIMIT));
     return POW.unsigned_integer_type_that_holds_all_values_less_than();
 }
 pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: anytype) type {
@@ -78,7 +78,7 @@ pub fn SmallestUnsignedIntThatCanHoldValue(comptime V: anytype) type {
 pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const UINT = std.meta.Int(.unsigned, bits);
+    const UINT = @Int(.unsigned, bits);
     assert_with_reason(@sizeOf(UINT) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(UINT) });
     return UINT;
 }
@@ -86,7 +86,7 @@ pub fn UnsignedIntegerWithSameSize(comptime T: type) type {
 pub fn TryUnsignedIntegerWithSameSize(comptime T: type) ?type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const UINT = std.meta.Int(.unsigned, bits);
+    const UINT = @Int(.unsigned, bits);
     if (@sizeOf(UINT) != @sizeOf(T)) return null;
     return UINT;
 }
@@ -94,7 +94,7 @@ pub fn TryUnsignedIntegerWithSameSize(comptime T: type) ?type {
 pub fn SignedIntegerWithSameSize(comptime T: type) type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const INT = std.meta.Int(.signed, bits);
+    const INT = @Int(.signed, bits);
     assert_with_reason(@sizeOf(INT) == @sizeOf(T), @src(), "type `{s}` does not have a native matching integer size, its size is `{d}`, but converted to an integer is `{d}`", .{ @typeName(T), @sizeOf(T), @sizeOf(INT) });
     return INT;
 }
@@ -112,7 +112,7 @@ pub fn FloatWithSameSize(comptime T: type) type {
 pub fn TrySignedIntegerWithSameSize(comptime T: type) ?type {
     const bytes = @sizeOf(T);
     const bits: u16 = bytes << 3;
-    const INT = std.meta.Int(.signed, bits);
+    const INT = @Int(.signed, bits);
     if (@sizeOf(INT) != @sizeOf(T)) return null;
     return INT;
 }
@@ -126,7 +126,7 @@ pub fn intcast(val: anytype, comptime T: type) T {
     } else if (type_is_float(V)) {
         return @as(T, @intFromFloat(val));
     } else if (type_is_enum(V)) {
-        return @as(T, @intCast(@intFromEnum(val)));
+        return @as(T, @intCast(@backingInt(val)));
     } else if (type_is_bool(V)) {
         return @as(T, @intCast(@intFromBool(val)));
     } else {
@@ -143,7 +143,7 @@ pub fn floatcast(val: anytype, comptime T: type) T {
     } else if (type_is_int(V)) {
         return @as(T, @floatFromInt(val));
     } else if (type_is_enum(V)) {
-        return @as(T, @floatFromInt(@intFromEnum(val)));
+        return @as(T, @floatFromInt(@backingInt(val)));
     } else if (type_is_bool(V)) {
         return @as(T, @floatFromInt(@intFromBool(val)));
     } else {
@@ -330,7 +330,7 @@ pub fn assert_has_len(comptime T: type, comptime src: std.builtin.SourceLocation
 }
 
 pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
-    if (@typeInfo(ENUM).@"enum".fields.len == 0) return true;
+    if (@typeInfo(ENUM).@"enum".field_names.len == 0) return true;
     const min = enum_min_value(ENUM);
     if (min != 0) return false;
     const max = enum_max_value(ENUM);
@@ -338,38 +338,38 @@ pub fn all_enum_values_start_from_zero_with_no_gaps(comptime ENUM: type) bool {
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
     const range = (max - min) + 1;
-    return (range - E_INFO.fields.len) == 0;
+    return (range - E_INFO.field_names.len) == 0;
 }
 
 pub fn count_enum_gaps_between_raw_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    if (!E_INFO.is_exhaustive) return 0;
+    if (!E_INFO.mode == .exhaustive) return 0;
     const raw_smallest = std.math.minInt(E_INFO.tag_type);
     const largest = enum_max_value(ENUM);
     const range = largest - raw_smallest;
-    return @intCast(range - E_INFO.fields.len);
+    return @intCast(range - E_INFO.field_names.len);
 }
 
 pub fn count_enum_gaps_between_zero_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    if (!E_INFO.is_exhaustive) return 0;
+    if (!E_INFO.mode == .exhaustive) return 0;
     const largest = enum_max_value(ENUM);
-    return @intCast(largest - E_INFO.fields.len);
+    return @intCast(largest - E_INFO.field_names.len);
 }
 
 pub fn count_enum_gaps_between_enum_min_and_enum_max_val(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    if (!E_INFO.is_exhaustive) return 0;
+    if (!E_INFO.mode == .exhaustive) return 0;
     const largest = enum_max_value(ENUM);
     const smallest = enum_min_value(ENUM);
     const range = largest - smallest;
-    return @intCast(range - E_INFO.fields.len);
+    return @intCast(range - E_INFO.field_names.len);
 }
 
 pub fn enum_min_value(comptime ENUM: type) comptime_int {
@@ -378,8 +378,8 @@ pub fn enum_min_value(comptime ENUM: type) comptime_int {
     const E_INFO = EI.@"enum";
     const raw_largest: comptime_int = std.math.maxInt(E_INFO.tag_type);
     var smallest: comptime_int = raw_largest;
-    for (E_INFO.fields) |field| {
-        if (field.value < smallest) smallest = field.value;
+    for (E_INFO.field_values) |field_value| {
+        if (field_value < smallest) smallest = field_value;
     }
     return smallest;
 }
@@ -389,8 +389,8 @@ pub fn enum_max_value(comptime ENUM: type) comptime_int {
     const E_INFO = EI.@"enum";
     const raw_smallest: comptime_int = std.math.minInt(E_INFO.tag_type);
     var largest: comptime_int = raw_smallest;
-    for (E_INFO.fields) |field| {
-        if (field.value > largest) largest = field.value;
+    for (E_INFO.field_values) |field_value| {
+        if (field_value > largest) largest = field_value;
     }
     return largest;
 }
@@ -399,22 +399,22 @@ pub fn enum_max_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    if (!E_INFO.is_exhaustive) return @intCast(std.math.maxInt(E_INFO.tag_type));
-    return @intCast(E_INFO.fields.len);
+    if (!E_INFO.mode == .exhaustive) return @intCast(std.math.maxInt(E_INFO.tag_type));
+    return @intCast(E_INFO.field_names.len);
 }
 
 pub fn enum_defined_field_count(comptime ENUM: type) comptime_int {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    return @intCast(E_INFO.fields.len);
+    return @intCast(E_INFO.field_names.len);
 }
 
 pub fn enum_is_exhaustive(comptime ENUM: type) bool {
     const EI = @typeInfo(ENUM);
     assert_with_reason(EI == .@"enum", @src(), "input `ENUM` must be an enum type", .{});
     const E_INFO = EI.@"enum";
-    return E_INFO.is_exhaustive;
+    return E_INFO.mode == .exhaustive;
 }
 
 pub fn ptr_with_sentinel_has_min_len(comptime T: type, comptime S: T, ptr: [*:S]const T, len: usize) bool {
@@ -492,19 +492,19 @@ pub inline fn type_has_field_with_type(comptime T: type, comptime field: []const
 }
 pub inline fn type_has_any_field_with_type(comptime T: type, comptime T_FIELD: type) bool {
     const INFO = @typeInfo(T).@"struct";
-    inline for (INFO.fields) |field| {
-        if (field.type == T_FIELD) return true;
+    inline for (INFO.field_types) |field_type_| {
+        if (field_type_ == T_FIELD) return true;
     }
     return false;
 }
 pub inline fn type_has_exactly_all_field_types(comptime T: type, comptime T_FIELDS: []const type) bool {
     const found_idx: [T_FIELDS.len]usize = undefined;
     const INFO = @typeInfo(T).@"struct";
-    if (INFO.fields.len != T_FIELDS.len) return false;
+    if (INFO.field_names.len != T_FIELDS.len) return false;
     inline for (T_FIELDS, 0..) |find_type, i| {
         comptime var found_match = false;
-        inline for (INFO.fields, 0..) |field, f| {
-            if (field.type == find_type) {
+        inline for (INFO.field_types, 0..) |field_type_, f| {
+            if (field_type_ == find_type) {
                 comptime var unique: bool = true;
                 inline for (found_idx[0..i]) |prev_found_f| {
                     if (prev_found_f == f) {
@@ -825,10 +825,10 @@ pub const NumericTransform = enum(u8) {
                 return @intFromFloat(@as(FloatWithSameSize(IN), @bitCast(in)));
             },
             NumericTransform.@"ENUM_TO_INT => INT_TO_INT" => {
-                return @intCast(@as(enum_tag_type(IN), @enumFromInt(in)));
+                return @intCast(@as(enum_tag_type(IN), @fromBackingInt(@intCast(in))));
             },
             NumericTransform.@"ENUM_TO_INT => INT_TO_FLOAT" => {
-                return @floatFromInt(@as(enum_tag_type(IN), @enumFromInt(in)));
+                return @floatFromInt(@as(enum_tag_type(IN), @fromBackingInt(@intCast(in))));
             },
             NumericTransform.@"BOOL_TO_INT => INT_TO_INT" => {
                 return @intCast(@intFromBool(in));
@@ -858,7 +858,7 @@ pub inline fn numeric_equivalent_type_and_transform(comptime T: type) struct { t
         },
         .UNION => |UNION| {
             assert_with_reason(UNION.layout != .@"packed", @src(), "only packed unions have numeric equivalent types, got non-packed struct `{s}`", .{@typeName(T)});
-            return .{ std.meta.Int(.unsigned, @bitSizeOf(UNION)), NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_INT" };
+            return .{ @Int(.unsigned, @bitSizeOf(UNION)), NumericTransform.@"BIT_CAST_UNSIGNED => INT_TO_INT" };
         },
         .POINTER => return .{ usize, NumericTransform.@"PTR_TO_INT => INT_TO_INT" },
         .OPTIONAL => |OPTIONAL| {
@@ -955,9 +955,9 @@ pub inline fn integer_type_A_has_bits_greater_than_or_equal_to_N(comptime A: typ
 pub fn union_and_enum_have_exact_same_fields(comptime UNION: type, comptime ENUM: type) bool {
     const U_INFO = @typeInfo(UNION).@"union";
     const E_INFO = @typeInfo(ENUM).@"enum";
-    next_union_field: inline for (U_INFO.fields) |u_field| {
-        inline for (E_INFO.fields) |e_field| {
-            if (std.mem.eql(u8, u_field.name, e_field.name)) {
+    next_union_field: inline for (U_INFO.field_names) |u_field_name| {
+        inline for (E_INFO.field_names) |e_field_name| {
+            if (std.mem.eql(u8, u_field_name, e_field_name)) {
                 continue :next_union_field;
             }
         }
@@ -972,8 +972,8 @@ pub inline fn type_is_struct_with_all_fields_same_type(comptime T: type, comptim
         else => return false,
     }
     const STRUCT = INFO.@"struct";
-    inline for (STRUCT.fields) |field| {
-        if (field.type != F) return false;
+    inline for (STRUCT.field_types) |field_type_| {
+        if (field_type_ != F) return false;
     }
     return true;
 }
@@ -982,9 +982,9 @@ pub inline fn two_structs_have_exact_same_field_names_and_order(comptime A: type
     const INFO_B = @typeInfo(B);
     const STRUCT_A = INFO_A.@"struct";
     const STRUCT_B = INFO_B.@"struct";
-    if (STRUCT_A.fields.len != STRUCT_B.fields.len) return false;
-    inline for (STRUCT_A.fields, STRUCT_B.fields) |field_a, field_b| {
-        if (!std.mem.eql(u8, field_a.name, field_b.name)) {
+    if (STRUCT_A.field_names.len != STRUCT_B.field_names.len) return false;
+    inline for (STRUCT_A.field_names, STRUCT_B.field_names) |field_a_name, field_b_name| {
+        if (!std.mem.eql(u8, field_a_name, field_b_name)) {
             return false;
         }
     }
@@ -1022,8 +1022,8 @@ pub inline fn type_is_union_with_all_fields_same_type(comptime T: type, comptime
         else => return false,
     }
     const UNION = INFO.@"union";
-    for (UNION.fields) |field| {
-        if (field.type != F) return false;
+    for (UNION.field_types) |field_type_| {
+        if (field_type_ != F) return false;
     }
     return true;
 }
@@ -1037,8 +1037,8 @@ pub inline fn type_is_struct_with_all_fields_same_type_class(comptime T: type, c
         else => return false,
     }
     const STRUCT = INFO.@"struct";
-    for (STRUCT.fields) |field| {
-        if (type_class(field.type) != TYPE_ID) return false;
+    for (STRUCT.field_types) |field_type_| {
+        if (type_class(field_type_) != TYPE_ID) return false;
     }
     return true;
 }
@@ -1049,8 +1049,8 @@ pub inline fn type_is_union_with_all_fields_same_type_class(comptime T: type, co
         else => return false,
     }
     const UNION = INFO.@"union";
-    for (UNION.fields) |field| {
-        if (type_class(field.type) != TYPE_ID) return false;
+    for (UNION.field_types) |field_type_| {
+        if (type_class(field_type_) != TYPE_ID) return false;
     }
     return true;
 }
@@ -1061,8 +1061,8 @@ pub inline fn type_is_union_with_all_fields_an_enum_type_with_all_tag_values_fro
         else => return false,
     }
     const UNION = INFO.@"union";
-    for (UNION.fields) |field| {
-        const FINFO = @typeInfo(field.type);
+    for (UNION.field_types) |field_type_| {
+        const FINFO = @typeInfo(field_type_);
         switch (FINFO) {
             .@"enum" => {
                 if (!all_enum_values_start_from_zero_with_no_gaps(FINFO.type)) return false;
@@ -1079,8 +1079,8 @@ pub inline fn type_is_struct_with_all_fields_an_enum_type_with_all_tag_values_fr
         else => return false,
     }
     const STRUCT = INFO.@"struct";
-    for (STRUCT.fields) |field| {
-        const FINFO = @typeInfo(field.type);
+    for (STRUCT.field_types) |field_type_| {
+        const FINFO = @typeInfo(field_type_);
         switch (FINFO) {
             .@"enum" => {
                 if (!all_enum_values_start_from_zero_with_no_gaps(FINFO.type)) return false;
@@ -1146,15 +1146,15 @@ pub fn real_type(comptime T: type) type {
 
 pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) bool {
     const enum_info = @typeInfo(ENUM_TYPE).@"enum";
-    if (!enum_info.is_exhaustive) {
+    if (!enum_info.mode == .exhaustive) {
         if (std.math.cast(enum_info.tag_type, int_value) == null) return false;
         return true;
     }
 
     const ordered_values = comptime make: {
-        var arr: [enum_info.fields.len]enum_info.tag_type = undefined;
+        var arr: [enum_info.field_names.len]enum_info.tag_type = undefined;
         var len: usize = 0;
-        while (len < enum_info.fields.len) : (len += 1) {
+        while (len < enum_info.field_names.len) : (len += 1) {
             const ins_idx = BinarySearch.simple_binary_search_insert_index(enum_info.tag_type, false, arr[0..len], enum_info.fields[len].value);
             mem.copyBackwards(enum_info.tag_type, arr[ins_idx + 1 .. len + 1], arr[ins_idx..len]);
             arr[ins_idx] = enum_info.fields[len].value;
@@ -1168,8 +1168,8 @@ pub fn is_valid_value_for_enum(comptime ENUM_TYPE: type, int_value: anytype) boo
 
 pub fn is_valid_tag_name_for_enum(comptime ENUM_TYPE: type, tag_name: [:0]const u8) bool {
     const enum_info = @typeInfo(ENUM_TYPE).@"enum";
-    for (enum_info.fields) |field| {
-        if (std.mem.eql(u8, field.name, tag_name)) return true;
+    for (enum_info.field_names) |field_name| {
+        if (std.mem.eql(u8, field_name, tag_name)) return true;
     }
     return false;
 }
@@ -1350,7 +1350,7 @@ pub inline fn union_tag_type(comptime T: type) type {
 }
 
 pub inline fn union_tag(union_val: anytype) union_tag_type(@TypeOf(union_val)) {
-    return @enumFromInt(@intFromEnum(union_val));
+    return @fromBackingInt(@intCast(@backingInt(union_val)));
 }
 
 pub fn is_error(error_union: anytype) bool {
@@ -1507,14 +1507,14 @@ pub fn type_is_comptime_only(comptime T: type) bool {
     switch (@typeInfo(T)) {
         .comptime_int, .comptime_float, .type, .frame => return true,
         .@"struct" => |info| {
-            inline for (info.fields) |field| {
-                if (type_is_comptime_only(field.type)) return true;
+            inline for (info.field_types) |field_type_| {
+                if (type_is_comptime_only(field_type_)) return true;
             }
             return false;
         },
         .@"union" => |info| {
-            inline for (info.fields) |field| {
-                if (type_is_comptime_only(field.type)) return true;
+            inline for (info.field_types) |field_type_| {
+                if (type_is_comptime_only(field_type_)) return true;
             }
             return false;
         },
@@ -1767,19 +1767,22 @@ pub const MethodDefinition2 = struct {
     pub fn has_func_error(comptime self: MethodDefinition2, comptime BASE_TYPE: type) ?InterfaceSignatureError {
         if (!@hasDecl(BASE_TYPE, self.name)) return InterfaceSignatureError.missing_function;
         const NEED_FUNC = @typeInfo(self.signature).@"fn";
-        const NEED_PARAMS = NEED_FUNC.params;
+        const NEED_PARAM_TYPES = NEED_FUNC.param_types;
+        const NEED_PARAM_ATTRS = NEED_FUNC.param_attrs;
         const NEED_RETURN = NEED_FUNC.return_type;
         const GOT_FIELD = @TypeOf(@field(BASE_TYPE, self.name));
         const GOT_INFO = @typeInfo(GOT_FIELD);
         switch (GOT_INFO) {
             .@"fn" => |GOT_FUNC| {
-                const GOT_PARAMS = GOT_FUNC.params;
+                const GOT_PARAM_TYPES = GOT_FUNC.param_types;
+                const GOT_PARAM_ATTRS = GOT_FUNC.param_attrs;
                 const GOT_RETURN = GOT_FUNC.return_type;
-                if (GOT_PARAMS.len != NEED_PARAMS.len) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_PARAM_TYPES.len != NEED_PARAM_TYPES.len) return InterfaceSignatureError.function_has_wrong_signature;
                 if (GOT_RETURN != NEED_RETURN) return InterfaceSignatureError.function_has_wrong_signature;
-                if (GOT_PARAMS.len > 1) {
-                    inline for (NEED_PARAMS[1..], GOT_PARAMS[1..]) |got_param, need_param| {
-                        if (got_param.type != need_param.type) return InterfaceSignatureError.function_has_wrong_signature;
+                if (GOT_PARAM_TYPES.len > 1) {
+                    inline for (NEED_PARAM_TYPES[1..], GOT_PARAM_TYPES[1..], NEED_PARAM_ATTRS[1..], GOT_PARAM_ATTRS[1..]) |got_p_type, need_p_type, got_p_attr, need_p_attr| {
+                        if (got_p_type != need_p_type) return InterfaceSignatureError.function_has_wrong_signature;
+                        if (got_p_attr.@"noalias" != need_p_attr.@"noalias") return InterfaceSignatureError.function_has_wrong_signature;
                     }
                 }
             },
@@ -1835,47 +1838,47 @@ pub const StaticFunctionDefinition = struct {
 pub fn all_enum_names_match_all_object_field_names(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
     const len = switch (@typeInfo(STRUCT_OR_UNION_OR_ENUM)) {
-        .@"struct" => |info| info.fields.len,
-        .@"union" => |info| info.fields.len,
-        .@"enum" => |info| info.fields.len,
+        .@"struct" => |info| info.field_names.len,
+        .@"union" => |info| info.field_names.len,
+        .@"enum" => |info| info.field_names.len,
         else => unreachable,
     };
-    if (E_INFO.fields.len != len) return false;
-    for (E_INFO.fields) |e_field| {
-        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    if (E_INFO.field_names.len != len) return false;
+    for (E_INFO.field_names) |e_field_name| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field_name)) return false;
     }
     return true;
 }
 
 pub fn all_enum_names_match_an_object_field_name(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
-    for (E_INFO.fields) |e_field| {
-        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    for (E_INFO.field_names) |e_field_name| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field_name)) return false;
     }
     return true;
 }
 pub fn all_enum_names_match_an_object_field_name_with_same_type(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type, comptime FIELD_TYPE: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
-    for (E_INFO.fields) |e_field| {
-        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
-        if (@FieldType(STRUCT_OR_UNION_OR_ENUM, e_field.name) != FIELD_TYPE) return false;
+    for (E_INFO.field_names) |e_field_name| {
+        if (!@hasField(STRUCT_OR_UNION_OR_ENUM, e_field_name)) return false;
+        if (@FieldType(STRUCT_OR_UNION_OR_ENUM, e_field_name) != FIELD_TYPE) return false;
     }
     return true;
 }
 
 pub fn all_enum_names_match_an_object_decl_name(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
-    for (E_INFO.fields) |e_field| {
-        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
+    for (E_INFO.field_names) |e_field_name| {
+        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field_name)) return false;
     }
     return true;
 }
 
 pub fn all_enum_names_match_an_object_decl_name_with_same_type(comptime ENUM: type, comptime STRUCT_OR_UNION_OR_ENUM: type, comptime DECL_TYPE: type) bool {
     const E_INFO = @typeInfo(ENUM).@"enum";
-    for (E_INFO.fields) |e_field| {
-        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field.name)) return false;
-        if (@TypeOf(@field(STRUCT_OR_UNION_OR_ENUM, e_field.name)) != DECL_TYPE) return false;
+    for (E_INFO.field_names) |e_field_name| {
+        if (!@hasDecl(STRUCT_OR_UNION_OR_ENUM, e_field_name)) return false;
+        if (@TypeOf(@field(STRUCT_OR_UNION_OR_ENUM, e_field_name)) != DECL_TYPE) return false;
     }
     return true;
 }
@@ -1901,21 +1904,21 @@ pub fn Combined2EnumInt(comptime E1: type, comptime E2: type) Combined2EnumIntIn
     mask_1 |= mask_1 >> 32;
     const bit_width_2: u16 = @intCast(64 - @clz(largest_2));
     const total = bit_width_1 + bit_width_2;
-    const INT = std.meta.Int(.unsigned, total);
+    const INT = @Int(.unsigned, total);
     return Combined2EnumIntInfo{ .combined_type = INT, .width_1 = bit_width_1, .mask_1 = mask_1 };
 }
 
 pub fn combine_2_enums(enum_1: anytype, enum_2: anytype) Combined2EnumInt(@TypeOf(enum_1), @TypeOf(enum_1)).combined_type {
     const INFO = Combined2EnumInt(@TypeOf(enum_1), @TypeOf(enum_1));
-    const a: INFO.combined_type = @intCast(@intFromEnum(enum_1));
-    const b: INFO.combined_type = @intCast(@intFromEnum(enum_2));
+    const a: INFO.combined_type = @intCast(@backingInt(enum_1));
+    const b: INFO.combined_type = @intCast(@backingInt(enum_2));
     return a | (b << @intCast(INFO.width_1));
 }
 pub fn decombine_2_enums(combined: anytype, comptime ENUM_1: type, comptime ENUM_2: type) .{ ENUM_1, ENUM_2 } {
     const INFO = Combined2EnumInt(ENUM_1, ENUM_2);
     const a: enum_tag_type(ENUM_1) = @intCast(combined & @as(@TypeOf(combined), @intCast(INFO.mask_1)));
     const b: enum_tag_type(ENUM_2) = @intCast(combined >> @intCast(INFO.width_1));
-    return .{ @enumFromInt(a), @enumFromInt(b) };
+    return .{ @fromBackingInt(@intCast(a)), @fromBackingInt(@intCast(b)) };
 }
 
 /// Returns a struct type with matching fields that holds *CONCRETE SCALAR* types of the matching fields in the given type
@@ -1927,46 +1930,46 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
     const INFO = @typeInfo(STRUCT_TYPE);
     switch (INFO) {
         .@"struct" => |STRUCT| {
-            // comptime var new_fields: [STRUCT.fields.len]std.builtin.Type.StructField = undefined;
-            comptime var field_names: [STRUCT.fields.len][]const u8 = undefined;
-            comptime var field_types: [STRUCT.fields.len]type = undefined;
-            comptime var field_attrs: [STRUCT.fields.len]std.builtin.Type.StructField.Attributes = undefined;
-            inline for (STRUCT.fields, 0..) |field, f| {
-                switch (@typeInfo(field.type)) {
+            // comptime var new_fields: [STRUCT.field_names.len]std.builtin.Type.StructField = undefined;
+            comptime var field_names: [STRUCT.field_names.len][]const u8 = undefined;
+            comptime var field_types: [STRUCT.field_names.len]type = undefined;
+            comptime var field_attrs: [STRUCT.field_names.len]std.builtin.Type.Struct.FieldAttributes = undefined;
+            inline for (STRUCT.field_names, STRUCT.field_types, STRUCT.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
+                switch (@typeInfo(field_type_)) {
                     .pointer => |P| {
-                        field_names[f] = field.name;
+                        field_names[f] = field_name;
                         field_types[f] = P.child;
-                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
-                            .@"align" = field.alignment,
-                            .@"comptime" = field.is_comptime,
+                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                            .@"align" = field_attr.alignment,
+                            .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
                         };
                     },
                     .array => |A| {
-                        field_names[f] = field.name;
+                        field_names[f] = field_name;
                         field_types[f] = A.child;
-                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
-                            .@"align" = field.alignment,
-                            .@"comptime" = field.is_comptime,
+                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                            .@"align" = field_attr.alignment,
+                            .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
                         };
                     },
                     .vector => |V| {
-                        field_names[f] = field.name;
+                        field_names[f] = field_name;
                         field_types[f] = V.child;
-                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
-                            .@"align" = field.alignment,
-                            .@"comptime" = field.is_comptime,
+                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                            .@"align" = field_attr.alignment,
+                            .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
                         };
                     },
                     else => {
-                        field_names[f] = field.name;
-                        field_types[f] = field.type;
-                        field_attrs[f] = std.builtin.Type.StructField.Attributes{
-                            .@"align" = field.alignment,
-                            .@"comptime" = field.is_comptime,
-                            .default_value_ptr = field.default_value_ptr,
+                        field_names[f] = field_name;
+                        field_types[f] = field_type_;
+                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                            .@"align" = field_attr.alignment,
+                            .@"comptime" = field_attr.is_comptime,
+                            .default_value_ptr = field_attr.default_value_ptr,
                         };
                     },
                 }
@@ -2005,14 +2008,14 @@ pub fn error_union_error(comptime T: type) type {
 /// This does not and *cannot* copy static declarations
 pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptime NEW_LAYOUT: ?std.builtin.Type.ContainerLayout) type {
     const TAGGED_INFO = @typeInfo(UNION).@"union";
-    const NUM_FIELDS = TAGGED_INFO.fields.len;
+    const NUM_FIELDS = TAGGED_INFO.field_names.len;
     comptime var field_names: [NUM_FIELDS][]const u8 = undefined;
     comptime var field_types: [NUM_FIELDS]type = undefined;
     comptime var field_attrs: [NUM_FIELDS]std.builtin.Type.UnionField.Attributes = undefined;
-    inline for (TAGGED_INFO.fields, 0..) |field, f| {
-        field_names[f] = field.name;
-        field_types[f] = field.type;
-        field_attrs[f] = std.builtin.Type.UnionField.Attributes{ .@"align" = field.alignment };
+    inline for (TAGGED_INFO.field_names, TAGGED_INFO.field_types, TAGGED_INFO.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
+        field_names[f] = field_name;
+        field_types[f] = field_type_;
+        field_attrs[f] = std.builtin.Type.UnionField.Attributes{ .@"align" = field_attr.alignment };
     }
     return @Union(if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout, null, &field_names, &field_types, &field_attrs);
 }
@@ -2072,20 +2075,16 @@ pub fn StructInfo(comptime NUM_FIELDS: usize) type {
     };
 }
 
-pub fn extract_struct_info(comptime STRUCT: type) StructInfo(@typeInfo(STRUCT).@"struct".fields.len) {
+pub fn extract_struct_info(comptime STRUCT: type) StructInfo(@typeInfo(STRUCT).@"struct".field_names.len) {
     const INFO = @typeInfo(STRUCT).@"struct";
-    const NUM_FIELDS = INFO.fields.len;
+    const NUM_FIELDS = INFO.field_names.len;
     comptime var NAMES: [NUM_FIELDS][]const u8 = undefined;
     comptime var TYPES: [NUM_FIELDS]type = undefined;
     comptime var ATTRS: [NUM_FIELDS]StructFieldAttr = undefined;
-    inline for (INFO.fields, 0..) |field, f| {
-        NAMES[f] = field.name;
-        TYPES[f] = field.type;
-        ATTRS[f] = StructFieldAttr{
-            .@"align" = field.alignment,
-            .@"comptime" = field.is_comptime,
-            .default_value_ptr = field.default_value_ptr,
-        };
+    inline for (INFO.field_names, INFO.field_types, INFO.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
+        NAMES[f] = field_name;
+        TYPES[f] = field_type_;
+        ATTRS[f] = field_attr;
     }
     return StructInfo(NUM_FIELDS){
         .backing_int = INFO.backing_integer,
@@ -2151,17 +2150,17 @@ pub fn UnionInfo(comptime NUM_FIELDS: usize) type {
     };
 }
 
-pub fn extract_union_info(comptime UNION: type) UnionInfo(@typeInfo(UNION).@"union".fields.len) {
+pub fn extract_union_info(comptime UNION: type) UnionInfo(@typeInfo(UNION).@"union".field_names.len) {
     const INFO = @typeInfo(UNION).@"union";
-    const NUM_FIELDS = INFO.fields.len;
+    const NUM_FIELDS = INFO.field_names.len;
     comptime var NAMES: [NUM_FIELDS][]const u8 = undefined;
     comptime var TYPES: [NUM_FIELDS]type = undefined;
     comptime var ATTRS: [NUM_FIELDS]UnionFieldAttr = undefined;
-    inline for (INFO.fields, 0..) |field, f| {
-        NAMES[f] = field.name;
-        TYPES[f] = field.type;
+    inline for (INFO.field_names, INFO.field_types, INFO.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
+        NAMES[f] = field_name;
+        TYPES[f] = field_type_;
         ATTRS[f] = UnionFieldAttr{
-            .@"align" = field.alignment,
+            .@"align" = field_attr.alignment,
         };
     }
     return UnionInfo(NUM_FIELDS){
@@ -2210,8 +2209,8 @@ pub const NonStructUnionTypeDummyFieldInfo = struct {
 pub fn ExtractStructUnionOrDummyType(comptime T: type) type {
     const KIND = KindInfo.get_kind_info(T);
     switch (KIND) {
-        .STRUCT => |STRUCT| return StructInfo(STRUCT.fields.len),
-        .UNION => |UNION| return UnionInfo(UNION.fields.len),
+        .STRUCT => |STRUCT| return StructInfo(STRUCT.field_names.len),
+        .UNION => |UNION| return UnionInfo(UNION.field_names.len),
         else => return NonStructUnionTypeDummyFieldInfo,
     }
 }
@@ -2281,6 +2280,6 @@ pub fn StructWithAllFieldsSameType(comptime FIELDS: type, comptime TYPE: type) t
     const NUM_FIELDS = enum_defined_field_count(FIELDS);
     comptime var names: [NUM_FIELDS][:0]const u8 = undefined;
     comptime var types: [NUM_FIELDS]type = @splat(TYPE);
-    comptime var attrs: [NUM_FIELDS]std.builtin.Type.StructField.Attributes = @splat(.{});
+    comptime var attrs: [NUM_FIELDS]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
     return @Struct(.auto, null, names[0..], &types, &attrs);
 }

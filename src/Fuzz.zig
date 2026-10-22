@@ -986,7 +986,7 @@ pub const DiffFuzzer = struct {
         const ns_per_block = self.slowest_bench / 64;
         const ns_per_sliver = ns_per_block / 8;
         _ = try self.console.write("RELATIVE SLOWNESS (SMALLER BETTER)\n");
-        std.mem.sort(BenchResult, self.bench_results.items, void{}, sort_bench_less_than);
+        std.mem.sort(BenchResult, self.bench_results.items, {}, sort_bench_less_than);
         for (self.bench_results.items) |result| {
             var this_ns_per_op = result.time_ns / result.ops;
             _ = try self.console.write(BENCH_RESULT_TEMPL);

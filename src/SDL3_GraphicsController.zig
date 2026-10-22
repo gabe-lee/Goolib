@@ -268,7 +268,7 @@ pub const SamplerInitSettings = union(DefaultCustomKind) {
     CUSTOM: GPU_SamplerCreateInfo,
 
     pub fn default_sampler_settings() SamplerInitSettings {
-        return SamplerInitSettings{ .DEFAULT = void{} };
+        return SamplerInitSettings{ .DEFAULT = {} };
     }
     pub fn custom_sampler_settings(settings: GPU_SamplerCreateInfo) SamplerInitSettings {
         return SamplerInitSettings{ .CUSTOM = settings };
@@ -484,7 +484,7 @@ pub const RenderLinkageRegisterKind = enum(u8) {
     // VERTEX_BUFFER = 4,
 
     pub fn storage_register_kind(self: RenderLinkageRegisterKind) StorageRegisterKind {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 };
 
@@ -575,7 +575,7 @@ pub const ShaderStage = enum(u8) {
     FRAGMENT = 1,
 
     pub fn idx(comptime self: ShaderStage) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -982,7 +982,7 @@ pub fn GraphicsController(
         var sizes_: [_NUM_INDEX_BUFFERS]u32 = undefined;
         var defined_: [_NUM_INDEX_BUFFERS]bool = @splat(false);
         for (INDEX_BUFFER_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined_[idx] == false, @src(), "index buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined_[idx] = true;
             tags_[idx] = def.index_size;
@@ -1003,7 +1003,7 @@ pub fn GraphicsController(
         var modes: [_NUM_INDIRECT_BUFFERS]IndirectDrawMode = undefined;
         var defined: [_NUM_INDIRECT_BUFFERS]bool = @splat(false);
         for (INDIRECT_BUFFER_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "indirect draw buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.mode.elem_type();
@@ -1019,7 +1019,7 @@ pub fn GraphicsController(
         var defs: [_NUM_SAMPLERS]GPU_SamplerCreateInfo = undefined;
         var defined: [_NUM_SAMPLERS]bool = @splat(false);
         for (SAMPLER_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "sampler `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             defs[idx] = def.sdl_info(.{});
@@ -1033,7 +1033,7 @@ pub fn GraphicsController(
         var defs: [_NUM_TEXTURES]TextureDef = undefined;
         var defined: [_NUM_TEXTURES]bool = @splat(false);
         for (TEXTURE_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "texture `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             assert_with_reason(def.pixel_format != .INVALID, @src(), "texture `{s}` had an `.INVALID` pixel format", .{@tagName(def.name)});
@@ -1056,9 +1056,9 @@ pub fn GraphicsController(
         var types: [_NUM_UNIFORM_STRUCTS]type = undefined;
         var names: [_NUM_UNIFORM_STRUCTS][:0]const u8 = undefined;
         var offsets: [_NUM_UNIFORM_STRUCTS]u32 = undefined;
-        const attrs: [_NUM_UNIFORM_STRUCTS]std.builtin.Type.StructField.Attributes = @splat(.{});
+        const attrs: [_NUM_UNIFORM_STRUCTS]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
         for (UNIFORM_STRUCT_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "uniform `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             sizes[idx] = @sizeOf(def.type);
@@ -1078,7 +1078,7 @@ pub fn GraphicsController(
         var defined: [_NUM_VERTEX_INPUT_STRUCTS]bool = @splat(false);
         var types: [_NUM_VERTEX_INPUT_STRUCTS]type = undefined;
         for (VERTEX_INPUT_STRUCT_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "vertex input struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.type;
@@ -1096,21 +1096,21 @@ pub fn GraphicsController(
         for (_VERTEX_INPUT_STRUCT_TYPES) |vert_input| {
             const VERT_INPUT = AnyVertexShaderInputStruct(vert_input, VERTEX_BUFFER_NAMES_ENUM);
             for (VERT_INPUT.ACTIVE_SLOT_TYPES, VERT_INPUT.ACTIVE_SLOT_PAIRS) |need_type, pair| {
-                const idx = @intFromEnum(pair.slot_name);
+                const idx = @backingInt(pair.slot_name);
                 if (defined[idx]) {
                     const need_info = @typeInfo(need_type).@"struct";
                     const cached_info = @typeInfo(types[idx]).@"struct";
                     assert_with_reason(need_info.layout == .@"extern" and cached_info.layout == .@"extern", @src(), "vertex buffer `{s}` is not declared as `extern` on all vertex input struct definitions", .{@tagName(pair.slot_name)});
-                    assert_with_reason(need_info.fields.len == cached_info.fields.len, @src(), "mismatch bewteen the number of fields on the struct types for the vertex buffer `{s}`: need {d} fields, cached {d} fields", .{ @tagName(pair.slot_name), need_info.fields.len, cached_info.fields.len });
-                    next_cached: for (cached_info.fields) |cached_field| {
-                        for (need_info.fields) |need_field| {
-                            if (std.mem.eql(u8, need_field.name, cached_field.name)) {
-                                assert_with_reason(need_field.type == cached_field.type, @src(), "the type for field `{s}` on vertex buffer `{s}` does not match: cached = `{s}`, need = `{s}`", .{ cached_field.name, @tagName(pair.slot_name), @typeName(cached_field.type), @typeName(need_field.type) });
-                                assert_with_reason(@offsetOf(need_type, cached_field.name) == @offsetOf(types[idx], cached_field.name), @src(), "the field `{s}` on vertex buffer `{s}` has mismatching offsets when calculated from two different vertex input structs: cached = `{d}`, need = `{d}`", .{ cached_field.name, @tagName(pair.slot_name), @offsetOf(types[idx], cached_field.name), @offsetOf(need_type, cached_field.name) });
+                    assert_with_reason(need_info.field_names.len == cached_info.field_names.len, @src(), "mismatch bewteen the number of fields on the struct types for the vertex buffer `{s}`: need {d} fields, cached {d} fields", .{ @tagName(pair.slot_name), need_info.field_names.len, cached_info.field_names.len });
+                    next_cached: for (cached_info.field_names, cached_info.field_types) |cached_field_name, cached_field_type| {
+                        for (need_info.field_names, need_info.field_types) |need_field_name, need_field_type| {
+                            if (std.mem.eql(u8, need_field_name, cached_field_name)) {
+                                assert_with_reason(need_field_type == cached_field_type, @src(), "the type for field `{s}` on vertex buffer `{s}` does not match: cached = `{s}`, need = `{s}`", .{ cached_field_name, @tagName(pair.slot_name), @typeName(cached_field_type), @typeName(need_field_type) });
+                                assert_with_reason(@offsetOf(need_type, cached_field_name) == @offsetOf(types[idx], cached_field_name), @src(), "the field `{s}` on vertex buffer `{s}` has mismatching offsets when calculated from two different vertex input structs: cached = `{d}`, need = `{d}`", .{ cached_field_name, @tagName(pair.slot_name), @offsetOf(types[idx], cached_field_name), @offsetOf(need_type, cached_field_name) });
                                 continue :next_cached;
                             }
                         }
-                        assert_unreachable(@src(), "cached struct for vertex buffer `{s}` has field `{s}`, but another vertex input struct did not define this field for this vertex buffer", .{ @tagName(pair.slot_name), cached_field.name });
+                        assert_unreachable(@src(), "cached struct for vertex buffer `{s}` has field `{s}`, but another vertex input struct did not define this field for this vertex buffer", .{ @tagName(pair.slot_name), cached_field_name });
                     }
                 } else {
                     defined[idx] = true;
@@ -1136,7 +1136,7 @@ pub fn GraphicsController(
         var defined: [_NUM_VERTEX_TO_FRAG_STRUCTS]bool = @splat(false);
         var types: [_NUM_VERTEX_TO_FRAG_STRUCTS]type = undefined;
         for (VERTEX_TO_FRAG_STRUCT_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "vertex-to-frag struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.type;
@@ -1150,7 +1150,7 @@ pub fn GraphicsController(
         var defined: [_NUM_FRAGMENT_OUTPUT_STRUCTS]bool = @splat(false);
         var types: [_NUM_FRAGMENT_OUTPUT_STRUCTS]type = undefined;
         for (FRAGMENT_OUTPUT_STRUCT_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "fragment output struct `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.type;
@@ -1166,7 +1166,7 @@ pub fn GraphicsController(
         var usages: [_NUM_STORAGE_BUFFERS]GPU_BufferUsageFlags = undefined;
         var defined: [_NUM_STORAGE_BUFFERS]bool = @splat(false);
         for (STORAGE_BUFFER_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "storage buffer `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             types[idx] = def.elem_type;
@@ -1182,7 +1182,7 @@ pub fn GraphicsController(
         var defined: [_NUM_RENDER_PIPELINES]bool = @splat(false);
         var defs: [_NUM_RENDER_PIPELINES]_RenderPipelineDefinition = undefined;
         for (RENDER_PIPELINE_DEFINITIONS) |def| {
-            const idx = @intFromEnum(def.name);
+            const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "render pipeline `{s}` was defined more than once", .{@tagName(def.name)});
             defined[idx] = true;
             defs[idx] = def;
@@ -1226,14 +1226,14 @@ pub fn GraphicsController(
             comptime uniform_name: UNIFORM_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
-            const uni_idx = @intFromEnum(uniform_name);
+            const uni_idx = @backingInt(uniform_name);
             switch (comptime stage) {
                 .VERTEX => {
                     assert_with_reason(v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed == false, @src(), "uniform `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(uniform_name), shader_name });
                     v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].allowed = true;
                     v.uniforms_allowed_in_vertex_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_vertex_shaders_len[shader_idx];
                     v.uniforms_allowed_in_vertex_shaders_len[shader_idx] += 1;
-                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                     v.max_enum_types_in_vertex_shaders[shader_idx] += @intCast(UNI_TYPE.ENUMS.len);
                 },
                 .FRAGMENT => {
@@ -1241,7 +1241,7 @@ pub fn GraphicsController(
                     v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].allowed = true;
                     v.uniforms_allowed_in_fragment_shaders[shader_idx][uni_idx].register = v.uniforms_allowed_in_fragment_shaders_len[shader_idx];
                     v.uniforms_allowed_in_fragment_shaders_len[shader_idx] += 1;
-                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                    const UNI_TYPE = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                     v.max_enum_types_in_fragment_shaders[shader_idx] += @intCast(UNI_TYPE.ENUMS.len);
                 },
             }
@@ -1253,7 +1253,7 @@ pub fn GraphicsController(
             comptime buffer_name: STORAGE_BUFFER_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
-            const buf_idx = @intFromEnum(buffer_name);
+            const buf_idx = @backingInt(buffer_name);
             if (comptime stage == .VERTEX) {
                 assert_with_reason(v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(buffer_name), shader_name });
                 v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].allowed = true;
@@ -1261,7 +1261,7 @@ pub fn GraphicsController(
                 v.storage_buffers_allowed_in_vertex_shaders[shader_idx][buf_idx].cpu_register = v.storage_buffers_allowed_in_vertex_shaders_len[shader_idx];
                 v.next_storage_gpu_register_in_vertex_shaders[shader_idx] += 1;
                 v.storage_buffers_allowed_in_vertex_shaders_len[shader_idx] += 1;
-                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buffer_name)]);
+                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buffer_name)]);
                 v.max_enum_types_in_vertex_shaders[shader_idx] += @intCast(STORE_TYPE.ENUMS.len);
             } else {
                 assert_with_reason(v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].allowed == false, @src(), "storage buffer `{s}` was registered more than once for fragment shader `{s}`", .{ @tagName(buffer_name), shader_name });
@@ -1270,7 +1270,7 @@ pub fn GraphicsController(
                 v.storage_buffers_allowed_in_fragment_shaders[shader_idx][buf_idx].cpu_register = v.storage_buffers_allowed_in_fragment_shaders_len[shader_idx];
                 v.next_storage_gpu_register_in_fragment_shaders[shader_idx] += 1;
                 v.storage_buffers_allowed_in_fragment_shaders_len[shader_idx] += 1;
-                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buffer_name)]);
+                const STORE_TYPE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buffer_name)]);
                 v.max_enum_types_in_fragment_shaders[shader_idx] += @intCast(STORE_TYPE.ENUMS.len);
             }
         }
@@ -1281,7 +1281,7 @@ pub fn GraphicsController(
             comptime texture_name: TEXTURE_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
-            const tex_idx = @intFromEnum(texture_name);
+            const tex_idx = @backingInt(texture_name);
             if (comptime stage == .VERTEX) {
                 assert_with_reason(v.storage_textures_allowed_in_vertex_shaders[shader_idx][tex_idx].allowed == false, @src(), "storage texture `{s}` was registered more than once for vertex shader `{s}`", .{ @tagName(texture_name), shader_name });
                 v.storage_textures_allowed_in_vertex_shaders[shader_idx][tex_idx].allowed = true;
@@ -1306,8 +1306,8 @@ pub fn GraphicsController(
             comptime samp_name: SAMPLER_NAMES_ENUM,
             comptime stage: ShaderStage,
         ) void {
-            const tex_idx = @intFromEnum(tex_name);
-            const samp_idx = @intFromEnum(samp_name);
+            const tex_idx = @backingInt(tex_name);
+            const samp_idx = @backingInt(samp_name);
             if (comptime stage == .VERTEX) {
                 assert_with_reason(v.sample_pairs_allowed_in_vertex_shaders[shader_idx][tex_idx][samp_idx].allowed == false, @src(), "sampler pair `{s} + {s}` was registered more than once for vertex shader `{s}`", .{ @tagName(tex_name), @tagName(samp_name), shader_name });
                 v.sample_pairs_allowed_in_vertex_shaders[shader_idx][tex_idx][samp_idx].allowed = true;
@@ -1341,7 +1341,7 @@ pub fn GraphicsController(
         var total_unique_enum_sets_len: u32 = 0;
         var unique_enum_starts: [_NUM_VERTEX_SHADERS + 1]u32 = undefined;
         for (VERTEX_SHADER_DEFINITIONS[0..]) |def| {
-            const idx = @intFromEnum(def.vertex_shader);
+            const idx = @backingInt(def.vertex_shader);
             assert_with_reason(defined[idx] == false, @src(), "for vertex shader `{s}` was defined twice", .{@tagName(def.vertex_shader)});
             defined[idx] = true;
             defs[idx] = def;
@@ -1374,14 +1374,14 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .STORAGE_BUFFER => |buf_name| {
-                        assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
+                        assert_with_reason(_STORAGE_BUFFER_USAGES[@backingInt(buf_name)].has_flag(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to vertex shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.vertex_shader) });
                         SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.vertex_shader), buf_name, .VERTEX);
                     },
                     else => {},
                 }
             }
-            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
-            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@backingInt(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.output_type)]);
             vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
             const MAX_ENUMS = vars.max_enum_types_in_vertex_shaders[@as(usize, @intCast(idx))];
             var unique_enums: [MAX_ENUMS]type = undefined;
@@ -1391,11 +1391,11 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .UNIFORM_BUFFER => |uniform_name| {
-                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
                     },
                     .STORAGE_BUFFER => |buf_name| {
-                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buf_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
                     },
                     else => {},
@@ -1412,8 +1412,8 @@ pub fn GraphicsController(
         for (_VERTEX_SHADER_DEFS[0..], 0..) |def, idx| {
             const start = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx];
             const end = _VERTEX_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
-            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
-            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            const IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@backingInt(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const OUT = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.output_type)]);
             var unique_enums = all_unique_vertex_enums[start..end];
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
             var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
@@ -1421,11 +1421,11 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .UNIFORM_BUFFER => |uniform_name| {
-                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
                     },
                     .STORAGE_BUFFER => |buf_name| {
-                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buf_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
                     },
                     else => {},
@@ -1441,7 +1441,7 @@ pub fn GraphicsController(
         var total_unique_enum_sets_len: u32 = 0;
         var unique_enum_starts: [_NUM_FRAGMENT_SHADERS + 1]u32 = undefined;
         for (FRAGMENT_SHADER_DEFINITIONS[0..]) |def| {
-            const idx = @intFromEnum(def.fragment_shader);
+            const idx = @backingInt(def.fragment_shader);
             assert_with_reason(defined[idx] == false, @src(), "fragment shader `{s}` was defined twice", .{@tagName(def.fragment_shader)});
             defined[idx] = true;
             defs[idx] = def;
@@ -1474,14 +1474,14 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .STORAGE_BUFFER => |buf_name| {
-                        assert_with_reason(_STORAGE_BUFFER_USAGES[@intFromEnum(buf_name)].contains(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.fragment_shader) });
+                        assert_with_reason(_STORAGE_BUFFER_USAGES[@backingInt(buf_name)].contains(.GRAPHICS_STORAGE_READ), @src(), "cannot bind storage buffer `{s}` to fragment shader `{s}` because is does not have the `.GRAPHICS_STORAGE_READ` usage flag", .{ @tagName(buf_name), @tagName(def.fragment_shader) });
                         SUB_ROUTINE.process_storage_buffer_def(&vars, @intCast(idx), @tagName(def.fragment_shader), buf_name, .FRAGMENT);
                     },
                     else => {},
                 }
             }
-            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
-            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.input_type)]);
+            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@backingInt(def.output_type)]);
             vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))] += @intCast(IN.ENUMS.len + OUT.ENUMS.len);
             const MAX_ENUMS = vars.max_enum_types_in_fragment_shaders[@as(usize, @intCast(idx))];
             var unique_enums: [MAX_ENUMS]type = undefined;
@@ -1491,11 +1491,11 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .UNIFORM_BUFFER => |uniform_name| {
-                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
                     },
                     .STORAGE_BUFFER => |buf_name| {
-                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buf_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
                     },
                     else => {},
@@ -1512,8 +1512,8 @@ pub fn GraphicsController(
         for (_FRAGMENT_SHADER_DEFS[0..], 0..) |def, idx| {
             const start = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx];
             const end = _FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[idx + 1];
-            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
-            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
+            const IN = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.input_type)]);
+            const OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@backingInt(def.output_type)]);
             var unique_enums = all_unique_fragment_enums[start..end];
             @memcpy(unique_enums[0..IN.ENUMS.len], IN.ENUMS[0..]);
             var unique_enums_len: u32 = @intCast(IN.ENUMS.len);
@@ -1521,11 +1521,11 @@ pub fn GraphicsController(
             for (def.resources_to_link) |resource| {
                 switch (resource) {
                     .UNIFORM_BUFFER => |uniform_name| {
-                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@intFromEnum(uniform_name)]);
+                        const UNI = AnyUniformOrStorageStruct(_UNIFORM_TYPES[@backingInt(uniform_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, UNI.ENUMS[0..]);
                     },
                     .STORAGE_BUFFER => |buf_name| {
-                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@intFromEnum(buf_name)]);
+                        const STORE = AnyUniformOrStorageStruct(_STORAGE_BUFFER_TYPES[@backingInt(buf_name)]);
                         SUB_ROUTINE.combine_unique_enums(unique_enums[0..], &unique_enums_len, STORE.ENUMS[0..]);
                     },
                     else => {},
@@ -1566,7 +1566,7 @@ pub fn GraphicsController(
         for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_vertex_shaders[v][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .uniform = @enumFromInt(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u))),
+                    .uniform = @fromBackingInt(@intCast(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u)))),
                     .register = vars.uniforms_allowed_in_vertex_shaders[v][u].register,
                 };
                 all_allowed_uniforms_flat_vert[idx] = allowed;
@@ -1582,7 +1582,7 @@ pub fn GraphicsController(
         for (0.._NUM_UNIFORM_STRUCTS) |u| {
             if (vars.uniforms_allowed_in_fragment_shaders[f][u].allowed) {
                 const allowed = _ShaderAllowedUniform{
-                    .uniform = @enumFromInt(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u))),
+                    .uniform = @fromBackingInt(@intCast(@as(Types.enum_tag_type(UNIFORM_NAMES_ENUM), @intCast(u)))),
                     .register = vars.uniforms_allowed_in_fragment_shaders[f][u].register,
                 };
                 all_allowed_uniforms_flat_frag[idx] = allowed;
@@ -1635,7 +1635,7 @@ pub fn GraphicsController(
         for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_vertex_shaders[v][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
+                    .buffer = @fromBackingInt(@intCast(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb)))),
                     .cpu_register = vars.storage_buffers_allowed_in_vertex_shaders[v][sb].cpu_register,
                     .gpu_register = vars.storage_buffers_allowed_in_vertex_shaders[v][sb].gpu_register,
                 };
@@ -1652,7 +1652,7 @@ pub fn GraphicsController(
         for (0.._NUM_STORAGE_BUFFERS) |sb| {
             if (vars.storage_buffers_allowed_in_fragment_shaders[f][sb].allowed) {
                 const allowed = _ShaderAllowedStorageBuffer{
-                    .buffer = @enumFromInt(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb))),
+                    .buffer = @fromBackingInt(@intCast(@as(Types.enum_tag_type(STORAGE_BUFFER_NAMES_ENUM), @intCast(sb)))),
                     .cpu_register = vars.storage_buffers_allowed_in_fragment_shaders[f][sb].cpu_register,
                     .gpu_register = vars.storage_buffers_allowed_in_fragment_shaders[f][sb].gpu_register,
                 };
@@ -1708,7 +1708,7 @@ pub fn GraphicsController(
         for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_vertex_shaders[v][t].allowed) {
                 const allowed = _ShaderAllowedStorageTexture{
-                    .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
+                    .texture = @fromBackingInt(@intCast(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t)))),
                     .cpu_register = vars.storage_textures_allowed_in_vertex_shaders[v][t].cpu_register,
                     .gpu_register = vars.storage_textures_allowed_in_vertex_shaders[v][t].gpu_register,
                 };
@@ -1725,7 +1725,7 @@ pub fn GraphicsController(
         for (0.._NUM_TEXTURES) |t| {
             if (vars.storage_textures_allowed_in_fragment_shaders[f][t].allowed) {
                 const allowed = _ShaderAllowedStorageTexture{
-                    .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
+                    .texture = @fromBackingInt(@intCast(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t)))),
                     .cpu_register = vars.storage_textures_allowed_in_fragment_shaders[f][t].cpu_register,
                     .gpu_register = vars.storage_textures_allowed_in_fragment_shaders[f][t].gpu_register,
                 };
@@ -1786,8 +1786,8 @@ pub fn GraphicsController(
             for (0.._NUM_SAMPLERS) |s| {
                 if (vars.sample_pairs_allowed_in_vertex_shaders[v][t][s].allowed) {
                     const allowed = _ShaderAllowedSamplePair{
-                        .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
-                        .sampler = @enumFromInt(@as(Types.enum_tag_type(SAMPLER_NAMES_ENUM), @intCast(s))),
+                        .texture = @fromBackingInt(@intCast(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t)))),
+                        .sampler = @fromBackingInt(@intCast(@as(Types.enum_tag_type(SAMPLER_NAMES_ENUM), @intCast(s)))),
                         .cpu_register = vars.sample_pairs_allowed_in_vertex_shaders[v][t][s].cpu_register,
                         .gpu_register = vars.sample_pairs_allowed_in_vertex_shaders[v][t][s].gpu_register,
                     };
@@ -1806,8 +1806,8 @@ pub fn GraphicsController(
             for (0.._NUM_SAMPLERS) |s| {
                 if (vars.sample_pairs_allowed_in_fragment_shaders[f][t][s].allowed) {
                     const allowed = _ShaderAllowedSamplePair{
-                        .texture = @enumFromInt(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t))),
-                        .sampler = @enumFromInt(@as(Types.enum_tag_type(SAMPLER_NAMES_ENUM), @intCast(s))),
+                        .texture = @fromBackingInt(@intCast(@as(Types.enum_tag_type(TEXTURE_NAMES_ENUM), @intCast(t)))),
+                        .sampler = @fromBackingInt(@intCast(@as(Types.enum_tag_type(SAMPLER_NAMES_ENUM), @intCast(s)))),
                         .cpu_register = vars.sample_pairs_allowed_in_fragment_shaders[f][t][s].cpu_register,
                         .gpu_register = vars.sample_pairs_allowed_in_fragment_shaders[f][t][s].gpu_register,
                     };
@@ -1838,13 +1838,13 @@ pub fn GraphicsController(
             vert_shaders[pipe_idx] = pipe_def.vertex;
             frag_shaders[pipe_idx] = pipe_def.fragment;
             const pipe_name = pipe_def.name;
-            const vert_idx = @intFromEnum(pipe_def.vertex);
-            const frag_idx = @intFromEnum(pipe_def.fragment);
+            const vert_idx = @backingInt(pipe_def.vertex);
+            const frag_idx = @backingInt(pipe_def.fragment);
             const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
             const frag_def = _FRAGMENT_SHADER_DEFS[frag_idx];
-            const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@backingInt(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
             // const VERT_TO_FRAG = AnyVertexToFragmentStruct(_VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(vert_def.output_type)]);
-            const FRAG_OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(frag_def.output_type)]);
+            const FRAG_OUT = AnyFragmentShaderOutputStruct(_FRAGMENT_OUTPUT_STRUCT_TYPES[@backingInt(frag_def.output_type)]);
             assert_with_reason(vert_def.output_type == frag_def.input_type, @src(), "for render pipeline `{s}` the vertex shader output type `{s}` does not match the fragment shader input type `{s}`", .{ @tagName(pipe_name), @tagName(pipe_def.vertex), @tagName(pipe_def.fragment) });
             assert_with_reason(pipe_def.target_info.num_color_targets == FRAG_OUT.NUM_COLOR_TARGETS, @src(), "for render pipeline `{s}` the fragment shader has {d} color targets, but `target_info.num_color_targets` = {d}", .{ @tagName(pipe_name), FRAG_OUT.NUM_COLOR_TARGETS, pipe_def.target_info.num_color_targets });
             if (pipe_def.target_info.num_color_targets > 0) {
@@ -1880,9 +1880,9 @@ pub fn GraphicsController(
         var vertex_attributes_to_bind_per_render_pipeline: [total_num_vert_atributes_across_all_pipes]SDL3.GPU_VertexAttribute = undefined;
         // SECOND PASS FILL RUNTIME BUFFERS
         for (_RENDER_PIPELINE_DEFS, 0..) |pipe_def, pipe_idx| {
-            const vert_idx = @intFromEnum(pipe_def.vertex);
+            const vert_idx = @backingInt(pipe_def.vertex);
             const vert_def = _VERTEX_SHADER_DEFS[vert_idx];
-            const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+            const VERT_IN = AnyVertexShaderInputStruct(_VERTEX_INPUT_STRUCT_TYPES[@backingInt(vert_def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
             const bufs_start = vertex_buffers_to_bind_start_locs[pipe_idx];
             const bufs_end = vertex_buffers_to_bind_start_locs[pipe_idx + 1];
             const attrs_start = vertex_attribute_start_locs[pipe_idx];
@@ -2034,54 +2034,54 @@ pub fn GraphicsController(
         }
 
         pub inline fn get_window(self: *const Controller, name: WindowName) *Window {
-            assert_with_reason(self.windows_init[@intFromEnum(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
-            return self.windows[@intFromEnum(name)];
+            assert_with_reason(self.windows_init[@backingInt(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
+            return self.windows[@backingInt(name)];
         }
         pub inline fn get_claimed_window(self: *const Controller, name: WindowName) *Window {
-            assert_with_reason(self.windows_init[@intFromEnum(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
-            assert_with_reason(self.windows_claimed[@intFromEnum(name)], @src(), "window `{s}` not claimed (no swapchain texture)", .{@tagName(name)});
-            return self.windows[@intFromEnum(name)];
+            assert_with_reason(self.windows_init[@backingInt(name)], @src(), "window `{s}` not initialized", .{@tagName(name)});
+            assert_with_reason(self.windows_claimed[@backingInt(name)], @src(), "window `{s}` not claimed (no swapchain texture)", .{@tagName(name)});
+            return self.windows[@backingInt(name)];
         }
         pub inline fn get_render_pipeline(self: *const Controller, name: RenderPipelineName) *GPU_GraphicsPipeline {
-            assert_with_reason(self.render_pipelines_init[@intFromEnum(name)], @src(), "render pipeline `{s}` not initialized", .{@tagName(name)});
-            return self.render_pipelines[@intFromEnum(name)];
+            assert_with_reason(self.render_pipelines_init[@backingInt(name)], @src(), "render pipeline `{s}` not initialized", .{@tagName(name)});
+            return self.render_pipelines[@backingInt(name)];
         }
         pub inline fn get_texture(self: *const Controller, name: TextureName) *GPU_Texture {
-            assert_with_reason(self.textures_init[@intFromEnum(name)], @src(), "texture `{s}` not initialized", .{@tagName(name)});
-            return self.textures[@intFromEnum(name)];
+            assert_with_reason(self.textures_init[@backingInt(name)], @src(), "texture `{s}` not initialized", .{@tagName(name)});
+            return self.textures[@backingInt(name)];
         }
         pub inline fn get_upload_transfer_buffer(self: *const Controller, name: UploadBufferName) *GPU_TransferBuffer {
-            assert_with_reason(self.upload_buffers_init[@intFromEnum(name)], @src(), "upload transfer buffer `{s}` not initialized", .{@tagName(name)});
-            return self.upload_buffers[@intFromEnum(name)];
+            assert_with_reason(self.upload_buffers_init[@backingInt(name)], @src(), "upload transfer buffer `{s}` not initialized", .{@tagName(name)});
+            return self.upload_buffers[@backingInt(name)];
         }
         pub inline fn get_download_transfer_buffer(self: *const Controller, name: DownloadBufferName) *GPU_TransferBuffer {
-            assert_with_reason(self.download_buffers_init[@intFromEnum(name)], @src(), "download transfer buffer `{s}` not initialized", .{@tagName(name)});
-            return self.download_buffers[@intFromEnum(name)];
+            assert_with_reason(self.download_buffers_init[@backingInt(name)], @src(), "download transfer buffer `{s}` not initialized", .{@tagName(name)});
+            return self.download_buffers[@backingInt(name)];
         }
         pub inline fn get_storage_buffer(self: *const Controller, name: StorageBufferName) *GPU_Buffer {
-            assert_with_reason(self.storage_buffers_init[@intFromEnum(name)], @src(), "storage buffer `{s}` not initialized", .{@tagName(name)});
-            return self.storage_buffers[@intFromEnum(name)];
+            assert_with_reason(self.storage_buffers_init[@backingInt(name)], @src(), "storage buffer `{s}` not initialized", .{@tagName(name)});
+            return self.storage_buffers[@backingInt(name)];
         }
         pub inline fn get_vertex_buffer(self: *const Controller, name: VertexBufferName) *GPU_Buffer {
-            assert_with_reason(self.vertex_buffers_init[@intFromEnum(name)], @src(), "vertex buffer `{s}` not initialized", .{@tagName(name)});
-            return self.vertex_buffers[@intFromEnum(name)];
+            assert_with_reason(self.vertex_buffers_init[@backingInt(name)], @src(), "vertex buffer `{s}` not initialized", .{@tagName(name)});
+            return self.vertex_buffers[@backingInt(name)];
         }
         pub inline fn get_sampler(self: *const Controller, name: SamplerName) *GPU_TextureSampler {
-            assert_with_reason(self.samplers_init[@intFromEnum(name)], @src(), "sampler `{s}` not initialized", .{@tagName(name)});
-            return self.samplers[@intFromEnum(name)];
+            assert_with_reason(self.samplers_init[@backingInt(name)], @src(), "sampler `{s}` not initialized", .{@tagName(name)});
+            return self.samplers[@backingInt(name)];
         }
         pub inline fn get_fence(self: *const Controller, name: FenceName) *GPU_Fence {
-            assert_with_reason(self.fences_init[@intFromEnum(name)], @src(), "fence `{s}` not initialized", .{@tagName(name)});
-            return self.fences[@intFromEnum(name)];
+            assert_with_reason(self.fences_init[@backingInt(name)], @src(), "fence `{s}` not initialized", .{@tagName(name)});
+            return self.fences[@backingInt(name)];
         }
         pub inline fn get_index_buffer(self: *const Controller, name: IndexBufferName) *GPU_Buffer {
-            assert_with_reason(self.index_buffers_init[@intFromEnum(name)], @src(), "index buffer `{s}` not initialized", .{@tagName(name)});
-            return self.index_buffers[@intFromEnum(name)];
+            assert_with_reason(self.index_buffers_init[@backingInt(name)], @src(), "index buffer `{s}` not initialized", .{@tagName(name)});
+            return self.index_buffers[@backingInt(name)];
         }
         pub inline fn get_indirect_draw_buffer(self: *const Controller, name: IndirectDrawBufferName) *GPU_Buffer {
             assert_with_reason(INTERNAL.HAS_INDIRECT_BUFS, @src(), "no indirect dra buffers defined", .{});
-            assert_with_reason(self.indirect_draw_buffers_init[@intFromEnum(name)], @src(), "indirect draw buffer `{s}` not initialized", .{@tagName(name)});
-            return self.indirect_draw_buffers[@intFromEnum(name)];
+            assert_with_reason(self.indirect_draw_buffers_init[@backingInt(name)], @src(), "indirect draw buffer `{s}` not initialized", .{@tagName(name)});
+            return self.indirect_draw_buffers[@backingInt(name)];
         }
         pub inline fn get_uniform_ptr(self: *Controller, comptime name: UniformName) *@FieldType(UniformCollection, @tagName(name)) {
             return &@field(self.uniforms, @tagName(name));
@@ -2091,7 +2091,7 @@ pub fn GraphicsController(
         }
 
         fn point_is_within_target(self: *Controller, tex: TextureName, point: Vec3(u32)) bool {
-            const tex_idx = @intFromEnum(tex);
+            const tex_idx = @backingInt(tex);
             const size = self.textures_sizes[tex_idx];
             return point.x < size.x and point.y < size.y and point.z < size.z;
         }
@@ -2619,70 +2619,70 @@ pub fn GraphicsController(
             assert_with_reason(!self.download_occured, src, "no download must have occured during the command buffer when calling this function", .{});
         }
         fn assert_window_initialized(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.windows_init[@intFromEnum(name)] == true, src, "window `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.windows_init[@backingInt(name)] == true, src, "window `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_window_NOT_initialized(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.windows_init[@intFromEnum(name)] == false, src, "window `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.windows_init[@backingInt(name)] == false, src, "window `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_window_claimed(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.windows_claimed[@intFromEnum(name)] == true, src, "window `{s}` was not claimed", .{@tagName(name)});
+            assert_with_reason(self.windows_claimed[@backingInt(name)] == true, src, "window `{s}` was not claimed", .{@tagName(name)});
         }
         fn assert_window_NOT_claimed(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.windows_claimed[@intFromEnum(name)] == false, src, "window `{s}` was already claimed", .{@tagName(name)});
+            assert_with_reason(self.windows_claimed[@backingInt(name)] == false, src, "window `{s}` was already claimed", .{@tagName(name)});
         }
         fn assert_vert_buffer_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.vertex_buffers_init[@intFromEnum(name)] == true, src, "vertex buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.vertex_buffers_init[@backingInt(name)] == true, src, "vertex buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_vert_buffer_NOT_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.vertex_buffers_init[@intFromEnum(name)] == false, src, "vertex buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.vertex_buffers_init[@backingInt(name)] == false, src, "vertex buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_storage_buffer_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.storage_buffers_init[@intFromEnum(name)] == true, src, "storage buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.storage_buffers_init[@backingInt(name)] == true, src, "storage buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_storage_buffer_NOT_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.storage_buffers_init[@intFromEnum(name)] == false, src, "storage buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.storage_buffers_init[@backingInt(name)] == false, src, "storage buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_index_buffer_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.index_buffers_init[@intFromEnum(name)] == true, src, "index buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.index_buffers_init[@backingInt(name)] == true, src, "index buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_index_buffer_NOT_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.index_buffers_init[@intFromEnum(name)] == false, src, "index buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.index_buffers_init[@backingInt(name)] == false, src, "index buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_indirect_buffer_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.indirect_draw_buffers_init[@intFromEnum(name)] == true, src, "indirect draw buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.indirect_draw_buffers_init[@backingInt(name)] == true, src, "indirect draw buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_indirect_buffer_NOT_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.indirect_draw_buffers_init[@intFromEnum(name)] == false, src, "indirect draw buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.indirect_draw_buffers_init[@backingInt(name)] == false, src, "indirect draw buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_download_buffer_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.download_buffers_init[@intFromEnum(name)] == true, src, "download transfer buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.download_buffers_init[@backingInt(name)] == true, src, "download transfer buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_download_buffer_NOT_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.download_buffers_init[@intFromEnum(name)] == false, src, "download transfer buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.download_buffers_init[@backingInt(name)] == false, src, "download transfer buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_upload_buffer_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.upload_buffers_init[@intFromEnum(name)] == true, src, "upload transfer buffer `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.upload_buffers_init[@backingInt(name)] == true, src, "upload transfer buffer `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_upload_buffer_NOT_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.upload_buffers_init[@intFromEnum(name)] == false, src, "upload transfer buffer `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.upload_buffers_init[@backingInt(name)] == false, src, "upload transfer buffer `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_texture_initialized(self: *const Controller, name: TextureName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.textures_init[@intFromEnum(name)] == true, src, "texture `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.textures_init[@backingInt(name)] == true, src, "texture `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_texture_NOT_initialized(self: *const Controller, name: TextureName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.textures_init[@intFromEnum(name)] == false, src, "texture `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.textures_init[@backingInt(name)] == false, src, "texture `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_sampler_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.samplers_init[@intFromEnum(name)] == true, src, "sampler `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.samplers_init[@backingInt(name)] == true, src, "sampler `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_sampler_NOT_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.samplers_init[@intFromEnum(name)] == false, src, "sampler `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.samplers_init[@backingInt(name)] == false, src, "sampler `{s}` was already initialized", .{@tagName(name)});
         }
         fn assert_fence_initialized(self: *const Controller, name: FenceName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.fences_init[@intFromEnum(name)] == true, src, "fence `{s}` was not initialized", .{@tagName(name)});
+            assert_with_reason(self.fences_init[@backingInt(name)] == true, src, "fence `{s}` was not initialized", .{@tagName(name)});
         }
         fn assert_fence_NOT_initialized(self: *const Controller, name: FenceName, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(self.fences_init[@intFromEnum(name)] == false, src, "fence `{s}` was already initialized", .{@tagName(name)});
+            assert_with_reason(self.fences_init[@backingInt(name)] == false, src, "fence `{s}` was already initialized", .{@tagName(name)});
         }
 
         pub const GrowAndCopyGPUBufferDetails = struct {
@@ -2711,7 +2711,7 @@ pub fn GraphicsController(
             controller: *Controller,
 
             fn ensure_upload_buffer_capacity(self: UploadPass, buf: UploadBufferName, need_byte_cap: u32) !void {
-                const idx = @intFromEnum(buf);
+                const idx = @backingInt(buf);
                 const curr_byte_cap = self.controller.upload_buffer_byte_caps[idx];
                 if (need_byte_cap <= curr_byte_cap) return;
 
@@ -2753,7 +2753,7 @@ pub fn GraphicsController(
 
             /// returns the slice and the byte offset it started from (for use in a CopyPass)
             fn get_next_unused_upload_slice(self: UploadPass, buffer: UploadBufferName, num_bytes: u32, optional_texel_size: ?u32) !struct { []u8, u32 } {
-                const idx = @intFromEnum(buffer);
+                const idx = @backingInt(buffer);
                 const start = self.controller.upload_bytes_written[idx];
                 const aligned_start = if (optional_texel_size) |texel_block_size| std.mem.alignForward(u32, start, @max(TEXTURE_TRANSFER_MIN_ALIGN, texel_block_size)) else start;
                 const end = aligned_start + num_bytes;
@@ -2824,7 +2824,7 @@ pub fn GraphicsController(
             fn upload_to_vertex_buffer_internal(self: UploadPass, comptime dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadBufferName, source: anytype, comptime TYPE_CHECK: bool) !void {
                 self.controller.stage.assert(.UPLOAD_TO_GPU, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const dest_idx = @intFromEnum(dest);
+                const dest_idx = @backingInt(dest);
                 const dest_type = INTERNAL.VERTEX_BUFFER_TYPES[dest_idx];
                 if (TYPE_CHECK) {
                     const source_element_type = element_type(@TypeOf(source));
@@ -2851,13 +2851,13 @@ pub fn GraphicsController(
             pub fn upload_to_vertex_buffer_no_type_check(self: UploadPass, comptime dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadBufferName, source: anytype) !void {
                 return self.upload_to_vertex_buffer_internal(dest, dest_index_of_first_vertex, transfer_buf, source, false);
             }
-            pub fn upload_to_vertex_buffer_typed(self: UploadPass, comptime dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.VERTEX_BUFFER_TYPES[@intFromEnum(dest)]) !void {
+            pub fn upload_to_vertex_buffer_typed(self: UploadPass, comptime dest: VertexBufferName, dest_index_of_first_vertex: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.VERTEX_BUFFER_TYPES[@backingInt(dest)]) !void {
                 return self.upload_to_vertex_buffer_internal(dest, dest_index_of_first_vertex, transfer_buf, source, true);
             }
-            pub fn upload_to_index_buffer(self: UploadPass, comptime dest: IndexBufferName, dest_index_of_first_index: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.INDEX_BUFFER_TYPES[@intFromEnum(dest)]) !void {
+            pub fn upload_to_index_buffer(self: UploadPass, comptime dest: IndexBufferName, dest_index_of_first_index: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.INDEX_BUFFER_TYPES[@backingInt(dest)]) !void {
                 self.controller.stage.assert(.UPLOAD_TO_GPU, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const dest_idx = @intFromEnum(dest);
+                const dest_idx = @backingInt(dest);
                 const ELEM = INTERNAL.INDEX_BUFFER_TYPES[dest_idx];
                 const dest_offset = @sizeOf(ELEM) * dest_index_of_first_index;
                 const transfer_len: u32 = @intCast(source_bytes.len);
@@ -2873,10 +2873,10 @@ pub fn GraphicsController(
                 };
                 self.controller.upload_list.append_one(details, self.controller.list_alloc);
             }
-            pub fn upload_to_indirect_draw_call_buffer(self: UploadPass, comptime dest: IndirectDrawBufferName, dest_index_of_first_draw_call: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.INDIRECT_BUFFER_TYPES[@intFromEnum(dest)]) !void {
+            pub fn upload_to_indirect_draw_call_buffer(self: UploadPass, comptime dest: IndirectDrawBufferName, dest_index_of_first_draw_call: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.INDIRECT_BUFFER_TYPES[@backingInt(dest)]) !void {
                 self.controller.stage.assert(.UPLOAD_TO_GPU, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const dest_idx = @intFromEnum(dest);
+                const dest_idx = @backingInt(dest);
                 const ELEM = INTERNAL.INDIRECT_BUFFER_TYPES[dest_idx];
                 const dest_offset = @sizeOf(ELEM) * dest_index_of_first_draw_call;
                 const transfer_len: u32 = @intCast(source_bytes.len);
@@ -2895,7 +2895,7 @@ pub fn GraphicsController(
             fn upload_to_storage_buffer_internal(self: UploadPass, comptime dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadBufferName, source: anytype, comptime TYPE_CHECK: bool) !void {
                 self.controller.stage.assert(.UPLOAD_TO_GPU, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
-                const dest_idx = @intFromEnum(dest);
+                const dest_idx = @backingInt(dest);
                 const dest_type = INTERNAL.STORAGE_BUFFER_TYPES[dest_idx];
                 if (TYPE_CHECK) {
                     const source_element_type = element_type(@TypeOf(source));
@@ -2921,14 +2921,14 @@ pub fn GraphicsController(
             pub fn upload_to_storage_buffer_no_type_check(self: UploadPass, comptime dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadBufferName, source: anytype) !void {
                 return self.upload_to_storage_buffer_internal(dest, dest_index_of_first_element, transfer_buf, source, false);
             }
-            pub fn upload_to_storage_buffer_typed(self: UploadPass, comptime dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(dest)]) !void {
+            pub fn upload_to_storage_buffer_typed(self: UploadPass, comptime dest: StorageBufferName, dest_index_of_first_element: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.STORAGE_BUFFER_TYPES[@backingInt(dest)]) !void {
                 return self.upload_to_storage_buffer_internal(dest, dest_index_of_first_element, transfer_buf, source, true);
             }
             fn upload_to_texture_internal(self: UploadPass, comptime dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadBufferName, source: anytype, comptime TYPE_CHECK: bool) !void {
                 self.controller.stage.assert(.UPLOAD_TO_GPU, @src());
                 const source_bytes: []const u8 = bytes_cast(source);
                 const source_len: u32 = @intCast(source_bytes.len);
-                const dest_idx = @intFromEnum(dest);
+                const dest_idx = @backingInt(dest);
                 const dest_texel_size = INTERNAL.TEXTURE_DEFS[dest_idx].pixel_format.texel_block_size();
                 const dest_byte_size = dest_size.x * dest_size.y * dest_size.z * dest_texel_size;
                 if (TYPE_CHECK) {
@@ -2954,7 +2954,7 @@ pub fn GraphicsController(
             pub fn upload_to_texture_no_type_check(self: UploadPass, comptime dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadBufferName, source: anytype) !void {
                 return self.upload_to_texture_internal(dest, dest_pos, dest_size, dest_mip_level, dest_layer, transfer_buf, source, false);
             }
-            pub fn upload_to_texture_typed(self: UploadPass, comptime dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.TEXTURE_DEFS[@intFromEnum(dest)].pixel_format.struct_type()) !void {
+            pub fn upload_to_texture_typed(self: UploadPass, comptime dest: TextureName, dest_pos: Vec3(u32), dest_size: Vec3(u32), dest_mip_level: u32, dest_layer: u32, transfer_buf: UploadBufferName, source: []const INTERNAL.TEXTURE_DEFS[@backingInt(dest)].pixel_format.struct_type()) !void {
                 return self.upload_to_texture_internal(dest, dest_pos, dest_size, dest_mip_level, dest_layer, transfer_buf, source, false);
             }
 
@@ -3114,7 +3114,7 @@ pub fn GraphicsController(
             controller: *Controller,
 
             fn get_download_slice(self: DownloadPass, buffer: DownloadBufferName, start: u32, end_excluded: u32) ![]const u8 {
-                const idx = @intFromEnum(buffer);
+                const idx = @backingInt(buffer);
                 assert_with_reason(start < end_excluded, @src(), "invalid slice for download", .{});
                 if (!self.controller.mapped_download_buffers[idx]) {
                     const ptr = try self.controller.gpu.map_transfer_buffer(self.controller.get_download_transfer_buffer(buffer), false);
@@ -3126,7 +3126,7 @@ pub fn GraphicsController(
 
             /// returns the byte offset the slice will start from (for use in a CopyPass)
             fn get_next_unused_download_slice_offset(self: DownloadPass, buffer: DownloadBufferName, num_bytes: u32, optional_texel_size: ?u32) !u32 {
-                const idx = @intFromEnum(buffer);
+                const idx = @backingInt(buffer);
                 const start = self.controller.download_bytes_read[idx];
                 const aligned_start = if (optional_texel_size) |texel_block_size| std.mem.alignForward(u32, start, @max(TEXTURE_TRANSFER_MIN_ALIGN, texel_block_size)) else start;
                 const end = aligned_start + num_bytes;
@@ -3137,7 +3137,7 @@ pub fn GraphicsController(
 
             fn handle_possible_transfer_buffer_grow(self: DownloadPass, buf: DownloadBufferName, offset: u32, len: u32, need_cap: u32) !void {
                 var grow_cap: u32 = 0;
-                const idx = @intFromEnum(buf);
+                const idx = @backingInt(buf);
                 const curr_cap = self.controller.download_buffer_byte_caps[idx];
                 switch (self.controller.download_buffer_grow_mode) {
                     .NO_GROW => {
@@ -3162,7 +3162,7 @@ pub fn GraphicsController(
             }
 
             fn queue_grow_transfer_buffer(self: DownloadPass, buf: DownloadBufferName, curr_size: u32, new_size: u32) !void {
-                const buf_idx = @intFromEnum(buf);
+                const buf_idx = @backingInt(buf);
                 for (self.controller.grow_and_copy_download_transfer_list.zig_slice_entire()) |*prev_grow| {
                     if (prev_grow.idx == buf_idx) {
                         prev_grow.new_len = @max(prev_grow.new_len, new_size);
@@ -3213,7 +3213,7 @@ pub fn GraphicsController(
             fn download_from_vertex_buffer_internal(self: DownloadPass, comptime source: VertexBufferName, source_index_of_first_element: u32, source_element_count: u32, transfer_buf: DownloadBufferName, dest: anytype, comptime TYPE_CHECK: bool) ![]element_type(@TypeOf(dest)) {
                 self.controller.stage.assert(.DOWNLOAD_FROM_GPU, @src());
                 const dest_bytes: []u8 = bytes_cast(dest);
-                const source_idx = @intFromEnum(source);
+                const source_idx = @backingInt(source);
                 const ELEM = INTERNAL.VERTEX_BUFFER_TYPES[source_idx];
                 const source_offset = @sizeOf(ELEM) * source_index_of_first_element;
                 if (comptime TYPE_CHECK) {
@@ -3270,8 +3270,8 @@ pub fn GraphicsController(
             fn download_from_index_buffer_internal(self: DownloadPass, comptime source: IndexBufferName, source_index_of_first_index: u32, source_index_count: u32, transfer_buf: DownloadBufferName, dest: anytype, comptime TYPE_CHECK: bool) ![]element_type(@TypeOf(dest)) {
                 self.controller.stage.assert(.DOWNLOAD_FROM_GPU, @src());
                 const dest_bytes: []u8 = bytes_cast(dest);
-                const source_idx = @intFromEnum(source);
-                const ELEM = INTERNAL.INDEX_BUFFER_TYPES[@intFromEnum(source)];
+                const source_idx = @backingInt(source);
+                const ELEM = INTERNAL.INDEX_BUFFER_TYPES[@backingInt(source)];
                 if (comptime TYPE_CHECK) {
                     const DEST_ELEM = element_type(@TypeOf(dest));
                     assert_with_reason(ELEM == DEST_ELEM, @src(), "source element type must be the same as the dest index buffer element type, but `{s}` != `{s}`", .{ @typeName(ELEM), @typeName(DEST_ELEM) });
@@ -3316,7 +3316,7 @@ pub fn GraphicsController(
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
             ///
             /// dest slice will not contain the expected data until the Fence or PendingFinalDownloadHandle is completed
-            pub fn download_from_index_buffer_typed(self: DownloadPass, comptime source: IndexBufferName, source_index_of_first_index: u32, source_index_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.INDEX_BUFFER_TYPES[@intFromEnum(source)]) ![]INTERNAL.INDEX_BUFFER_TYPES[@intFromEnum(source)] {
+            pub fn download_from_index_buffer_typed(self: DownloadPass, comptime source: IndexBufferName, source_index_of_first_index: u32, source_index_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.INDEX_BUFFER_TYPES[@backingInt(source)]) ![]INTERNAL.INDEX_BUFFER_TYPES[@backingInt(source)] {
                 return self.download_from_index_buffer_internal(source, source_index_of_first_index, source_index_count, transfer_buf, dest, true);
             }
             //TODO flexible funcs for other buffers
@@ -3325,11 +3325,11 @@ pub fn GraphicsController(
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
             ///
             /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
-            pub fn download_from_indirect_draw_call_buffer(self: DownloadPass, comptime source: IndirectDrawBufferName, source_index_of_first_draw_call: u32, source_draw_call_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.INDIRECT_BUFFER_TYPES[@intFromEnum(source)]) ![]INTERNAL.INDIRECT_BUFFER_TYPES[@intFromEnum(source)] {
+            pub fn download_from_indirect_draw_call_buffer(self: DownloadPass, comptime source: IndirectDrawBufferName, source_index_of_first_draw_call: u32, source_draw_call_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.INDIRECT_BUFFER_TYPES[@backingInt(source)]) ![]INTERNAL.INDIRECT_BUFFER_TYPES[@backingInt(source)] {
                 self.controller.stage.assert(.DOWNLOAD_FROM_GPU, @src());
                 const dest_bytes: []u8 = bytes_cast(dest);
-                const source_idx = @intFromEnum(source);
-                const ELEM = INTERNAL.INDIRECT_BUFFER_TYPES[@intFromEnum(source)];
+                const source_idx = @backingInt(source);
+                const ELEM = INTERNAL.INDIRECT_BUFFER_TYPES[@backingInt(source)];
                 const source_offset = @sizeOf(ELEM) * source_index_of_first_draw_call;
                 const transfer_len: u32 = @sizeOf(ELEM) * source_draw_call_count;
                 const buffer_end = source_offset + transfer_len;
@@ -3354,11 +3354,11 @@ pub fn GraphicsController(
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
             ///
             /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
-            pub fn download_from_storage_buffer(self: DownloadPass, comptime source: StorageBufferName, source_index_of_first_element: u32, source_element_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(source)]) ![]INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(source)] {
+            pub fn download_from_storage_buffer(self: DownloadPass, comptime source: StorageBufferName, source_index_of_first_element: u32, source_element_count: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.STORAGE_BUFFER_TYPES[@backingInt(source)]) ![]INTERNAL.STORAGE_BUFFER_TYPES[@backingInt(source)] {
                 self.controller.stage.assert(.DOWNLOAD_FROM_GPU, @src());
                 const dest_bytes: []u8 = bytes_cast(dest);
-                const source_idx = @intFromEnum(source);
-                const ELEM = INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(source)];
+                const source_idx = @backingInt(source);
+                const ELEM = INTERNAL.STORAGE_BUFFER_TYPES[@backingInt(source)];
                 const source_offset = @sizeOf(ELEM) * source_index_of_first_element;
                 const transfer_len: u32 = @sizeOf(ELEM) * source_element_count;
                 const buffer_end = source_offset + transfer_len;
@@ -3385,7 +3385,7 @@ pub fn GraphicsController(
                 const ELEM = element_type(@TypeOf(dest));
                 var source_format: GPU_TextureFormat = undefined;
                 var source_full_size: Vec3(u32) = undefined;
-                const tex_idx = @intFromEnum(source_tex_name);
+                const tex_idx = @backingInt(source_tex_name);
                 const def = INTERNAL.TEXTURE_DEFS[tex_idx];
                 source_format = def.pixel_format;
                 source_full_size = self.controller.textures_sizes[tex_idx];
@@ -3434,7 +3434,7 @@ pub fn GraphicsController(
             /// Returns the actual slice of `dest` that WILL BE written to when the pass is ended and submitted (in case it is smaller than the provided slice)
             ///
             /// dest slice will not contain the expected data until the PendingFinalDownloadHandle is submitted
-            pub fn download_from_texture_typed(self: DownloadPass, comptime source_tex_name: TextureName, source_pos: Vec3(u32), source_size: Vec3(u32), source_mip_level: u32, source_layer: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.TEXTURE_DEFS[@intFromEnum(source_tex_name)].pixel_format.struct_type()) ![]INTERNAL.TEXTURE_DEFS[@intFromEnum(source_tex_name)].pixel_format.struct_type() {
+            pub fn download_from_texture_typed(self: DownloadPass, comptime source_tex_name: TextureName, source_pos: Vec3(u32), source_size: Vec3(u32), source_mip_level: u32, source_layer: u32, transfer_buf: DownloadBufferName, dest: []INTERNAL.TEXTURE_DEFS[@backingInt(source_tex_name)].pixel_format.struct_type()) ![]INTERNAL.TEXTURE_DEFS[@backingInt(source_tex_name)].pixel_format.struct_type() {
                 return self.download_from_texture_internal(source_tex_name, source_pos, source_size, source_mip_level, source_layer, transfer_buf, dest, false);
             }
 
@@ -3506,7 +3506,7 @@ pub fn GraphicsController(
 
             pub fn get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) !?*GPU_Texture {
                 self.controller.stage.assert_any(&.{ .WAITING_FOR_RENDER_COMPUTE_OR_GPU_COPY, .COPY_PASS, .RENDER_PASS, .COMPUTE_PASS }, @src());
-                const win_idx = @intFromEnum(window_name);
+                const win_idx = @backingInt(window_name);
                 if (self.controller.swapchain_is_cached[win_idx]) {
                     return self.controller.swapchain_cache[win_idx].texture;
                 } else {
@@ -3519,7 +3519,7 @@ pub fn GraphicsController(
             }
             pub fn get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) !GPU_SwapchainTexture {
                 self.controller.stage.assert_any(&.{ .WAITING_FOR_RENDER_COMPUTE_OR_GPU_COPY, .COPY_PASS, .RENDER_PASS, .COMPUTE_PASS }, @src());
-                const win_idx = @intFromEnum(window_name);
+                const win_idx = @backingInt(window_name);
                 if (self.controller.swapchain_is_cached[win_idx]) {
                     return self.controller.swapchain_cache[win_idx];
                 } else {
@@ -3532,7 +3532,7 @@ pub fn GraphicsController(
             }
             pub fn wait_and_get_swapchain_texture_for_window(self: CommandBuffer, window_name: WindowName) !?*GPU_Texture {
                 self.controller.stage.assert_any(&.{ .WAITING_FOR_RENDER_COMPUTE_OR_GPU_COPY, .COPY_PASS, .RENDER_PASS, .COMPUTE_PASS }, @src());
-                const win_idx = @intFromEnum(window_name);
+                const win_idx = @backingInt(window_name);
                 if (self.controller.swapchain_is_cached[win_idx]) {
                     return self.controller.swapchain_cache[win_idx].texture;
                 } else {
@@ -3545,7 +3545,7 @@ pub fn GraphicsController(
             }
             pub fn wait_and_get_swapchain_texture_and_size_for_window(self: CommandBuffer, window_name: WindowName) !GPU_SwapchainTexture {
                 self.controller.stage.assert_any(&.{ .WAITING_FOR_RENDER_COMPUTE_OR_GPU_COPY, .COPY_PASS, .RENDER_PASS, .COMPUTE_PASS }, @src());
-                const win_idx = @intFromEnum(window_name);
+                const win_idx = @backingInt(window_name);
                 if (self.controller.swapchain_is_cached[win_idx]) {
                     return self.controller.swapchain_cache[win_idx];
                 } else {
@@ -3568,7 +3568,7 @@ pub fn GraphicsController(
             pub fn begin_render_pass(self: CommandBuffer, comptime pipeline: RenderPipelineName, color_targets: []const ColorTarget, opt_depth_target: ?DepthTarget) !?RenderPass {
                 self.controller.stage.assert(.WAITING_FOR_RENDER_COMPUTE_OR_GPU_COPY, @src());
                 assert_with_reason(color_targets.len <= 8, @src(), "GraphicsController only supports up to 8 color targets, got {d}", .{color_targets.len});
-                const DEF = INTERNAL.PIPELINE_DEFS[@intFromEnum(pipeline)];
+                const DEF = INTERNAL.PIPELINE_DEFS[@backingInt(pipeline)];
                 assert_with_reason(DEF.target_info.num_color_targets == num_cast(color_targets.len, u32), @src(), "mismatched number of color targets for render pipeline `{s}`, need {d}, got {d}", .{ @tagName(pipeline), DEF.target_info.num_color_targets, color_targets.len });
                 assert_with_reason(DEF.depth_stencil_options.enable_depth_test == (opt_depth_target != null), @src(), "render pipeline `{s}`, needs {d} depth targets, got {d}", .{ @tagName(pipeline), if (DEF.depth_stencil_options.enable_depth_test) @as(u8, 1) else @as(u8, 0), if (opt_depth_target != null) @as(u8, 1) else @as(u8, 0) });
                 var targets: [8]GPU_ColorTargetInfo = undefined;
@@ -3710,8 +3710,8 @@ pub fn GraphicsController(
 
             fn assert_valid_idx_buffer_end(self: RenderPass, first_idx: u32, num_indexes: u32, comptime src: ?std.builtin.SourceLocation) void {
                 const end_index_excl = first_idx + num_indexes;
-                const byte_end_exclusive = INTERNAL.INDEX_BUFFER_TAGS[@intFromEnum(self.controller.bound_index_buffer)].size() * (end_index_excl);
-                assert_with_reason(self.controller.index_buffer_byte_caps[@intFromEnum(self.controller.bound_index_buffer)] >= byte_end_exclusive, src, "index buffer `{s}` does not have at least {d} indexes (start {d} + count {d})", .{ @tagName(self.controller.bound_index_buffer), end_index_excl, first_idx, num_indexes });
+                const byte_end_exclusive = INTERNAL.INDEX_BUFFER_TAGS[@backingInt(self.controller.bound_index_buffer)].size() * (end_index_excl);
+                assert_with_reason(self.controller.index_buffer_byte_caps[@backingInt(self.controller.bound_index_buffer)] >= byte_end_exclusive, src, "index buffer `{s}` does not have at least {d} indexes (start {d} + count {d})", .{ @tagName(self.controller.bound_index_buffer), end_index_excl, first_idx, num_indexes });
             }
 
             /// Notably this does not bind index buffers, since there is no prescribed index buffer for any specific pipeline
@@ -3730,7 +3730,7 @@ pub fn GraphicsController(
                 const allowed_vert_uniforms = INTERNAL.allowed_uniforms_for_vert_shader(info.vertex);
                 const allowed_frag_uniforms = INTERNAL.allowed_uniforms_for_frag_shader(info.fragment);
                 for (allowed_vert_uniforms) |uniform| {
-                    const uni_idx = @intFromEnum(uniform.uniform);
+                    const uni_idx = @backingInt(uniform.uniform);
                     var ptr: [*]const u8 = @ptrCast(&self.controller.uniforms);
                     const uni_size = INTERNAL.UNIFORM_SIZES[uni_idx];
                     const uni_offset = INTERNAL.UNIFORM_OFFSETS[uni_idx];
@@ -3738,7 +3738,7 @@ pub fn GraphicsController(
                     self.controller.sdl_cmd_buf.push_vertex_uniform_data(uniform.register, @ptrCast(ptr), uni_size);
                 }
                 for (allowed_frag_uniforms) |uniform| {
-                    const uni_idx = @intFromEnum(uniform.uniform);
+                    const uni_idx = @backingInt(uniform.uniform);
                     var ptr: [*]const u8 = @ptrCast(&self.controller.uniforms);
                     const uni_size = INTERNAL.UNIFORM_SIZES[uni_idx];
                     const uni_offset = INTERNAL.UNIFORM_OFFSETS[uni_idx];
@@ -3859,7 +3859,7 @@ pub fn GraphicsController(
 
             pub fn bind_index_buffer(self: RenderPass, buffer: IndexBufferName, offset: u32) void {
                 self.controller.stage.assert(.RENDER_PASS, @src());
-                const buf_idx = @intFromEnum(buffer);
+                const buf_idx = @backingInt(buffer);
                 var bind = GPU_BufferBinding{
                     .buffer = self.controller.get_index_buffer(buffer),
                     .offset = offset,
@@ -3880,7 +3880,7 @@ pub fn GraphicsController(
             }
             pub fn draw_primitives_indirect(self: RenderPass, indirect_draw_buffer: IndirectDrawBufferName, first_draw_call_index: u32, num_draw_calls: u32) void {
                 self.controller.stage.assert(.RENDER_PASS, @src());
-                const buf_idx = @intFromEnum(indirect_draw_buffer);
+                const buf_idx = @backingInt(indirect_draw_buffer);
                 const buf = self.controller.get_indirect_draw_buffer(indirect_draw_buffer);
                 assert_with_reason(INTERNAL.INDIRECT_BUFFER_MODES[buf_idx] == .NORMAL_INDIRECT, @src(), "indirect draw call buffer `{s}` is staged to contain per-index draw calls (GPU_IndexedIndirectDrawCommand), not per-vertex draw calls (GPU_IndirectDrawCommand)", .{@tagName(indirect_draw_buffer)});
                 //TODO assert each indirect draw is valid
@@ -3902,7 +3902,7 @@ pub fn GraphicsController(
             pub fn draw_indexed_primitives_indirect(self: RenderPass, indirect_draw_buffer: IndirectDrawBufferName, first_draw_call_index: u32, num_draw_calls: u32) void {
                 self.controller.stage.assert(.RENDER_PASS, @src());
                 assert_with_reason(self.controller.index_buffer_bound, @src(), "cannot draw indexed data when no index buffer is bound", .{});
-                const buf_idx = @intFromEnum(indirect_draw_buffer);
+                const buf_idx = @backingInt(indirect_draw_buffer);
                 const buf = self.controller.get_indirect_draw_buffer(indirect_draw_buffer);
                 assert_with_reason(INTERNAL.INDIRECT_BUFFER_MODES[buf_idx] == .INDEXED_INDIRECT, @src(), "indirect draw call buffer `{s}` is staged to contain per-vertex draw calls (GPU_IndirectDrawCommand), not per-index draw calls (GPU_IndexedIndirectDrawCommand)", .{@tagName(indirect_draw_buffer)});
                 //TODO assert each indirect draw is valid
@@ -3974,7 +3974,7 @@ pub fn GraphicsController(
 
             pub const PIPELINE_DEFS = _RENDER_PIPELINE_DEFS;
             pub inline fn get_render_pipeline_info(pipeline: RenderPipelineName) _RenderPipelineDefinition {
-                return PIPELINE_DEFS[@intFromEnum(pipeline)];
+                return PIPELINE_DEFS[@backingInt(pipeline)];
             }
 
             pub const ALLOWED_UNIFORMS_FLAT_FRAG = all_allowed_uniforms_flat_frag_const;
@@ -3982,19 +3982,19 @@ pub fn GraphicsController(
             pub const UNIFORMS_STARTS_FRAG = uniform_starts_frag_const;
             pub const UNIFORMS_STARTS_VERT = uniform_starts_vert_const;
             pub inline fn num_uniforms_for_frag_shader(frag_shader: FragmentShaderName) u32 {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return UNIFORMS_STARTS_FRAG[idx + 1] - UNIFORMS_STARTS_FRAG[idx];
             }
             pub inline fn num_uniforms_for_vert_shader(vert_shader: VertexShaderName) u32 {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return UNIFORMS_STARTS_VERT[idx + 1] - UNIFORMS_STARTS_VERT[idx];
             }
             pub inline fn allowed_uniforms_for_frag_shader(frag_shader: FragmentShaderName) []const _ShaderAllowedUniform {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return ALLOWED_UNIFORMS_FLAT_FRAG[UNIFORMS_STARTS_FRAG[idx]..UNIFORMS_STARTS_FRAG[idx + 1]];
             }
             pub inline fn allowed_uniforms_for_vert_shader(vert_shader: VertexShaderName) []const _ShaderAllowedUniform {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return ALLOWED_UNIFORMS_FLAT_VERT[UNIFORMS_STARTS_VERT[idx]..UNIFORMS_STARTS_VERT[idx + 1]];
             }
             pub fn uniform_register_for_pipeline_stage(pipeline: RenderPipelineName, uniform: UniformName, comptime stage: ShaderStage) ?u32 {
@@ -4021,19 +4021,19 @@ pub fn GraphicsController(
             pub const STORAGE_BUFFERS_STARTS_FRAG = storage_buffer_starts_frag_const;
             pub const STORAGE_BUFFERS_STARTS_VERT = storage_buffer_starts_vert_const;
             pub inline fn num_storage_buffers_for_frag_shader(frag_shader: FragmentShaderName) u32 {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return STORAGE_BUFFERS_STARTS_FRAG[idx + 1] - STORAGE_BUFFERS_STARTS_FRAG[idx];
             }
             pub inline fn num_storage_buffers_for_vert_shader(vert_shader: VertexShaderName) u32 {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return STORAGE_BUFFERS_STARTS_VERT[idx + 1] - STORAGE_BUFFERS_STARTS_VERT[idx];
             }
             pub inline fn allowed_storage_buffers_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedStorageBuffer {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return ALLOWED_STORAGE_BUFFERS_FLAT_FRAG[STORAGE_BUFFERS_STARTS_FRAG[idx]..STORAGE_BUFFERS_STARTS_FRAG[idx + 1]];
             }
             pub inline fn allowed_storage_buffers_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedStorageBuffer {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return ALLOWED_STORAGE_BUFFERS_FLAT_VERT[STORAGE_BUFFERS_STARTS_VERT[idx]..STORAGE_BUFFERS_STARTS_VERT[idx + 1]];
             }
             pub fn storage_buffer_register_for_render_pipeline_stage(pipeline: RenderPipelineName, buffer: StorageBufferName, comptime stage: ShaderStage) ?u32 {
@@ -4060,19 +4060,19 @@ pub fn GraphicsController(
             pub const STORAGE_TEXTURES_STARTS_FRAG = storage_texture_starts_frag_const;
             pub const STORAGE_TEXTURES_STARTS_VERT = storage_texture_starts_vert_const;
             pub inline fn num_storage_textures_for_frag_shader(frag_shader: FragmentShaderName) u32 {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return STORAGE_TEXTURES_STARTS_FRAG[idx + 1] - STORAGE_TEXTURES_STARTS_FRAG[idx];
             }
             pub inline fn num_storage_textures_for_vert_shader(vert_shader: VertexShaderName) u32 {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return STORAGE_TEXTURES_STARTS_VERT[idx + 1] - STORAGE_TEXTURES_STARTS_VERT[idx];
             }
             pub inline fn allowed_storage_textures_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedStorageTexture {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return ALLOWED_STORAGE_TEXTURES_FLAT_FRAG[STORAGE_TEXTURES_STARTS_FRAG[idx]..STORAGE_TEXTURES_STARTS_FRAG[idx + 1]];
             }
             pub inline fn allowed_storage_textures_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedStorageTexture {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return ALLOWED_STORAGE_TEXTURES_FLAT_VERT[STORAGE_TEXTURES_STARTS_VERT[idx]..STORAGE_TEXTURES_STARTS_VERT[idx + 1]];
             }
             pub fn storage_texture_cpu_register_for_render_pipeline_stage(pipeline: RenderPipelineName, texture: TextureName, comptime stage: ShaderStage) ?u32 {
@@ -4099,19 +4099,19 @@ pub fn GraphicsController(
             pub const SAMPLERS_STARTS_FRAG = sample_pair_starts_frag_const;
             pub const SAMPLERS_STARTS_VERT = sample_pair_starts_vert_const;
             pub inline fn num_sample_pairs_for_frag_shader(frag_shader: FragmentShaderName) u32 {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return SAMPLERS_STARTS_FRAG[idx + 1] - SAMPLERS_STARTS_FRAG[idx];
             }
             pub inline fn num_sample_pairs_for_vert_shader(vert_shader: VertexShaderName) u32 {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return SAMPLERS_STARTS_VERT[idx + 1] - SAMPLERS_STARTS_VERT[idx];
             }
             pub inline fn allowed_sample_pairs_for_frag_shaders(frag_shader: FragmentShaderName) []const _ShaderAllowedSamplePair {
-                const idx = @intFromEnum(frag_shader);
+                const idx = @backingInt(frag_shader);
                 return ALLOWED_SAMPLERS_FLAT_FRAG[SAMPLERS_STARTS_FRAG[idx]..SAMPLERS_STARTS_FRAG[idx + 1]];
             }
             pub inline fn allowed_sample_pairs_for_vert_shaders(vert_shader: VertexShaderName) []const _ShaderAllowedSamplePair {
-                const idx = @intFromEnum(vert_shader);
+                const idx = @backingInt(vert_shader);
                 return ALLOWED_SAMPLERS_FLAT_VERT[SAMPLERS_STARTS_VERT[idx]..SAMPLERS_STARTS_VERT[idx + 1]];
             }
             pub fn sample_pair_cpu_register_for_render_pipeline_stage(pipeline: RenderPipelineName, sampler: SamplerName, texture: TextureName, comptime stage: ShaderStage) ?u32 {
@@ -4143,15 +4143,15 @@ pub fn GraphicsController(
             pub const VERTEX_BUFFER_TYPES = _VERTEX_BUFFER_TYPES;
             pub const VERTEX_BUFFER_ELEM_SIZES = _VERTEX_BUFFER_SIZES;
             pub inline fn allowed_vertex_buffer_names_for_pipeline(pipeline: RenderPipelineName) []const VertexBufferName {
-                const idx = @intFromEnum(pipeline);
+                const idx = @backingInt(pipeline);
                 return ALLOWED_VERTEX_BUFFER_NAMES_FOR_PIPELINE_FLAT[VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx]..VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx + 1]];
             }
             pub inline fn allowed_vertex_buffer_defs_for_pipeline(pipeline: RenderPipelineName) []const SDL3.GPU_VertexBufferDescription {
-                const idx = @intFromEnum(pipeline);
+                const idx = @backingInt(pipeline);
                 return ALLOWED_VERTEX_BUFFER_DEFS_FOR_PIPELINE_FLAT[VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx]..VERTEX_BUFFER_NAMES_DEFS_START_LOCS[idx + 1]];
             }
             pub inline fn allowed_vertex_buffer_attributes_for_pipeline(pipeline: RenderPipelineName) []const SDL3.GPU_VertexAttribute {
-                const idx = @intFromEnum(pipeline);
+                const idx = @backingInt(pipeline);
                 return ALLOWED_VERTEX_ATTRIBUTES_FOR_PIPELINE_FLAT[VERTEX_ATTRIBUTE_START_LOCS[idx]..VERTEX_ATTRIBUTE_START_LOCS[idx + 1]];
             }
             pub fn vertex_buffer_def_for_buffer_name_for_pipeline(pipeline: RenderPipelineName, name: VertexBufferName) ?SDL3.GPU_VertexBufferDescription {
@@ -4268,7 +4268,7 @@ pub fn GraphicsController(
             props: PropertiesID = .{},
 
             pub fn sdl_info(self: TextureInit) GPU_TextureCreateInfo {
-                const tex_idx = @intFromEnum(self.name);
+                const tex_idx = @backingInt(self.name);
                 const def = INTERNAL.TEXTURE_DEFS[tex_idx];
                 return GPU_TextureCreateInfo{
                     .format = def.pixel_format,
@@ -4292,7 +4292,7 @@ pub fn GraphicsController(
             pub fn sdl_info(self: SamplerInit) GPU_SamplerCreateInfo {
                 switch (self.settings) {
                     .DEFAULT => {
-                        const def = INTERNAL.SAMPLER_DEFS[@intFromEnum(self.name)];
+                        const def = INTERNAL.SAMPLER_DEFS[@backingInt(self.name)];
                         return GPU_SamplerCreateInfo{
                             .address_mode_x = def.address_mode_x,
                             .address_mode_y = def.address_mode_y,
@@ -4351,7 +4351,7 @@ pub fn GraphicsController(
             props: PropertiesID = .{},
 
             pub fn sdl_info(self: VertexBufferInit) GPU_BufferCreateInfo {
-                const idx = @intFromEnum(self.name);
+                const idx = @backingInt(self.name);
                 const SIZE = INTERNAL.VERTEX_BUFFER_ELEM_SIZES[idx];
                 return GPU_BufferCreateInfo{
                     .props = self.props,
@@ -4367,7 +4367,7 @@ pub fn GraphicsController(
             props: PropertiesID = .{},
 
             pub fn sdl_info(self: StorageBufferInit) GPU_BufferCreateInfo {
-                const idx = @intFromEnum(self.name);
+                const idx = @backingInt(self.name);
                 const SIZE = INTERNAL.STORAGE_BUFFER_ELEM_SIZES[idx];
                 return GPU_BufferCreateInfo{
                     .props = self.props,
@@ -4383,7 +4383,7 @@ pub fn GraphicsController(
             props: PropertiesID = .{},
 
             pub fn sdl_info(self: IndexBufferInit) GPU_BufferCreateInfo {
-                const SIZE: u32 = switch (INTERNAL.INDEX_BUFFER_TAGS[@intFromEnum(self.name)]) {
+                const SIZE: u32 = switch (INTERNAL.INDEX_BUFFER_TAGS[@backingInt(self.name)]) {
                     .U32 => 4,
                     .U16 => 2,
                 };
@@ -4493,7 +4493,7 @@ pub fn GraphicsController(
                 }
             }
             for (options.init_windows) |win| {
-                const win_idx = @intFromEnum(win.name);
+                const win_idx = @backingInt(win.name);
                 controller.assert_window_NOT_initialized(win.name, @src());
                 controller.assert_window_NOT_claimed(win.name, @src());
                 const sdl_info = win.sdl_info();
@@ -4515,7 +4515,7 @@ pub fn GraphicsController(
                 }
             }
             for (options.vertex_shaders[0..]) |vert| {
-                const vert_idx = @intFromEnum(vert.name);
+                const vert_idx = @backingInt(vert.name);
                 assert_with_reason(vert_shaders_init[vert_idx] == false, @src(), "vertex shader `{s}` was initialized more than once", .{@tagName(vert.name)});
                 assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.has_flag(vert.code.format), @src(), "vertex shader `{s}` has incompatible code format `{s}`", .{ @tagName(vert.name), @tagName(vert.code.format) });
                 const sdl_info = vert.sdl_info();
@@ -4533,7 +4533,7 @@ pub fn GraphicsController(
                 }
             }
             for (options.fragment_shaders[0..]) |frag| {
-                const frag_idx = @intFromEnum(frag.name);
+                const frag_idx = @backingInt(frag.name);
                 assert_with_reason(frag_shaders_init[frag_idx] == false, @src(), "fragment shader `{s}` was initialized more than once", .{@tagName(frag.name)});
                 assert_with_reason(INTERNAL.CREATE_OPTIONS.shader_formats.has_flag(frag.code.format), @src(), "fragment shader `{s}` has incompatible code format `{s}`", .{ @tagName(frag.name), @tagName(frag.code.format) });
                 const sdl_info = frag.sdl_info();
@@ -4552,17 +4552,17 @@ pub fn GraphicsController(
                 }
             }
             for (options.render_pipeline_init) |props| {
-                const idx = @intFromEnum(props.name);
+                const idx = @backingInt(props.name);
                 assert_with_reason(pipelines_props_init[idx] == false, @src(), "render pipeline `{s}` was given props more than once", .{@tagName(props.name)});
                 pipelines_props_init[idx] = true;
                 pipeline_props[idx] = props.props;
             }
             for (0..INTERNAL.NUM_RENDER_PIPELINES) |r| {
                 const def = INTERNAL.PIPELINE_DEFS[r];
-                const vert = vert_shaders[@intFromEnum(def.vertex)];
-                const frag = frag_shaders[@intFromEnum(def.fragment)];
-                const attrs = INTERNAL.allowed_vertex_buffer_attributes_for_pipeline(@enumFromInt(r));
-                const bufs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(@enumFromInt(r));
+                const vert = vert_shaders[@backingInt(def.vertex)];
+                const frag = frag_shaders[@backingInt(def.fragment)];
+                const attrs = INTERNAL.allowed_vertex_buffer_attributes_for_pipeline(@fromBackingInt(@intCast(r)));
+                const bufs = INTERNAL.allowed_vertex_buffer_defs_for_pipeline(@fromBackingInt(@intCast(r)));
                 const in_state = GPU_VertexInputState{
                     .vertex_attributes = attrs.ptr,
                     .num_vertex_attributes = @intCast(attrs.len),
@@ -4594,7 +4594,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_textures) |tex| {
-                    const tex_idx = @intFromEnum(tex.name);
+                    const tex_idx = @backingInt(tex.name);
                     controller.assert_texture_NOT_initialized(tex.name, @src());
                     const sdl_info = tex.sdl_info();
                     controller.textures[tex_idx] = try controller.gpu.create_texture(sdl_info);
@@ -4612,7 +4612,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_samplers) |init| {
-                    const idx = @intFromEnum(init.name);
+                    const idx = @backingInt(init.name);
                     const sdl_info = init.sdl_info();
                     controller.samplers[idx] = try controller.gpu.create_texture_sampler(sdl_info);
                     controller.samplers_init[idx] = true;
@@ -4628,7 +4628,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_upload_buffers) |buf| {
-                    const buf_idx = @intFromEnum(buf.name);
+                    const buf_idx = @backingInt(buf.name);
                     controller.assert_upload_buffer_NOT_initialized(buf.name, @src());
                     const sdl_info = buf.sdl_info();
                     controller.upload_buffers[buf_idx] = try controller.gpu.create_transfer_buffer(sdl_info);
@@ -4647,7 +4647,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_download_buffers) |buf| {
-                    const buf_idx = @intFromEnum(buf.name);
+                    const buf_idx = @backingInt(buf.name);
                     controller.assert_download_buffer_NOT_initialized(buf.name, @src());
                     const sdl_info = buf.sdl_info();
                     controller.download_buffers[buf_idx] = try controller.gpu.create_transfer_buffer(sdl_info);
@@ -4664,7 +4664,7 @@ pub fn GraphicsController(
                 }
             }
             for (options.init_vertex_buffers) |buf| {
-                const buf_idx = @intFromEnum(buf.name);
+                const buf_idx = @backingInt(buf.name);
                 controller.assert_vert_buffer_NOT_initialized(buf.name, @src());
                 const sdl_info = buf.sdl_info();
                 controller.vertex_buffers[buf_idx] = try controller.gpu.create_buffer(sdl_info);
@@ -4681,7 +4681,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_storage_buffers) |buf| {
-                    const buf_idx = @intFromEnum(buf.name);
+                    const buf_idx = @backingInt(buf.name);
                     controller.assert_storage_buffer_NOT_initialized(buf.name, @src());
                     const sdl_info = buf.sdl_info();
                     controller.storage_buffers[buf_idx] = try controller.gpu.create_buffer(sdl_info);
@@ -4699,7 +4699,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_index_buffers) |buf| {
-                    const buf_idx = @intFromEnum(buf.name);
+                    const buf_idx = @backingInt(buf.name);
                     controller.assert_index_buffer_NOT_initialized(buf.name, @src());
                     const sdl_info = buf.sdl_info();
                     controller.index_buffers[buf_idx] = try controller.gpu.create_buffer(sdl_info);
@@ -4717,7 +4717,7 @@ pub fn GraphicsController(
                     }
                 }
                 for (options.init_indirect_buffers) |buf| {
-                    const buf_idx = @intFromEnum(buf.name);
+                    const buf_idx = @backingInt(buf.name);
                     controller.assert_indirect_buffer_NOT_initialized(buf.name, @src());
                     const sdl_info = buf.sdl_info();
                     controller.indirect_draw_buffers[buf_idx] = try controller.gpu.create_buffer(sdl_info);
@@ -4837,30 +4837,30 @@ pub fn GraphicsController(
         pub fn create_window(self: *Controller, init: WindowInit) !void {
             self.assert_window_NOT_initialized(init.name, @src());
             self.assert_window_NOT_claimed(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             self.windows[idx] = try Window.create(init.sdl_info());
             self.windows_init[idx] = true;
         }
         pub fn destroy_window(self: *Controller, name: WindowName) void {
             self.assert_window_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             if (self.windows_claimed[idx]) {
                 self.gpu.unclaim_window(self.windows[idx]);
                 self.windows_claimed[idx] = false;
             }
             self.windows[idx].destroy();
-            self.windows_init[@intFromEnum(name)] = false;
+            self.windows_init[@backingInt(name)] = false;
         }
         pub fn claim_window(self: *Controller, name: WindowName) !void {
             self.assert_window_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             if (self.windows_claimed[idx]) return;
             try self.gpu.claim_window(self.windows[idx]);
             self.windows_claimed[idx] = true;
         }
         pub fn unclaim_window(self: *Controller, name: WindowName) void {
             self.assert_window_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             if (!self.windows_claimed[idx]) return;
             self.gpu.unclaim_window(self.windows[idx]);
             self.windows_claimed[idx] = false;
@@ -4876,21 +4876,21 @@ pub fn GraphicsController(
 
         pub fn create_sampler(self: *Controller, init: SamplerInit) !void {
             self.assert_sampler_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.samplers[idx] = try self.gpu.create_texture_sampler(sdl_info);
             self.samplers_init[idx] = true;
         }
         pub fn destroy_sampler(self: *Controller, name: SamplerName) void {
             self.assert_sampler_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_texture_sampler(self.samplers[idx]);
             self.samplers_init[idx] = false;
         }
 
         pub fn create_texture(self: *Controller, init: TextureInit) !void {
             self.assert_texture_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.textures[idx] = try self.gpu.create_texture(sdl_info);
             self.textures_init[idx] = true;
@@ -4898,7 +4898,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_texture(self: *Controller, name: TextureName) void {
             self.assert_texture_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_texture(self.textures[idx]);
             self.textures_init[idx] = false;
             self.textures_sizes[idx] = .ZERO;
@@ -4906,7 +4906,7 @@ pub fn GraphicsController(
 
         pub fn create_vertex_buffer(self: *Controller, init: VertexBufferInit) !void {
             self.assert_vert_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.vertex_buffers[idx] = try self.gpu.create_buffer(sdl_info);
             self.vertex_buffers_init[idx] = true;
@@ -4914,7 +4914,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_vertex_buffer(self: *Controller, name: VertexBufferName) void {
             self.assert_vert_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_buffer(self.vertex_buffers[idx]);
             self.vertex_buffers_init[idx] = false;
             self.vertex_buffer_byte_caps[idx] = 0;
@@ -4922,7 +4922,7 @@ pub fn GraphicsController(
 
         pub fn create_storage_buffer(self: *Controller, init: StorageBufferInit) !void {
             self.assert_storage_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.storage_buffers[idx] = try self.gpu.create_buffer(sdl_info);
             self.storage_buffers_init[idx] = true;
@@ -4930,7 +4930,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_storage_buffer(self: *Controller, name: StorageBufferName) void {
             self.assert_storage_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_buffer(self.storage_buffers[idx]);
             self.storage_buffers_init[idx] = false;
             self.storage_buffer_byte_caps[idx] = 0;
@@ -4938,7 +4938,7 @@ pub fn GraphicsController(
 
         pub fn create_index_buffer(self: *Controller, init: IndexBufferInit) !void {
             self.assert_index_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.index_buffers[idx] = try self.gpu.create_buffer(sdl_info);
             self.index_buffers_init[idx] = true;
@@ -4946,7 +4946,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_index_buffer(self: *Controller, name: IndexBufferName) void {
             self.assert_index_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_buffer(self.index_buffers[idx]);
             self.index_buffers_init[idx] = false;
             self.index_buffer_byte_caps[idx] = 0;
@@ -4954,7 +4954,7 @@ pub fn GraphicsController(
 
         pub fn create_indirect_draw_call_buffer(self: *Controller, init: IndirectDrawBufferInit) !void {
             self.assert_indirect_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.indirect_draw_buffers[idx] = try self.gpu.create_buffer(sdl_info);
             self.indirect_draw_buffers_init[idx] = true;
@@ -4962,7 +4962,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_indirect_draw_call_buffer(self: *Controller, name: IndirectDrawBufferName) void {
             self.assert_indirect_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_buffer(self.indirect_draw_buffers[idx]);
             self.indirect_draw_buffers_init[idx] = false;
             self.indirect_draw_buffer_byte_caps[idx] = 0;
@@ -4970,7 +4970,7 @@ pub fn GraphicsController(
 
         pub fn create_upload_buffer(self: *Controller, init: UploadBufferInit) !void {
             self.assert_upload_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.upload_buffers[idx] = try self.gpu.create_transfer_buffer(sdl_info);
             self.upload_buffers_init[idx] = true;
@@ -4978,7 +4978,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_upload_buffer(self: *Controller, name: UploadBufferName) void {
             self.assert_upload_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_transfer_buffer(self.upload_buffers[idx]);
             self.upload_buffers_init[idx] = false;
             self.upload_buffer_byte_caps[idx] = 0;
@@ -4986,7 +4986,7 @@ pub fn GraphicsController(
 
         pub fn create_download_buffer(self: *Controller, init: DownloadBufferInit) !void {
             self.assert_download_buffer_NOT_initialized(init.name, @src());
-            const idx = @intFromEnum(init.name);
+            const idx = @backingInt(init.name);
             const sdl_info = init.sdl_info();
             self.download_buffers[idx] = try self.gpu.create_transfer_buffer(sdl_info);
             self.download_buffers_init[idx] = true;
@@ -4994,7 +4994,7 @@ pub fn GraphicsController(
         }
         pub fn destroy_download_buffer(self: *Controller, name: DownloadBufferName) void {
             self.assert_download_buffer_initialized(name, @src());
-            const idx = @intFromEnum(name);
+            const idx = @backingInt(name);
             self.gpu.release_transfer_buffer(self.download_buffers[idx]);
             self.download_buffers_init[idx] = false;
             self.download_buffer_byte_caps[idx] = 0;
@@ -5002,7 +5002,7 @@ pub fn GraphicsController(
 
         pub fn destroy_fence(self: *Controller, fence: FenceName) void {
             self.assert_fence_initialized(fence, @src());
-            const idx = @intFromEnum(fence);
+            const idx = @backingInt(fence);
             self.gpu.release_fence(self.fences[idx]);
             self.fences_init[idx] = false;
         }
@@ -5046,10 +5046,10 @@ pub fn GraphicsController(
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
-                const V_IN = AnyVertexShaderInputStruct(INTERNAL.VERTEX_INPUT_STRUCT_TYPES[@intFromEnum(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
-                const V_OUT = AnyVertexToFragmentStruct(INTERNAL.VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.output_type)]);
-                const enum_start = INTERNAL.VERTEX_SHADER_UNIQUE_ENUM_STARTS[@intFromEnum(def.vertex_shader)];
-                const enum_end = INTERNAL.VERTEX_SHADER_UNIQUE_ENUM_STARTS[@intFromEnum(def.vertex_shader) + 1];
+                const V_IN = AnyVertexShaderInputStruct(INTERNAL.VERTEX_INPUT_STRUCT_TYPES[@backingInt(def.input_type)], VERTEX_BUFFER_NAMES_ENUM);
+                const V_OUT = AnyVertexToFragmentStruct(INTERNAL.VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.output_type)]);
+                const enum_start = INTERNAL.VERTEX_SHADER_UNIQUE_ENUM_STARTS[@backingInt(def.vertex_shader)];
+                const enum_end = INTERNAL.VERTEX_SHADER_UNIQUE_ENUM_STARTS[@backingInt(def.vertex_shader) + 1];
                 inline for (INTERNAL.VERTEX_SHADER_UNIQUE_ENUMS[enum_start..enum_end]) |enum_type| {
                     try ShaderUtils.write_hlsl_enum_stub(enum_type, writer);
                 }
@@ -5099,10 +5099,10 @@ pub fn GraphicsController(
                 defer file.close(io);
                 var writer_impl = file.writer(io, write_buf[0..]);
                 var writer = &writer_impl.interface;
-                const F_IN = AnyVertexToFragmentStruct(INTERNAL.VERTEX_TO_FRAG_STRUCT_TYPES[@intFromEnum(def.input_type)]);
-                const F_OUT = AnyFragmentShaderOutputStruct(INTERNAL.FRAGMENT_OUTPUT_STRUCT_TYPES[@intFromEnum(def.output_type)]);
-                const enum_start = INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[@intFromEnum(def.fragment_shader)];
-                const enum_end = INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[@intFromEnum(def.fragment_shader) + 1];
+                const F_IN = AnyVertexToFragmentStruct(INTERNAL.VERTEX_TO_FRAG_STRUCT_TYPES[@backingInt(def.input_type)]);
+                const F_OUT = AnyFragmentShaderOutputStruct(INTERNAL.FRAGMENT_OUTPUT_STRUCT_TYPES[@backingInt(def.output_type)]);
+                const enum_start = INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[@backingInt(def.fragment_shader)];
+                const enum_end = INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUM_STARTS[@backingInt(def.fragment_shader) + 1];
                 inline for (INTERNAL.FRAGMENT_SHADER_UNIQUE_ENUMS[enum_start..enum_end]) |enum_type| {
                     try ShaderUtils.write_hlsl_enum_stub(enum_type, writer);
                 }
@@ -5132,7 +5132,7 @@ pub fn GraphicsController(
                 .VERTEX => "space0",
                 .FRAGMENT => "space2",
             };
-            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@intFromEnum(pair.texture)];
+            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@backingInt(pair.texture)];
             const TEX_TYPE = switch (TEX_DEF.shape) {
                 ._2D => "Texture2D<",
                 ._2D_ARRAY => "Texture2DArray<",
@@ -5153,7 +5153,7 @@ pub fn GraphicsController(
                 .VERTEX => "space0",
                 .FRAGMENT => "space2",
             };
-            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@intFromEnum(def.texture)];
+            const TEX_DEF = INTERNAL.TEXTURE_DEFS[@backingInt(def.texture)];
             const TEX_TYPE = switch (TEX_DEF.shape) {
                 ._2D => "Texture2D<",
                 ._2D_ARRAY => "Texture2DArray<",
@@ -5172,7 +5172,7 @@ pub fn GraphicsController(
                 .VERTEX => 0,
                 .FRAGMENT => 2,
             };
-            const STORAGE = AnyUniformOrStorageStruct(INTERNAL.STORAGE_BUFFER_TYPES[@intFromEnum(def.buffer)]);
+            const STORAGE = AnyUniformOrStorageStruct(INTERNAL.STORAGE_BUFFER_TYPES[@backingInt(def.buffer)]);
             try STORAGE.write_hlsl_storage_buffer_stub(@tagName(def.buffer), @tagName(def.buffer) ++ "_BUFFER", @intCast(def.gpu_register), space, writer);
             try writer.writeByte('\n');
         }
@@ -5182,7 +5182,7 @@ pub fn GraphicsController(
                 .VERTEX => 1,
                 .FRAGMENT => 3,
             };
-            const UNI = AnyUniformOrStorageStruct(INTERNAL.UNIFORM_TYPES[@intFromEnum(def.uniform)]);
+            const UNI = AnyUniformOrStorageStruct(INTERNAL.UNIFORM_TYPES[@backingInt(def.uniform)]);
             try UNI.write_hlsl_uniform_stub(@tagName(def.uniform), @intCast(def.register), space, writer);
             try writer.writeByte('\n');
         }

@@ -35,21 +35,21 @@ const inline_swap = Root.Utils.inline_swap;
 const Iterator = Root.Iterator;
 // const greater_than = Compare.greater_than;
 
-pub const StructField = struct {
-    const Field = std.builtin.Type.StructField;
-    pub fn match(a: Field, b: Field) bool {
-        return std.mem.eql(u8, a.name, b.name);
-    }
-    pub fn smaller_align_to_the_right_gt(a: Field, b: Field) bool {
-        return a.alignment < b.alignment;
-    }
-    pub fn smaller_align_to_the_left_gt(a: Field, b: Field) bool {
-        return a.alignment > b.alignment;
-    }
-    pub fn smaller_size_to_the_right_gt(a: Field, b: Field) bool {
-        return @sizeOf(a.type) < @sizeOf(b.type);
-    }
-    pub fn smaller_size_to_the_left_gt(a: Field, b: Field) bool {
-        return @sizeOf(a.type) > @sizeOf(b.type);
-    }
-};
+// pub const StructField = struct {
+//     const Field = std.builtin.Type.Struct.;
+//     pub fn match(a: Field, b: Field) bool {
+//         return std.mem.eql(u8, a.name, b.name);
+//     }
+//     pub fn smaller_align_to_the_right_gt(a: Field, b: Field) bool {
+//         return a.a alignment < b.alignment;
+//     }
+//     pub fn smaller_align_to_the_left_gt(a: Field, b: Field) bool {
+//         return a.alignment > b.alignment;
+//     }
+//     pub fn smaller_size_to_the_right_gt(a: Field, b: Field) bool {
+//         return @sizeOf(a.type) < @sizeOf(b.type);
+//     }
+//     pub fn smaller_size_to_the_left_gt(a: Field, b: Field) bool {
+//         return @sizeOf(a.type) > @sizeOf(b.type);
+//     }
+// };

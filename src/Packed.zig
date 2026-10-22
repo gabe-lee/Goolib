@@ -47,13 +47,13 @@ pub fn define_arbitrary_packed_struct_type(comptime BACKING_INT_TYPE: type, comp
     const _NUM_FIELDS = Types.enum_defined_field_count(FIELDS_ENUM);
     assert_with_reason(Types.enum_defined_field_count(FIELDS_ENUM) > 0, @src(), "`FIELDS_ENUM` must have at least one tag", .{});
     const _E = @typeInfo(FIELDS_ENUM).@"enum";
-    assert_with_reason(FIELD_DEFS.len == _E.fields.len, @src(), "the number of fields in `FIELD_DEFS` does not match the number of enum tags in `FIELDS_ENUM`, {d} != {d}", .{ FIELD_DEFS.len, _E.fields.len });
+    assert_with_reason(FIELD_DEFS.len == _E.field_names.len, @src(), "the number of fields in `FIELD_DEFS` does not match the number of enum tags in `FIELDS_ENUM`, {d} != {d}", .{ FIELD_DEFS.len, _E.field_names.len });
     var _INITS: [_NUM_FIELDS]bool = @splat(false);
     const _BITS_PER_BACKING_INT = @typeInfo(BACKING_INT_TYPE).int.bits;
     const _TOTAL_BITS: u16 = NUM_BACKING_INTS * _BITS_PER_BACKING_INT;
     var _PACKED_BITS: u16 = 0;
     for (FIELD_DEFS[0..], 0..) |def, didx| {
-        const idx = @intFromEnum(def.field);
+        const idx = @backingInt(def.field);
         assert_with_reason(_INITS[idx] == false, @src(), "field `{s}` had a duplicate definition at index {d}", .{ @tagName(def.field), didx });
         assert_with_reason(def.packed_bits <= _BITS_PER_BACKING_INT, @src(), "all field bit sizes must be <= the bit size of the backing integer type `{s}`... field `{s}` wants {d} bits, but backing bits size is {d}", .{ @typeName(BACKING_INT_TYPE), @tagName(def.field), def.packed_bits, _BITS_PER_BACKING_INT });
         assert_with_reason(def.packed_bits <= @bitSizeOf(def.unpacked_type), @src(), "field `{s}` must have a `packed_bits` value <= `@bitSizeOf(unpacked_type)`, got {d} > {d}", .{ @tagName(def.field), def.packed_bits, @bitSizeOf(def.unpacked_type) });
@@ -76,7 +76,7 @@ pub fn define_arbitrary_packed_struct_type(comptime BACKING_INT_TYPE: type, comp
         assert_with_reason(b < NUM_BACKING_INTS, @src(), "failed to layout fields, current block ({d} is >= the `NUM_BACKING_INTS` ({d})... try re-ordering the elements in `FIELD_DEFS`", .{ b, NUM_BACKING_INTS });
         assert_with_reason((b * _BITS_PER_BACKING_INT) + o + def.packed_bits < _TOTAL_BITS, @src(), "failed to layout fields, current block ({d}) and offset ({d}) plus field bit size ({d}) would put the total bits beyond the number of bits available in the backing data of {d} x {s}  ({d})... try re-ordering the elements in `FIELD_DEFS`", .{ b, o, def.packed_bits, NUM_BACKING_INTS, @typeName(BACKING_INT_TYPE), _TOTAL_BITS });
         var got_slot_from_empty = false;
-        const i = @intFromEnum(def.field);
+        const i = @backingInt(def.field);
         for (empty_slots[0..empty_slots_len], 0..) |slot, si| {
             const len = _BITS_PER_BACKING_INT - slot.offset;
             if (len >= def.packed_bits) {
@@ -136,20 +136,20 @@ pub fn define_arbitrary_packed_struct_type(comptime BACKING_INT_TYPE: type, comp
         pub const FIELD_TYPES: [NUM_FIELDS]type = _TYPES_CONST;
         pub const FIELD_SIZES: [NUM_FIELDS]u16 = _TOTAL_SIZES;
         pub fn FieldType(comptime F: FIELDS) type {
-            return FIELD_TYPES[@intFromEnum(F)];
+            return FIELD_TYPES[@backingInt(F)];
         }
         pub inline fn get(self: *Self, comptime field: FIELDS) FieldType(field) {
-            const i = @intFromEnum(field);
+            const i = @backingInt(field);
             var val: BACKING_INT_TYPE = if (MULTIPLE_BACKING) self.raw[FIELD_BLOCKS[i]] else self.raw;
             val &= FIELD_MASKS[i];
             val >>= FIELD_OFFSETS[i];
-            const OUT_UINT = std.meta.Int(.unsigned, @bitSizeOf(FIELD_TYPES[i]));
+            const OUT_UINT = @Int(.unsigned, @bitSizeOf(FIELD_TYPES[i]));
             const out_uint: OUT_UINT = @intCast(val);
             return @bitCast(out_uint);
         }
         pub inline fn set(self: *Self, comptime field: FIELDS, val: FieldType(field)) void {
-            const i = @intFromEnum(field);
-            const IN_UINT = std.meta.Int(.unsigned, @bitSizeOf(FIELD_TYPES[i]));
+            const i = @backingInt(field);
+            const IN_UINT = @Int(.unsigned, @bitSizeOf(FIELD_TYPES[i]));
             const in_uint: IN_UINT = @bitCast(val);
             var sval: BACKING_INT_TYPE = @intCast(in_uint);
             sval <<= @intCast(FIELD_OFFSETS[i]);

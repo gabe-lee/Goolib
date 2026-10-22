@@ -204,7 +204,7 @@ pub fn ValCondition(comptime T: type) type {
         EQUALS_STRING_OPAQUE_PTR: []const u8,
 
         pub fn no_cond() Self {
-            return Self{ .NONE = void{} };
+            return Self{ .NONE = {} };
         }
         pub fn equals(val: T) Self {
             return Self{ .EQUAL = val };
@@ -286,7 +286,7 @@ pub fn NullCondition(comptime T: type) type {
         NOT_NULL: ValCondition(Child),
 
         pub fn is_null() Self {
-            return Self{ .IS_NULL = void{} };
+            return Self{ .IS_NULL = {} };
         }
         pub fn not_null() Self {
             return Self{ .NOT_NULL = .no_cond() };
@@ -325,7 +325,7 @@ pub fn MatchSlice(comptime T: type) type {
         IS_NONE_OF: []const []const T,
 
         pub fn no_requirement() Self {
-            return Self{ .NONE = void{} };
+            return Self{ .NONE = {} };
         }
 
         pub fn is(comptime val: []const T) Self {
@@ -374,7 +374,7 @@ pub fn MatchValue(comptime T: type) type {
         IS_NONE_OF: []const ValCondition(T),
 
         pub fn no_requirement() Self {
-            return Self{ .NONE = void{} };
+            return Self{ .NONE = {} };
         }
 
         pub fn equals(val: T) Self {
@@ -461,7 +461,7 @@ pub fn MatchOptionalValue(comptime T: type) type {
         IS_NONE_OF: []const NullCondition(T),
 
         pub fn no_requirement() Self {
-            return Self{ .NONE = void{} };
+            return Self{ .NONE = {} };
         }
 
         pub fn is_null() Self {
@@ -576,7 +576,7 @@ pub const MatchFailure = struct {
     }
 
     pub fn add_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
-        if (build.mode == .Debug) {
+        if (build.mode == .debug) {
             comptime var new_self = self;
             new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
             return new_self;
@@ -585,7 +585,7 @@ pub const MatchFailure = struct {
         }
     }
     pub fn add_pass_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
-        if (build.mode == .Debug) {
+        if (build.mode == .debug) {
             comptime var new_self = self;
             new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
             new_self.state = .PASS;
@@ -597,7 +597,7 @@ pub const MatchFailure = struct {
         }
     }
     pub fn add_fail_context(comptime self: MatchFailure, comptime fmt: []const u8, comptime args: anytype) MatchFailure {
-        if (build.mode == .Debug) {
+        if (build.mode == .debug) {
             comptime var new_self = self;
             new_self.ctx = self.ctx ++ std.fmt.comptimePrint(fmt, args);
             new_self.state = .FAIL;
@@ -656,16 +656,16 @@ pub const KindInfoMatcher = union(enum) {
     ENUM_LITERAL: void,
 
     pub fn type_kind() KindInfoMatcher {
-        return KindInfoMatcher{ .TYPE = void{} };
+        return KindInfoMatcher{ .TYPE = {} };
     }
     pub fn void_kind() KindInfoMatcher {
-        return KindInfoMatcher{ .VOID = void{} };
+        return KindInfoMatcher{ .VOID = {} };
     }
     pub fn bool_kind() KindInfoMatcher {
-        return KindInfoMatcher{ .BOOL = void{} };
+        return KindInfoMatcher{ .BOOL = {} };
     }
     pub fn noreturn_kind() KindInfoMatcher {
-        return KindInfoMatcher{ .NO_RETURN = void{} };
+        return KindInfoMatcher{ .NO_RETURN = {} };
     }
     pub fn int_kind(comptime matcher: IntMatcher) KindInfoMatcher {
         return KindInfoMatcher{ .INT = matcher };
@@ -869,7 +869,7 @@ pub const AllStructFieldsMatcher = union(enum) {
     FLEX: FlexFieldMatchers,
 
     pub fn no_requirement() AllStructFieldsMatcher {
-        return AllStructFieldsMatcher{ .NONE = void{} };
+        return AllStructFieldsMatcher{ .NONE = {} };
     }
 
     pub fn with_exactly_these_fields(comptime field_matchers: []const StructFieldMatcher) AllStructFieldsMatcher {
@@ -1018,7 +1018,7 @@ pub const AllDeclsMatcher = union(enum) {
     FLEX: FlexDeclMatchers,
 
     pub fn no_requirement() AllDeclsMatcher {
-        return AllDeclsMatcher{ .NONE = void{} };
+        return AllDeclsMatcher{ .NONE = {} };
     }
 
     pub fn with_exactly_these_decls(comptime decl_matchers: []const DeclMatcher) AllDeclsMatcher {
@@ -1159,7 +1159,7 @@ pub const TypeMatcher = union(enum) {
     KIND: MatchKindInfo,
     NONE: void,
 
-    pub const NO_REQ = TypeMatcher{ .NONE = void{} };
+    pub const NO_REQ = TypeMatcher{ .NONE = {} };
 
     pub fn no_requirement() TypeMatcher {
         return NO_REQ;

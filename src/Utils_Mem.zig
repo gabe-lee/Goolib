@@ -111,7 +111,7 @@ pub inline fn secure_zero(comptime T: type, slice: []volatile T) void {
     @memset(u8_ptr[0..raw_len], 0);
 }
 pub inline fn secure_memset_undefined(comptime T: type, slice: []volatile T) void {
-    if (build.mode == .Debug or build.mode == .ReleaseSafe) {
+    if (build.mode == .debug or build.mode == .safe) {
         const cast_ptr: [*]volatile u8 = @ptrCast(@alignCast(slice.ptr));
         const byte_len = slice.len * @sizeOf(T);
         const cast_slice: []volatile u8 = cast_ptr[0..byte_len];
@@ -441,7 +441,6 @@ pub fn array_or_slice_equal(a: anytype, b: anytype) bool {
     return true;
 }
 
-
 pub const CopyLenKind = enum(u8) {
     ENTIRE_SOURCE_TO_DEST,
     LIMITED_BY_SMALLER_LEN,
@@ -458,10 +457,10 @@ pub const CopyLen = union(CopyLenKind) {
     PROVIDE_LEN_MIN: usize,
 
     pub fn copy_entire_source_to_dest() CopyLen {
-        return CopyLen{ .SRC_DST_ALWAYS_SAME_SIZE = void{} };
+        return CopyLen{ .SRC_DST_ALWAYS_SAME_SIZE = {} };
     }
     pub fn copy_as_many_elements_as_possible_from_source_to_dest() CopyLen {
-        return CopyLen{ .LIMITED_BY_SMALLER_LEN = void{} };
+        return CopyLen{ .LIMITED_BY_SMALLER_LEN = {} };
     }
     pub fn copy_exact_element_count(count: usize) CopyLen {
         return CopyLen{ .PROVIDE_LEN_EXACT = count };

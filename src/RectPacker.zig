@@ -98,10 +98,10 @@ pub fn RowPacker(comptime T: type) type {
             CUSTOM_THRESHOLD: T,
 
             pub inline fn ignore_threshold() Threshold {
-                return Threshold{ .IGNORE_THRESHOLD = void{} };
+                return Threshold{ .IGNORE_THRESHOLD = {} };
             }
             pub inline fn default_threshold() Threshold {
-                return Threshold{ .DEFAULT_THRESHOLD = void{} };
+                return Threshold{ .DEFAULT_THRESHOLD = {} };
             }
             pub inline fn custom_threshold(threshold: T) Threshold {
                 return Threshold{ .CUSTOM_THRESHOLD = threshold };

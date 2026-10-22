@@ -87,7 +87,7 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
 
     switch (info) {
         .@"struct" => |s_info| {
-            if (s_info.fields.len == 0) {
+            if (s_info.field_names.len == 0) {
                 std.debug.print("{s}{{}}\n", .{type_name(TMODE, T)});
                 return;
             }
@@ -97,15 +97,15 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                 .LOCAL_OFFSET => 0,
                 .TOTAL_OFFSET => offset,
             };
-            inline for (s_info.fields) |field| {
-                debug_val_internal(field.name, @field(value, field.name), ind + 1, depth_limit, TMODE, OMODE, base_off + @offsetOf(T, field.name));
+            inline for (s_info.field_names) |field_name| {
+                debug_val_internal(field_name, @field(value, field_name), ind + 1, depth_limit, TMODE, OMODE, base_off + @offsetOf(T, field_name));
             }
             indent(ind);
             std.debug.print("}}\n", .{});
         },
         .@"union" => |u_info| {
             if (u_info.tag_type) |_| {
-                if (u_info.fields.len == 0) {
+                if (u_info.field_names.len == 0) {
                     std.debug.print("{s}{{}}\n", .{type_name(TMODE, T)});
                     return;
                 }

@@ -136,7 +136,7 @@ pub const VarintSize = enum(u8) {
     _16_BYTES = 16,
 
     pub fn bytes(comptime self: VarintSize) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -268,7 +268,7 @@ pub const SerialSource = union(enum) {
     pub fn read_varint(self: SerialSource, comptime ZIGZAG: bool, comptime SIZE: VarintSize, native_dest: [*]u8) SerialReadError!usize {
         const NATIVE_LEN = comptime SIZE.bytes();
         assert_with_reason(NATIVE_LEN == 2 or NATIVE_LEN == 4 or NATIVE_LEN == 8 or NATIVE_LEN == 16, @src(), "VarInts are only upported for 2, 4, 8, or 16 byte types with well-defined memory layouts, got native len {d}", .{NATIVE_LEN});
-        const NATIVE_UINT = std.meta.Int(.unsigned, @intCast(NATIVE_LEN * 8));
+        const NATIVE_UINT = @Int(.unsigned, @intCast(NATIVE_LEN * 8));
         var temp_buffer: [32]u8 align(@alignOf(u128)) = @splat(0);
         const temp_uint: *NATIVE_UINT = @ptrCast(@alignCast(&temp_buffer[16]));
         var additional_bytes_to_read: usize = 0;
@@ -532,7 +532,7 @@ pub const SerialDest = union(enum) {
         const NATIVE_LEN = comptime SIZE.bytes();
         assert_with_reason(NATIVE_LEN == 2 or NATIVE_LEN == 4 or NATIVE_LEN == 8 or NATIVE_LEN == 16, @src(), "VarInts are only supported for 2, 4, 8, or 16 byte data types with a well-defined memory layout, got native len {d}", .{NATIVE_LEN});
         var temp_buffer: [35]u8 align(@alignOf(u128)) = @splat(0);
-        const NATIVE_UINT = std.meta.Int(.unsigned, @intCast(NATIVE_LEN * 8));
+        const NATIVE_UINT = @Int(.unsigned, @intCast(NATIVE_LEN * 8));
         const temp_uint: *NATIVE_UINT = @ptrCast(@alignCast(&temp_buffer[16]));
         @memcpy(temp_buffer[16 .. 16 + NATIVE_LEN], native_src[0..NATIVE_LEN]);
         const num_bytes: usize, const least_sig_byte_with_data: usize, const most_sig_byte_with_data: usize = switch (NATIVE_LEN) {

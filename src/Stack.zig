@@ -70,12 +70,12 @@ pub fn Stack(comptime T: type, comptime SIZE: StaticDynamic, comptime CACHE_ALLO
         const IS_DYNAMIC = SIZE == .DYNAMIC;
         const CACHE_ALLOC = IS_DYNAMIC and (CACHE_ALLOC_ == .CACHE_ALLOCATOR);
         const T_CACHE_ALLOC = if (CACHE_ALLOC) Allocator else void;
-        const T_CACHE_ALLOC_DEFAULT = if (CACHE_ALLOC) DummyAlloc.allocator_panic_free_noop else void{};
+        const T_CACHE_ALLOC_DEFAULT = if (CACHE_ALLOC) DummyAlloc.allocator_panic_free_noop else {};
         const T_FUNC_ALLOC = if (CACHE_ALLOC) void else Allocator;
 
         pub fn init_alloc(cap: u32, alloc: Allocator) Self {
             var self = Self{
-                .alloc = if (CACHE_ALLOC) alloc else void{},
+                .alloc = if (CACHE_ALLOC) alloc else {},
             };
             Utils.Alloc.smart_alloc_ptr_ptrs(alloc, &self.ptr, &self.cap, @intCast(cap), .{}, .{});
             return self;

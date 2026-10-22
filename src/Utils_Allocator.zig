@@ -85,19 +85,19 @@ pub fn InitNew(comptime T: type) type {
         FORCE_MEMSET_NEW_CUSTOM: T,
 
         pub inline fn dont_memset_new() Self {
-            return Self{ .DONT_MEMSET_NEW = void{} };
+            return Self{ .DONT_MEMSET_NEW = {} };
         }
         pub inline fn memset_new_undefined() Self {
-            return Self{ .MEMSET_NEW_UNDEFINED = void{} };
+            return Self{ .MEMSET_NEW_UNDEFINED = {} };
         }
         pub inline fn force_memset_new_undefined() Self {
-            return Self{ .FORCE_MEMSET_NEW_UNDEFINED = void{} };
+            return Self{ .FORCE_MEMSET_NEW_UNDEFINED = {} };
         }
         pub inline fn memset_new_zero() Self {
-            return Self{ .MEMSET_NEW_ZERO = void{} };
+            return Self{ .MEMSET_NEW_ZERO = {} };
         }
         pub inline fn force_memset_new_zero() Self {
-            return Self{ .FORCE_MEMSET_NEW_ZERO = void{} };
+            return Self{ .FORCE_MEMSET_NEW_ZERO = {} };
         }
         pub inline fn memset_new_custom(val: T) Self {
             return Self{ .MEMSET_NEW_CUSTOM = val };
@@ -113,11 +113,11 @@ pub fn InitNew(comptime T: type) type {
                     assert_with_reason(@TypeOf(v) == T, @src(), "type of `val` was not a T or ?T, got type `{s}`", .{@typeName(@TypeOf(val))});
                     return Self{ .memset_new_custom = v };
                 } else {
-                    return Self{ .memset_new_undefined = void{} };
+                    return Self{ .memset_new_undefined = {} };
                 }
             } else {
                 assert_with_reason(V == T, @src(), "type of `val` was not a T or ?T, got type `{s}`", .{@typeName(@TypeOf(val))});
-                return Self{ .memset_new_undefined = void{} };
+                return Self{ .memset_new_undefined = {} };
             }
         }
         pub fn init_new_custom_orelse_zero(val: anytype) Self {
@@ -127,11 +127,11 @@ pub fn InitNew(comptime T: type) type {
                     assert_with_reason(@TypeOf(v) == T, @src(), "type of `val` was not a T or ?T, got type `{s}`", .{@typeName(@TypeOf(val))});
                     return Self{ .memset_new_custom = v };
                 } else {
-                    return Self{ .memset_new_zero = void{} };
+                    return Self{ .memset_new_zero = {} };
                 }
             } else {
                 assert_with_reason(V == T, @src(), "type of `val` was not a T or ?T, got type `{s}`", .{@typeName(@TypeOf(val))});
-                return Self{ .memset_new_zero = void{} };
+                return Self{ .memset_new_zero = {} };
             }
         }
     };
@@ -167,7 +167,7 @@ pub fn realloc_list(ptr: anytype, len: anytype, cap: @TypeOf(len), need_len: @Ty
             continue :to_stage .TRY_REALLOC;
         },
         .TRY_REALLOC => {
-            if (alloc_.allocWithOptions(PTR.child, adjusted_need_len, if (PTR.alignment) |a| .fromByteUnits(a) else null, PTR.sentinel())) |new_mem_| {
+            if (alloc_.allocWithOptions(PTR.child, adjusted_need_len, if (PTR.attrs.@"align") |a| .fromByteUnits(a) else null, PTR.sentinel())) |new_mem_| {
                 new_mem = new_mem_;
                 continue :to_stage .COPY_DATA_FREE_OLD;
             } else |_| {
@@ -257,10 +257,10 @@ pub const Align = union(AlignMode) {
     CUSTOM_ALIGN: usize,
 
     pub fn align_to_type() Align {
-        return Align{ .ALIGN_TO_TYPE = void{} };
+        return Align{ .ALIGN_TO_TYPE = {} };
     }
     pub fn align_to_max_of_type_and_cache_line() Align {
-        return Align{ .ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE = void{} };
+        return Align{ .ALIGN_TO_MAX_OF_TYPE_AND_CACHE_LINE = {} };
     }
     pub fn custom_align(alignment: usize) Align {
         return Align{ .CUSTOM_ALIGN = alignment };

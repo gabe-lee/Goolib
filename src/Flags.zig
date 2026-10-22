@@ -48,17 +48,17 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
     assert_with_reason(INFO_2 == .@"enum", @src(), "parameter `GROUPS` must be an enum type (possibly empty)", .{});
     const G_INFO = INFO_2.@"enum";
     assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), "parameter `GROUPS` must have the exact same tag type as `FLAGS_ENUM`", .{});
-    const F: E_INFO.tag_type = @as(E_INFO.tag_type, math.maxInt(meta.Int(.unsigned, @bitSizeOf(E_INFO.tag_type))));
+    const F: E_INFO.tag_type = @as(E_INFO.tag_type, math.maxInt(@Int(.unsigned, @bitSizeOf(E_INFO.tag_type))));
     const A: E_INFO.tag_type = combine: {
-        if (!E_INFO.is_exhaustive) break :combine F;
+        if (!E_INFO.mode == .exhaustive) break :combine F;
         var a: E_INFO.tag_type = 0;
-        for (E_INFO.fields) |field| {
-            a |= field.value;
+        for (E_INFO.field_values) |field_value| {
+            a |= field_value;
         }
         break :combine a;
     };
-    for (G_INFO.fields) |group_field| {
-        assert_with_reason(group_field.value & ~A == 0, @src(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field.name, group_field.value, A, group_field.value & ~A });
+    for (G_INFO.field_names, G_INFO.field_values) |group_field_name, group_field_value| {
+        assert_with_reason(group_field_value & ~A == 0, @src(), "group `{s}` has invalid bits for flags enum:\nbits to set = {b:0>64}\nvalid range = {b:0>64}\ninvalid pos = {b:0>64}", .{ group_field_name, group_field_value, A, group_field_value & ~A });
     }
     return extern struct {
         raw: RawInt = 0,
@@ -81,19 +81,19 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         }
 
         inline fn bits(flag_or_group: anytype) RawInt {
-            return @intFromEnum(flag_or_group);
+            return @backingInt(flag_or_group);
         }
         inline fn inv_bits(flag_or_group: anytype) RawInt {
-            return ~@intFromEnum(flag_or_group);
+            return ~@backingInt(flag_or_group);
         }
         inline fn ctz(flag_or_group: anytype) BitCount {
-            return @ctz(@intFromEnum(flag_or_group));
+            return @ctz(@backingInt(flag_or_group));
         }
         inline fn clz(flag_or_group: anytype) BitCount {
-            return @clz(@intFromEnum(flag_or_group));
+            return @clz(@backingInt(flag_or_group));
         }
         inline fn bit_count(flag_or_group: anytype) BitCount {
-            return @popCount(@intFromEnum(flag_or_group));
+            return @popCount(@backingInt(flag_or_group));
         }
 
         pub inline fn blank() Self {
@@ -108,27 +108,27 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
 
         /// current flags must EXACTLY match one of the tags in the enum set
         pub fn flag_name(self: Self) []const u8 {
-            const tag: Flag = @enumFromInt(self.raw);
+            const tag: Flag = @fromBackingInt(@intCast(self.raw));
             return @tagName(tag);
         }
 
         pub fn from_flag(flag: Flag) Self {
-            return Self{ .raw = @intFromEnum(flag) };
+            return Self{ .raw = @backingInt(flag) };
         }
         pub fn from_flags(flags: []const Flag) Self {
             var self = Self{ .raw = 0 };
             for (flags) |flag| {
-                self.raw |= @intFromEnum(flag);
+                self.raw |= @backingInt(flag);
             }
             return self;
         }
         pub fn from_full_group(group: Group) Self {
-            return Self{ .raw = @intFromEnum(group) };
+            return Self{ .raw = @backingInt(group) };
         }
         pub fn from_combined_full_groups(groups: []const Group) Self {
             var self = Self{ .raw = 0 };
             for (groups) |group| {
-                self.raw |= @intFromEnum(group);
+                self.raw |= @backingInt(group);
             }
             return self;
         }
@@ -569,14 +569,14 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         }
 
         pub inline fn flag_to_first_matching_group(flag: Flag) ?Group {
-            for (G_INFO.fields) |field| {
-                if (bits(flag) & field.value == bits(flag)) return @enumFromInt(field.value);
+            for (G_INFO.field_values) |field_value| {
+                if (bits(flag) & field_value == bits(flag)) return @fromBackingInt(@intCast(field_value));
             }
             return null;
         }
         pub inline fn flag_to_first_matching_group_guaranteed(flag: Flag) Group {
-            for (G_INFO.fields) |field| {
-                if (bits(flag) & field.value == bits(flag)) return @enumFromInt(field.value);
+            for (G_INFO.field_values) |field_value| {
+                if (bits(flag) & field_value == bits(flag)) return @fromBackingInt(@intCast(field_value));
             }
             unreachable;
         }
@@ -594,14 +594,14 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         }
 
         pub inline fn all_flags_to_first_matching_group(self: Self) ?Group {
-            for (G_INFO.fields) |field| {
-                if (self.raw & field.value == self.raw) return @enumFromInt(field.value);
+            for (G_INFO.field_values) |field_value| {
+                if (self.raw & field_value == self.raw) return @fromBackingInt(@intCast(field_value));
             }
             return null;
         }
         pub inline fn all_flags_to_first_matching_group_guaranteed(self: Self) Group {
-            for (G_INFO.fields) |field| {
-                if (self.raw & field.value == self.raw) return @enumFromInt(field.value);
+            for (G_INFO.field_values) |field_value| {
+                if (self.raw & field_value == self.raw) return @fromBackingInt(@intCast(field_value));
             }
             unreachable;
         }
@@ -642,11 +642,11 @@ pub fn SingleBitFlags(comptime LAYOUT: FlagTagLayout, comptime ENUM: type) type 
         bits |= bits >> 4;
         bits |= bits >> 8;
         bits += 1;
-        break :check std.meta.Int(.unsigned, bits);
+        break :check @Int(.unsigned, bits);
     } else check: {
         var bits: u16 = 0;
-        for (E_INFO.fields) |field| {
-            bits = @max(bits, @as(u16, @intCast(field.value)));
+        for (E_INFO.field_values) |field_val| {
+            bits = @max(bits, @as(u16, @intCast(field_val)));
         }
         bits += 1;
         // Round up to next power of 2, at least 8
@@ -657,17 +657,17 @@ pub fn SingleBitFlags(comptime LAYOUT: FlagTagLayout, comptime ENUM: type) type 
         bits |= bits >> 4;
         bits |= bits >> 8;
         bits += 1;
-        break :check std.meta.Int(.unsigned, bits);
+        break :check @Int(.unsigned, bits);
     };
     const _ALLOWED_BITS = comptime check: {
         var allowed: _ValueInt = 0;
-        for (E_INFO.fields) |field| {
+        for (E_INFO.field_names, E_INFO.field_values) |field_name, field_val| {
             if (LAYOUT == .TAGS_ARE_FLAG_VALUES) {
-                allowed |= field.value;
-                const pop_count = @popCount(@as(E_INFO.tag_type, @intCast(field.value)));
-                assert_with_reason(pop_count == 1 or pop_count == 0, @src(), "SingleBitFlags is only compatible with enums where each tag is only a single bit, but tag `{s}` has value `{b}`", .{ field.name, field.value });
+                allowed |= field_val;
+                const pop_count = @popCount(@as(E_INFO.tag_type, @intCast(field_val)));
+                assert_with_reason(pop_count == 1 or pop_count == 0, @src(), "SingleBitFlags is only compatible with enums where each tag is only a single bit, but tag `{s}` has value `{b}`", .{ field_name, field_val });
             } else {
-                allowed |= @as(_ValueInt, 1) << field.value;
+                allowed |= @as(_ValueInt, 1) << field_val;
             }
         }
         break :check allowed;
@@ -694,20 +694,20 @@ pub fn SingleBitFlags(comptime LAYOUT: FlagTagLayout, comptime ENUM: type) type 
         inline fn flag_to_bit(flag_: ENUM) ValueInt {
             switch (comptime LAYOUT) {
                 .TAGS_ARE_FLAG_VALUES => {
-                    return @intCast(@intFromEnum(flag_));
+                    return @intCast(@backingInt(flag_));
                 },
                 .TAGS_ARE_FLAG_INDEXES => {
-                    return @as(ValueInt, 1) << @intCast(@intFromEnum(flag_));
+                    return @as(ValueInt, 1) << @intCast(@backingInt(flag_));
                 },
             }
         }
         inline fn bit_to_flag(raw_: ValueInt) Flag {
             switch (comptime LAYOUT) {
                 .TAGS_ARE_FLAG_VALUES => {
-                    return @enumFromInt(@as(E_INFO.tag_type, @intCast(raw_)));
+                    return @fromBackingInt(@intCast(@as(E_INFO.tag_type, @intCast(raw_))));
                 },
                 .TAGS_ARE_FLAG_INDEXES => {
-                    return @enumFromInt(@as(E_INFO.tag_type, @intCast(@ctz(raw_))));
+                    return @fromBackingInt(@intCast(@as(E_INFO.tag_type, @intCast(@ctz(raw_)))));
                 },
             }
         }

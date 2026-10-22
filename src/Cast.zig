@@ -150,7 +150,7 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
     };
     const cast_from = switch (FI) {
         .int, .comptime_int, .float, .comptime_float => from,
-        .@"enum" => @intFromEnum(from),
+        .@"enum" => @backingInt(from),
         .bool => @intFromBool(from),
         .vector => |VI| get: {
             break :get switch (@typeInfo(VI.child)) {
@@ -222,12 +222,12 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
         FROM_INT | TO_INT_VEC => @splat(@intCast(cast_from)),
         FROM_INT | TO_FLOAT, FROM_INT_VEC | TO_FLOAT_VEC => @floatFromInt(cast_from),
         FROM_INT | TO_FLOAT_VEC => @splat(@floatFromInt(cast_from)),
-        FROM_INT | TO_ENUM => @enumFromInt(cast_from),
+        FROM_INT | TO_ENUM => @fromBackingInt(@intCast(cast_from)),
         FROM_INT_VEC | TO_ENUM_VEC => check: {
             if (Assert.should_assert()) {
                 var out: TO = undefined;
                 inline for (0..cast_from.len) |i| {
-                    out[i] = @enumFromInt(cast_from[i]);
+                    out[i] = @fromBackingInt(@intCast(cast_from[i]));
                 }
                 break :check out;
             } else {
@@ -237,7 +237,7 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
                 break :check @as(TO, @bitCast(intermediate));
             }
         },
-        FROM_INT | TO_ENUM_VEC => @splat(@enumFromInt(cast_from)),
+        FROM_INT | TO_ENUM_VEC => @splat(@fromBackingInt(@intCast(cast_from))),
         FROM_INT | TO_PTR => @ptrFromInt(cast_from),
         FROM_INT_VEC | TO_PTR_VEC => make: {
             if (Assert.should_assert()) {
@@ -260,14 +260,14 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
         FROM_FLOAT | TO_FLOAT_VEC => @splat(@floatCast(cast_from)),
         FROM_FLOAT | TO_ENUM => make: {
             const INT_TYPE = @typeInfo(TO).@"enum".tag_type;
-            break :make @enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from)));
+            break :make @fromBackingInt(@intCast(@as(INT_TYPE, @intFromFloat(cast_from))));
         },
         FROM_FLOAT_VEC | TO_ENUM_VEC => make: {
             const INT_TYPE = @typeInfo(@typeInfo(TO).vector.child).@"enum".tag_type;
             if (Assert.should_assert()) {
                 var out: TO = undefined;
                 inline for (0..cast_from.len) |i| {
-                    out[i] = @enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from[i])));
+                    out[i] = @fromBackingInt(@intCast(@as(INT_TYPE, @intFromFloat(cast_from[i]))));
                 }
                 break :make out;
             } else {
@@ -278,7 +278,7 @@ pub fn num_cast(from: anytype, comptime TO: type) TO {
         },
         FROM_FLOAT | TO_ENUM_VEC => make: {
             const INT_TYPE = @typeInfo(@typeInfo(TO).vector.child).@"enum".tag_type;
-            break :make @splat(@enumFromInt(@as(INT_TYPE, @intFromFloat(cast_from))));
+            break :make @splat(@fromBackingInt(@intCast(@as(INT_TYPE, @intFromFloat(cast_from)))));
         },
         FROM_FLOAT | TO_PTR => @ptrFromInt(@as(usize, @intFromFloat(cast_from))),
         FROM_FLOAT_VEC | TO_PTR_VEC => make: {
@@ -336,14 +336,14 @@ pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
     switch (TI) {
         .pointer => |PTR_INFO| switch (PTR_INFO.size) {
             .slice => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment orelse @alignOf(PTR_INFO.child) });
+                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.attrs.@"align" orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.attrs.@"align" orelse @alignOf(PTR_INFO.child) });
                 var to: TO = undefined;
                 to.ptr = @ptrFromInt(raw_addr);
                 to.len = 0;
                 return to;
             },
             else => {
-                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.alignment orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.alignment orelse @alignOf(PTR_INFO.child) });
+                assert_with_reason(mem.isAligned(raw_addr, PTR_INFO.attrs.@"align" orelse @alignOf(PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), PTR_INFO.attrs.@"align" orelse @alignOf(PTR_INFO.child) });
                 return @ptrFromInt(raw_addr);
             },
         },
@@ -355,14 +355,14 @@ pub inline fn ptr_cast(from: anytype, comptime TO: type) TO {
                 switch (OPT_CHILD_INFO) {
                     .pointer => |CHILD_PTR_INFO| switch (CHILD_PTR_INFO.size) {
                         .slice => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child) });
+                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.attrs.@"align" orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.attrs.@"align" orelse @alignOf(CHILD_PTR_INFO.child) });
                             var to: TO = undefined;
                             to.ptr = @ptrFromInt(raw_addr);
                             to.len = 0;
                             return to;
                         },
                         else => {
-                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.alignment orelse @alignOf(CHILD_PTR_INFO.child) });
+                            assert_with_reason(mem.isAligned(raw_addr, CHILD_PTR_INFO.attrs.@"align" orelse @alignOf(CHILD_PTR_INFO.child)), @src(), "address {d} was not aligned to required alignment for type {s} ({d})", .{ raw_addr, @typeName(TO), CHILD_PTR_INFO.attrs.@"align" orelse @alignOf(CHILD_PTR_INFO.child) });
                             return @ptrFromInt(raw_addr);
                         },
                     },
@@ -389,7 +389,7 @@ pub fn SameTypeSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
+        .@"align" = PTR.attrs.@"align" orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -402,7 +402,7 @@ pub fn TypeSliceSameProps(comptime POINTER_OR_SLICE: type, comptime NEW_TYPE: ty
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
+        .@"align" = PTR.attrs.@"align" orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -414,7 +414,7 @@ pub fn TypeSliceSamePropsAndType(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
+        .@"align" = PTR.attrs.@"align" orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -441,7 +441,7 @@ pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
         .@"addrspace" = PTR.address_space,
-        .@"align" = PTR.alignment orelse @alignOf(PTR.child),
+        .@"align" = PTR.attrs.@"align" orelse @alignOf(PTR.child),
         .@"allowzero" = PTR.is_allowzero,
         .@"const" = PTR.is_const,
         .@"volatile" = PTR.is_volatile,
@@ -557,7 +557,7 @@ pub fn ChangePtrElemSameAttrs(
     const info = @typeInfo(source).pointer;
     return @Pointer(size, .{
         .@"addrspace" = info.address_space,
-        .@"align" = info.alignment,
+        .@"align" = info.attrs.@"align",
         .@"allowzero" = info.is_allowzero,
         .@"const" = info.is_const,
         .@"volatile" = info.is_volatile,

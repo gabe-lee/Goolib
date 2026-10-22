@@ -47,7 +47,7 @@ const assert_unreachable = Assert.assert_unreachable;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 
 const GROW_BUCKET_AMOUNT = 8;
-const NO_ALLOC = void{};
+const NO_ALLOC = {};
 
 pub const ThreadingMode = enum(u8) {
     single_threaded,
@@ -1866,7 +1866,7 @@ pub fn CompactCoupledAllocationSystem(comptime _DEFINITION: CCAS_Definition) typ
                     .split_range = P_FUNCS.p_split_range,
                 };
                 const P = IListConcrete.CreateConcretePrototype(T, *ListSelf, void, VFX, IFX, NFX);
-                const VTABLE = P.VTABLE_ALLOC_STATIC(true, false, false, math.maxInt(usize), void{});
+                const VTABLE = P.VTABLE_ALLOC_STATIC(true, false, false, math.maxInt(usize), {});
                 //*** END PROTOTYPE***
 
                 pub fn interface(self: *ListSelf) IList.IList(T) {

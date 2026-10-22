@@ -84,7 +84,7 @@ pub const MemRealloc = enum {
             ALLOW_MEM_REALLOC: T_PKG(.ALLOW_MEM_REALLOC, ELEM),
 
             pub fn static_mem() Self {
-                return Self{ .STATIC_MEM = void{} };
+                return Self{ .STATIC_MEM = {} };
             }
             pub fn allow_mem_realloc(alloc: Allocator, settings: Utils.Alloc.SmartAllocSettings(ELEM)) Self {
                 return Self{ .ALLOW_MEM_REALLOC = T_PKG(.ALLOW_MEM_REALLOC, ELEM){
@@ -416,7 +416,7 @@ pub fn IndexBasedMultiFirstChildNextSiblingTraverser(comptime NODE: type, compti
             WHITELIST: [NUM_CHILD_PATHS]bool,
 
             pub fn all_child_paths() AllowedPaths {
-                return AllowedPaths{ .ALL = void{} };
+                return AllowedPaths{ .ALL = {} };
             }
             pub fn only_child_paths(comptime paths: []const []const u8) AllowedPaths {
                 return AllowedPaths{ .WHITELIST = comptime make: {
@@ -782,43 +782,43 @@ test IndexBasedFirstChildNextSiblingTraverser {
     };
     var err: ?ErrorOld = null;
     var out = Out{};
-    nodes, stack, err = Trav.do_action_on_all_nodes_children_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_children_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, {}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_children_first(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_children_first(nodes, stack, I, .STATIC_MEM, {}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first_comptime_action_body(nodes, stack, I, .STATIC_MEM, {}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabchdef", "expected", "", .{});
     out.idx = 0;
-    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first(nodes, stack, I, .STATIC_MEM, void{}, &out, PROTO.act);
+    nodes, stack, err = Trav.do_action_on_all_nodes_parents_first(nodes, stack, I, .STATIC_MEM, {}, &out, PROTO.act);
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabchdef", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, void{}, .COMPTIME_FN_PTR, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, {}, .COMPTIME_FN_PTR, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .all_child_paths(), I, &out, {}, .RUNTIME_FN_PTR, {}, PROTO.act_dual_rt, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcABCgdefDEFhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .all_child_paths(), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .all_child_paths(), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabcABChdefDEF", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .all_child_paths(), I, &out, void{}, .RUNTIME_FN_PTR, void{}, PROTO.act_dual_rt, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .all_child_paths(), I, &out, {}, .RUNTIME_FN_PTR, {}, PROTO.act_dual_rt, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "igabcABChdefDEF", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .only_child_paths(&.{"first_child_lower"}), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .only_child_paths(&.{"first_child_lower"}), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .exclude_child_paths(&.{"first_child_lower"}), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .exclude_child_paths(&.{"first_child_lower"}), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "i", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .only_child_paths(&.{"first_child_upper"}), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .PARENTS_FIRST, .only_child_paths(&.{"first_child_upper"}), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "i", "expected", "", .{});
     out.idx = 0;
-    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .exclude_child_paths(&.{"first_child_upper"}), I, &out, void{}, .COMPTIME_FN_BODY, PROTO.act_dual, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+    nodes_dual, stack_dual = try TravDual.do_action_on_all_nodes(nodes_dual, stack_dual, .no_stack_reallocation(), .CHILDREN_FIRST, .exclude_child_paths(&.{"first_child_upper"}), I, &out, {}, .COMPTIME_FN_BODY, PROTO.act_dual, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
     try Test.expect_strings_equal(out.buf[0..out.idx], "result", "abcgdefhi", "expected", "", .{});
     out.idx = 0;
 }

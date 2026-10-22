@@ -9,7 +9,7 @@ pub fn build(b: *std.Build) void {
     });
 
     zstbi.addIncludePath(b.path("libs/stbi"));
-    if (optimize == .Debug) {
+    if (optimize == .debug) {
         // TODO: Workaround for Zig bug.
         zstbi.addCSourceFile(.{
             .file = b.path("src/zstbi.c"),

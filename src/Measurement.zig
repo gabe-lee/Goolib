@@ -68,6 +68,3 @@ pub const CM_TO_KM = 1.0 / 100000.0;
 
 pub const KM_TO_MM = 1000000.0;
 pub const MM_TO_KM = 1.0 / 1000000.0;
-
-
-

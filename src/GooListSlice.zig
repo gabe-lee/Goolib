@@ -160,7 +160,7 @@ const ReturnMode = enum {
             .RETURN_PTR_OR_SLICE => ptr,
             .RETURN_PTR_OR_SLICE_IDX => .{ ptr, idx },
             .RETURN_IDX => idx,
-            .RETURN_VOID => void{},
+            .RETURN_VOID => {},
         };
     }
 };
@@ -291,16 +291,16 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         assert_with_reason(@sizeOf(ELEM) > 0, @src(), ".SPLIT_FIELDS not compatible with zero-size elements, type `{s}` is zero-sized", .{@typeName(ELEM)});
     }
     const _NUM_FIELDS: usize = switch (@typeInfo(ELEM)) {
-        .@"struct" => |s| s.fields.len,
+        .@"struct" => |s| s.field_names.len,
         else => 1,
     };
     if (FIELD_LAYOUT == .SPLIT_FIELDS) {
         assert_with_reason(Type.type_is_struct(ELEM), @src(), ".SPLIT_FIELDS is only valid on struct types", .{});
     }
     if (Type.type_is_struct(ELEM)) {
-        assert_with_reason(@typeInfo(ELEM).@"struct".fields.len > 0, @src(), "not compatible with zero-field structs", .{});
+        assert_with_reason(@typeInfo(ELEM).@"struct".field_names.len > 0, @src(), "not compatible with zero-field structs", .{});
     }
-    const _E_INT = std.meta.Int(.unsigned, @intCast(std.math.log2_int_ceil(usize, _NUM_FIELDS)));
+    const _E_INT = @Int(.unsigned, @intCast(std.math.log2_int_ceil(usize, _NUM_FIELDS)));
     const _PROTO = struct {
         fn field_a_should_have_memory_offset_after_field_b(a: Type.StructFieldTypeAttrPkg, b: Type.StructFieldTypeAttrPkg) bool {
             return (@sizeOf(a.type) == 0) or @alignOf(a.type) < @alignOf(b.type);
@@ -325,7 +325,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 var e_val: [_NUM_FIELDS]_E_INT = undefined;
                 var names: [_NUM_FIELDS][]const u8 = undefined;
                 var types: [_NUM_FIELDS]type = undefined;
-                var offs: if (FIELD_LAYOUT == .SPLIT_FIELDS) [_NUM_FIELDS + 1]IDX else void = if (FIELD_LAYOUT == .SPLIT_FIELDS) undefined else void{};
+                var offs: if (FIELD_LAYOUT == .SPLIT_FIELDS) [_NUM_FIELDS + 1]IDX else void = if (FIELD_LAYOUT == .SPLIT_FIELDS) undefined else {};
                 var off_total: IDX = 0;
                 inline for (bundles[0..], 0..) |bundle, i| {
                     e_val[i] = @intCast(i);
@@ -445,12 +445,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         /// the 'first' element in the data. For example, this would be used
         /// in a Ring Buffer configuration, to denote the current starting position
         /// where index `0` sits
-        root_offset: if (HAS_ROOT_OFFSET) IDX else void = if (HAS_ROOT_OFFSET) 0 else void{},
+        root_offset: if (HAS_ROOT_OFFSET) IDX else void = if (HAS_ROOT_OFFSET) 0 else {},
         /// The length of the data, either its entirety or as a slice
         data_len: IDX = 0,
         /// If the list is a slice, this is the offset from index
         /// `0` where the slice starts
-        slice_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else void{},
+        slice_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else {},
 
         //****************
         // INITIALIZE
@@ -643,13 +643,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return ORDERED_FIELD_OFFSETS[NUM_FIELDS];
         }
         inline fn field_begin_stride(comptime field: Field) IDX {
-            return ORDERED_FIELD_OFFSETS[@intFromEnum(field)];
+            return ORDERED_FIELD_OFFSETS[@backingInt(field)];
         }
         inline fn field_begin_stride_fidx(comptime fidx: usize) IDX {
             return ORDERED_FIELD_OFFSETS[fidx];
         }
         inline fn FieldType(comptime field: Field) type {
-            return ORDERED_FIELD_TYPES[@intFromEnum(field)];
+            return ORDERED_FIELD_TYPES[@backingInt(field)];
         }
         inline fn FieldTypeFidx(comptime fidx: usize) type {
             return ORDERED_FIELD_TYPES[fidx];
@@ -690,7 +690,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return @ptrCast(@alignCast(self.root_ptr + stride));
         }
         inline fn root_field_ptr(self: ListSelf, comptime FIELD: Field) if (IS_CONST) [*]const FieldType(FIELD) else [*]FieldType(FIELD) {
-            return self.field_slice_from_field_idx(@intFromEnum(FIELD));
+            return self.field_slice_from_field_idx(@backingInt(FIELD));
         }
         inline fn contiguous_indexes_after_index_inclusive(self: ListSelf, start: IDX) IDX {
             switch (comptime INDEX_LAYOUT) {
@@ -761,28 +761,28 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //     STOP_WITH_PREV_IDX: void,
 
         //     pub fn continue_to_next_idx() IterState {
-        //         return IterState{ .CONTINUE_IMPLICIT_NEXT_IDX = void{} };
+        //         return IterState{ .CONTINUE_IMPLICIT_NEXT_IDX = {} };
         //     }
         //     pub fn continue_to_specific_idx(id: IDX) IterState {
         //         return IterState{ .CONTINUE_SPECIFIC_NEXT_IDX = id };
         //     }
         //     pub fn continue_with_same_idx() IterState {
-        //         return IterState{ .CONTINUE_WITH_SAME_IDX = void{} };
+        //         return IterState{ .CONTINUE_WITH_SAME_IDX = {} };
         //     }
         //     pub fn continue_with_prev_idx() IterState {
-        //         return IterState{ .CONTINUE_WITH_PREV_IDX = void{} };
+        //         return IterState{ .CONTINUE_WITH_PREV_IDX = {} };
         //     }
         //     pub fn stop_with_implicit_next_idx() IterState {
-        //         return IterState{ .STOP_IMPLICIT_NEXT_IDX = void{} };
+        //         return IterState{ .STOP_IMPLICIT_NEXT_IDX = {} };
         //     }
         //     pub fn stop_with_specific_next_idx(id: IDX) IterState {
         //         return IterState{ .STOP_SPECIFIC_NEXT_IDX = id };
         //     }
         //     pub fn stop_with_same_idx() IterState {
-        //         return IterState{ .STOP_WITH_SAME_IDX = void{} };
+        //         return IterState{ .STOP_WITH_SAME_IDX = {} };
         //     }
         //     pub fn stop_with_prev_idx() IterState {
-        //         return IterState{ .STOP_WITH_PREV_IDX = void{} };
+        //         return IterState{ .STOP_WITH_PREV_IDX = {} };
         //     }
         // };
 
@@ -1967,8 +1967,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                         .SPLIT_FIELDS => {
                             var mem_does_overlap: bool = undefined;
                             {
-                                const copy_src_ptr: [*]FieldTypeFidx(0) = @ptrCast(remaining_self.get_field_ptr_const(@enumFromInt(0), 0));
-                                const copy_dst_ptr: [*]FieldTypeFidx(0) = @ptrCast(remaining_dest.get_field_ptr(@enumFromInt(0), 0));
+                                const copy_src_ptr: [*]FieldTypeFidx(0) = @ptrCast(remaining_self.get_field_ptr_const(@fromBackingInt(@intCast(0)), 0));
+                                const copy_dst_ptr: [*]FieldTypeFidx(0) = @ptrCast(remaining_dest.get_field_ptr(@fromBackingInt(@intCast(0)), 0));
                                 const copy_src = copy_src_ptr[0..copy_len];
                                 const copy_dst = copy_dst_ptr[0..copy_len];
                                 mem_does_overlap = memory_overlaps(FieldTypeFidx(0), copy_src, copy_dst);
@@ -1979,8 +1979,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                                 }
                             }
                             inline for (1..NUM_FIELDS) |FIDX| {
-                                const copy_src_ptr: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_self.get_field_ptr_const(@enumFromInt(FIDX), 0));
-                                const copy_dst_ptr: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_dest.get_field_ptr(@enumFromInt(FIDX), 0));
+                                const copy_src_ptr: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_self.get_field_ptr_const(@fromBackingInt(@intCast(FIDX)), 0));
+                                const copy_dst_ptr: [*]FieldTypeFidx(FIDX) = @ptrCast(remaining_dest.get_field_ptr(@fromBackingInt(@intCast(FIDX)), 0));
                                 const copy_src = copy_src_ptr[0..copy_len];
                                 const copy_dst = copy_dst_ptr[0..copy_len];
                                 if (mem_does_overlap) {
@@ -2563,7 +2563,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //**************
         fn delete_one_internal(self: *ListSelf, idx: IDX, comptime STRATEGY: DeleteMode, comptime RETURN: DeleteReturnMode) if (RETURN == .RETURN_VAL) ELEM else void {
             self.assert_valid_idx(idx, @src());
-            const val_or_void: if (RETURN == .RETURN_VAL) ELEM else void = if (RETURN == .RETURN_VAL) self.get(idx) else void{};
+            const val_or_void: if (RETURN == .RETURN_VAL) ELEM else void = if (RETURN == .RETURN_VAL) self.get(idx) else {};
             if (idx == self.data_len - 1) {
                 switch (comptime INDEX_LAYOUT) {
                     .SERIAL_INDEXES => {},
@@ -2678,13 +2678,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn delete_range(self: *ListSelf, start_idx: IDX, end_idx_exclusive: IDX) void {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            self.delete_many_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, void{});
+            self.delete_many_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {});
         }
         pub fn delete_count(self: *ListSelf, start_idx: IDX, count: IDX) void {
             const end_idx_exclusive = start_idx + count;
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            self.delete_many_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, void{});
+            self.delete_many_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {});
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2706,13 +2706,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub fn swap_delete_range(self: *ListSelf, start_idx: IDX, end_idx_exclusive: IDX) void {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            self.delete_many_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, void{});
+            self.delete_many_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {});
         }
         pub fn swap_delete_count(self: *ListSelf, start_idx: IDX, count: IDX) void {
             const end_idx_exclusive = start_idx + count;
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            self.delete_many_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, void{});
+            self.delete_many_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {});
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2881,7 +2881,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
-            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_delete_range_filtered(
             self: *ListSelf,
@@ -2894,7 +2894,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             self.assert_valid_range(start_idx, end_idx_exclusive, @src());
-            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return self.delete_filtered_internal(start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_range_filtered_assume_dest_cap(
             self: *ListSelf,
@@ -2964,7 +2964,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return self.delete_filtered_internal(0, self.get_len(), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_delete_filtered(
             self: *ListSelf,
@@ -2974,7 +2974,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return self.delete_filtered_internal(0, self.get_len(), .SWAP, .IGNORE_VAL, .ASSUME_CAP, void{}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return self.delete_filtered_internal(0, self.get_len(), .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_filtered_assume_dest_cap(
             self: *ListSelf,
@@ -3174,7 +3174,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return idxs_[1];
         }
         pub fn median_index_of_3(self: ListSelf, idxs: [3]IDX, greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool) IDX {
-            return self.median_index_of_3_advanced(idxs, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+            return self.median_index_of_3_advanced(idxs, {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {});
         }
 
         fn build_heap_within_range_internal(
@@ -3276,7 +3276,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             higher_in_heap_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
             higher_in_heap_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) void {
-            self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, idx, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+            self.heap_sift_down_within_range_internal(heap_first_idx, heap_len, idx, {}, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, {});
         }
         pub inline fn heap_sift_down(
             self: ListSelf,
@@ -3284,7 +3284,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             higher_in_heap_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
             higher_in_heap_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) void {
-            self.heap_sift_down_within_range_internal(0, self.get_len(), idx, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+            self.heap_sift_down_within_range_internal(0, self.get_len(), idx, {}, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, {});
         }
         // TODO more heap operations
 
@@ -3330,7 +3330,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         ) void {
             self.assert_valid_range(start, end_excluded, @src());
             if (start == end_excluded) return;
-            self.build_heap_within_range_internal(start, end_excluded, void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+            self.build_heap_within_range_internal(start, end_excluded, {}, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, {});
         }
 
         pub inline fn build_heap(
@@ -3339,7 +3339,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             higher_in_heap_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) void {
             if (self.get_len() < 2) return;
-            self.build_heap_within_range_internal(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, void{}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, void{});
+            self.build_heap_within_range_internal(0, self.get_len(), {}, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_idx, {}, .RUNTIME_FN_PTR, higher_in_heap_idx_val, {});
         }
 
         fn is_range_a_valid_heap_internal(
@@ -3395,13 +3395,13 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
         ) bool {
             self.assert_valid_range(heap_first_idx, heap_last_idx_exclusive, @src());
-            return self.is_range_a_valid_heap_internal(heap_first_idx, heap_last_idx_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+            return self.is_range_a_valid_heap_internal(heap_first_idx, heap_last_idx_exclusive, {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {});
         }
         pub fn is_a_valid_heap(
             self: ListSelf,
             greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
         ) bool {
-            return self.is_range_a_valid_heap_internal(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+            return self.is_range_a_valid_heap_internal(0, self.get_len(), {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {});
         }
 
         pub fn is_range_sorted_advanced(
@@ -3447,11 +3447,11 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
 
         pub inline fn is_sorted(self: ListSelf, greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool) bool {
-            return self.is_range_sorted_advanced(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+            return self.is_range_sorted_advanced(0, self.get_len(), {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {});
         }
 
         pub inline fn is_range_sorted(self: ListSelf, start: IDX, end_exclusive: IDX, greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool) bool {
-            return self.is_range_sorted_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{});
+            return self.is_range_sorted_advanced(start, end_exclusive, {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {});
         }
 
         /// Builds a max-heap out of the given data range using the provided 'greater-than' comparisons,
@@ -3561,7 +3561,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
             greater_than_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) void {
-            self.heapsort_range_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+            self.heapsort_range_advanced(start, end_exclusive, {}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {}, .RUNTIME_FN_PTR, greater_than_idx_val, {});
         }
 
         /// Builds a max-heap from the entire data slice using the provided 'greater-than' comparisons,
@@ -3589,7 +3589,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             greater_than_idx_idx: *const fn (ListSelf, IDX, IDX, void, void) bool,
             greater_than_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) void {
-            self.heapsort_advanced(void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_idx, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+            self.heapsort_advanced({}, {}, .RUNTIME_FN_PTR, greater_than_idx_idx, {}, .RUNTIME_FN_PTR, greater_than_idx_val, {});
         }
 
         /// Filters smaller ordered items down until they find an index where they would be
@@ -3715,7 +3715,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         /// Space:
         ///   - O(1)
         pub inline fn insertion_sort_range(self: ListSelf, start: IDX, end_exclusive: IDX, greater_than_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool) void {
-            self.insertion_sort_range_advanced(start, end_exclusive, void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+            self.insertion_sort_range_advanced(start, end_exclusive, {}, {}, .RUNTIME_FN_PTR, greater_than_idx_val, {});
         }
 
         /// Filters smaller ordered items down until they find an index where they would be
@@ -3742,7 +3742,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         /// Space:
         ///   - O(1)
         pub inline fn insertion_sort(self: ListSelf, greater_than_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool) void {
-            self.insertion_sort_range_advanced(0, self.get_len(), void{}, void{}, .RUNTIME_FN_PTR, greater_than_idx_val, void{});
+            self.insertion_sort_range_advanced(0, self.get_len(), {}, {}, .RUNTIME_FN_PTR, greater_than_idx_val, {});
         }
 
         const PartitionResult = struct {
@@ -3754,7 +3754,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             return struct {
                 lo_idx: IDX,
                 hi_idx: IDX,
-                budget: if (DEGENERATE_FALLBACK) IDX else void = if (DEGENERATE_FALLBACK) undefined else void{},
+                budget: if (DEGENERATE_FALLBACK) IDX else void = if (DEGENERATE_FALLBACK) undefined else {},
 
                 pub fn new(lo: IDX, hi: IDX, budget: IDX) @This() {
                     var this = @This(){
@@ -3955,8 +3955,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             var stack: [SETTINGS.QUICKSORT_MAX_STACK]Partition = undefined;
             stack[0] = Partition.new(start, last, degenerate_limit);
             var stack_len: u8 = 1;
-            var force_3_way = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) false else void{};
-            var force_3_way_counter = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) @as(IDX, 0) else void{};
+            var force_3_way = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) false else {};
+            var force_3_way_counter = if (SETTINGS.SAME_ORDER_EXPECTATIONS == .DYNAMIC_BASED_ON_SAME_ORDER_DENSITY) @as(IDX, 0) else {};
             next_partition: while (stack_len > 0) {
                 stack_len -= 1;
                 const part = stack[stack_len];
@@ -4230,20 +4230,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 start,
                 end_excluded,
                 .{},
-                void{},
-                void{},
+                {},
+                {},
                 .RUNTIME_FN_PTR,
                 less_than_idx_val,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 greater_than_idx_idx,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 greater_than_idx_val,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 equal_idx_val,
-                void{},
+                {},
             );
         }
         /// Quicksort using a number of optimizations (similar to Introsort):
@@ -4288,20 +4288,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 0,
                 self.get_len(),
                 .{},
-                void{},
-                void{},
+                {},
+                {},
                 .RUNTIME_FN_PTR,
                 less_than_idx_val,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 greater_than_idx_idx,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 greater_than_idx_val,
-                void{},
+                {},
                 .RUNTIME_FN_PTR,
                 equal_idx_val,
-                void{},
+                {},
             );
         }
 
@@ -4425,7 +4425,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
@@ -4450,20 +4450,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 start,
                 end_excluded,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
         pub inline fn for_each_in_range_filtered_with_context(
@@ -4480,19 +4480,19 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 end_excluded,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
 
@@ -4517,7 +4517,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
@@ -4541,20 +4541,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 0,
                 null,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
         pub inline fn for_each_filtered_with_context(
@@ -4569,19 +4569,19 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 null,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
 
@@ -4596,7 +4596,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime ACTION_FN_KIND: FuncParamType,
             action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
             comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
-        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+        ) ForEachReturn(.NO_FILTERING, {}, ACTION_ERROR) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
@@ -4604,17 +4604,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
                 action,
                 ACTION,
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_in_range(
@@ -4623,25 +4623,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             end_excluded: ?IDX,
             max_count: IDX,
             action: *const fn (ListSelf, IDX, void, void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_in_range_with_context(
@@ -4651,25 +4651,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             max_count: IDX,
             context: anytype,
             action: *const fn (ListSelf, IDX, @TypeOf(context), void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -4682,7 +4682,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime ACTION_FN_KIND: FuncParamType,
             action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
             comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
-        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+        ) ForEachReturn(.NO_FILTERING, {}, ACTION_ERROR) {
             return self.for_each_complete_advanced(
                 0,
                 null,
@@ -4690,17 +4690,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
                 action,
                 ACTION,
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -4708,25 +4708,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self: ListSelf,
             max_count: IDX,
             action: *const fn (ListSelf, IDX, void, void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 0,
                 null,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_with_context(
@@ -4734,25 +4734,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             max_count: IDX,
             context: anytype,
             action: *const fn (ListSelf, IDX, @TypeOf(context), void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 0,
                 null,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_next_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_in_range_filtered_reverse_advanced(
@@ -4778,7 +4778,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
@@ -4803,20 +4803,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 start,
                 end_excluded,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
 
@@ -4834,19 +4834,19 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 end_excluded,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
 
@@ -4871,7 +4871,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
@@ -4895,20 +4895,20 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 self.get_len() -| 1,
                 null,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
         pub inline fn for_each_filtered_reverse_with_context(
@@ -4923,19 +4923,19 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 null,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .USE_FILTERING_FUNC,
                 null,
                 .RUNTIME_FN_PTR,
                 filter,
-                void{},
+                {},
             );
         }
 
@@ -4950,7 +4950,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime ACTION_FN_KIND: FuncParamType,
             action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
             comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
-        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+        ) ForEachReturn(.NO_FILTERING, {}, ACTION_ERROR) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
@@ -4958,17 +4958,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
                 action,
                 ACTION,
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_in_range_reverse(
@@ -4977,25 +4977,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             end_excluded: ?IDX,
             max_count: IDX,
             action: *const fn (ListSelf, IDX, void, void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -5006,25 +5006,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             max_count: IDX,
             context: anytype,
             action: *const fn (ListSelf, IDX, @TypeOf(context), void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 start,
                 end_excluded,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(context)),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -5037,7 +5037,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             comptime ACTION_FN_KIND: FuncParamType,
             action: ForEachActionRT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
             comptime ACTION: ForEachActionCT(ACTION_FN_KIND, @TypeOf(action_ctx), @TypeOf(ACTION_CTX), ACTION_ERROR),
-        ) ForEachReturn(.NO_FILTERING, void{}, ACTION_ERROR) {
+        ) ForEachReturn(.NO_FILTERING, {}, ACTION_ERROR) {
             return self.for_each_complete_advanced(
                 self.get_len() -| 1,
                 null,
@@ -5045,17 +5045,17 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 action_ctx,
                 ACTION_CTX,
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(action_ctx), @TypeOf(ACTION_CTX)),
                 ACTION_ERROR,
                 ACTION_FN_KIND,
                 action,
                 ACTION,
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -5063,25 +5063,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             self: ListSelf,
             max_count: IDX,
             action: *const fn (ListSelf, IDX, void, void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 self.get_len() -| 1,
                 null,
                 max_count,
-                void{},
-                void{},
+                {},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(void, void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
         pub inline fn for_each_reverse_with_context(
@@ -5089,25 +5089,25 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             max_count: IDX,
             context: anytype,
             action: *const fn (ListSelf, IDX, @TypeOf(context), void) void,
-        ) ForEachReturn(.NO_FILTERING, void{}, null) {
+        ) ForEachReturn(.NO_FILTERING, {}, null) {
             return self.for_each_complete_advanced(
                 self.get_len() -| 1,
                 null,
                 max_count,
                 context,
-                void{},
+                {},
                 .COMPTIME_FN_BODY,
-                void{},
+                {},
                 simple_prev_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,
-                void{},
+                {},
                 .NO_FILTERING,
-                void{},
-                void{},
-                void{},
-                void{},
+                {},
+                {},
+                {},
+                {},
             );
         }
 
@@ -5129,8 +5129,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             iface: std.Io.Reader,
             list: ListSelf,
             read_pos: IDX,
-            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else void{},
-            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) @sizeOf(ELEM) else void{},
+            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else {},
+            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) @sizeOf(ELEM) else {},
 
             pub fn interface(reader: *StdReader) *std.Io.Reader {
                 return &reader.iface;
@@ -5250,8 +5250,8 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
             write_pos: IDX,
             alloc: ?Allocator = null,
             growth: Growth = .GROW_BY_25_PERCENT,
-            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else void{},
-            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) 0 else void{},
+            partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else {},
+            partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) 0 else {},
 
             pub fn interface(writer: *StdWriter) *std.Io.Writer {
                 return &writer.iface;
@@ -5465,7 +5465,7 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                 stack: Stack = .{},
                 stack_alloc: Allocator = dummy_alloc,
                 stack_growth: Growth = .GROW_EXACT_NEEDED,
-                max_stack_len: if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) IDX else void = if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) 0 else void{},
+                max_stack_len: if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) IDX else void = if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) 0 else {},
 
                 pub fn init_static_stack(list: ListSelf, stack: Stack) ListSelfTraverser {
                     return ListSelfTraverser{
@@ -5498,14 +5498,14 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
                     curr_path: IDX,
                 };
                 pub const HAS_NEXT_SIBLING_FIELD = OPT_NEXT_SIBLING_FIELD != null;
-                pub const NEXT_SIBLING_FIELD = if (OPT_NEXT_SIBLING_FIELD) |F| F else void{};
+                pub const NEXT_SIBLING_FIELD = if (OPT_NEXT_SIBLING_FIELD) |F| F else {};
                 pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
                 pub const AllowedPaths = union(enum) {
                     ALL: void,
                     WHITELIST: [NUM_CHILD_PATHS]bool,
 
                     pub fn all_child_paths() AllowedPaths {
-                        return AllowedPaths{ .ALL = void{} };
+                        return AllowedPaths{ .ALL = {} };
                     }
                     pub fn only_child_paths(comptime paths: []const Field) AllowedPaths {
                         return AllowedPaths{ .WHITELIST = comptime make: {

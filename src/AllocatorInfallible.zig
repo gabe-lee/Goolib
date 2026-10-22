@@ -55,7 +55,7 @@ pub inline fn from(allocator: Allocator) AllocatorInfal {
 
 pub inline fn raw_alloc(self: AllocatorInfal, len: usize, alignment: Alignment, ret_addr: usize) [*]u8 {
     const alloc_result = self.allocator.rawAlloc(len, alignment, ret_addr);
-    assert_with_reason(alloc_result != null, @src(), "Allocator.rawAlloc(allocator: {any}, len = {d}, alignment = {d}, ret_addr = {x}) failed", .{ self.allocator, len, @intFromEnum(alignment), ret_addr });
+    assert_with_reason(alloc_result != null, @src(), "Allocator.rawAlloc(allocator: {any}, len = {d}, alignment = {d}, ret_addr = {x}) failed", .{ self.allocator, len, @backingInt(alignment), ret_addr });
     return alloc_result.?;
 }
 
@@ -163,7 +163,7 @@ pub inline fn resize(self: AllocatorInfal, allocation: anytype, new_len: usize) 
 /// `new_len` may be zero, in which case the allocation is freed.
 pub inline fn remap(self: AllocatorInfal, allocation: anytype, new_len: usize) t: {
     const Slice = @typeInfo(@TypeOf(allocation)).pointer;
-    break :t ?[]align(Slice.alignment) Slice.child;
+    break :t ?[]align(Slice.attrs.@"align") Slice.child;
 } {
     return self.allocator.remap(allocation, new_len);
 }
@@ -182,7 +182,7 @@ pub inline fn remap(self: AllocatorInfal, allocation: anytype, new_len: usize) t
 ///   change the size without relocating the allocation.
 pub fn realloc(self: AllocatorInfal, old_mem: anytype, new_n: usize) t: {
     const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
-    break :t []align(Slice.alignment) Slice.child;
+    break :t []align(Slice.attrs.@"align") Slice.child;
 } {
     return self.realloc_retaddr(old_mem, new_n, @returnAddress());
 }
@@ -194,7 +194,7 @@ pub fn realloc_retaddr(
     return_address: usize,
 ) t: {
     const Slice = @typeInfo(@TypeOf(old_mem)).pointer;
-    break :t []align(Slice.alignment) Slice.child;
+    break :t []align(Slice.attrs.@"align") Slice.child;
 } {
     const alloc_result = self.allocator.reallocAdvanced(old_mem, new_n, return_address);
     return alloc_result catch |err| assert_with_reason(false, @src(), "Allocator.reallocAdvanced(allocator: {any}, old_mem = {*}, new_n = {d}, return_address = {x}) failed: {s}", .{ self.allocator, old_mem, new_n, return_address, @errorName(err) });

@@ -68,8 +68,9 @@ pub fn insertion_sort_implicit_with_matching_buffers(buffer: anytype, matching_b
     const T = Types.IndexableChild(BUF);
     Types.assert_has_len(BUF, @src());
     assert_with_reason(Utils.can_infer_type_order(T), @src(), "cannot inherently order type " ++ @typeName(T), .{});
-    inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
-        _ = Types.IndexableChild(matching_field.type);
+    const MATCH_BUF_INFO = @typeInfo(@TypeOf(matching_buffers)).@"struct";
+    inline for (MATCH_BUF_INFO.field_types) |matching_field_type| {
+        _ = Types.IndexableChild(matching_field_type);
     }
     var i: usize = 1;
     var j: usize = undefined;
@@ -132,8 +133,9 @@ pub fn insertion_sort_with_func_and_matching_buffers(buffer: anytype, matching_b
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
     Types.assert_has_len(BUF, @src());
-    inline for (@typeInfo(@TypeOf(matching_buffers)).@"struct".fields) |matching_field| {
-        _ = Types.IndexableChild(matching_field.type);
+    const MATCH_BUF_INFO = @typeInfo(@TypeOf(matching_buffers)).@"struct";
+    inline for (MATCH_BUF_INFO.field_types) |matching_field_type| {
+        _ = Types.IndexableChild(matching_field_type);
     }
     var i: usize = 1;
     var j: usize = undefined;
@@ -196,8 +198,9 @@ pub fn insertion_sort_with_func_userdata_and_matching_buffers(buffer: anytype, m
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
     Types.assert_has_len(BUF);
-    inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
-        _ = Types.IndexableChild(matching_field.type);
+    const MATCH_BUF_INFO = @typeInfo(@TypeOf(matching_buffers)).@"struct";
+    inline for (MATCH_BUF_INFO.field_types) |matching_field_type| {
+        _ = Types.IndexableChild(matching_field_type);
     }
     var i: usize = 1;
     var j: usize = undefined;
@@ -265,8 +268,9 @@ pub fn insertion_sort_with_transform_to_implicit_and_matching_buffers(buffer: an
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
     Types.assert_has_len(BUF);
-    inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
-        _ = Types.IndexableChild(matching_field.type);
+    const MATCH_BUF_INFO = @typeInfo(@TypeOf(matching_buffers)).@"struct";
+    inline for (MATCH_BUF_INFO.field_types) |matching_field_type| {
+        _ = Types.IndexableChild(matching_field_type);
     }
     assert_with_reason(Utils.can_infer_type_order(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
     var i: usize = 1;
@@ -339,8 +343,9 @@ pub fn insertion_sort_with_transform_to_implicit_matching_buffers_and_userdata(b
     const BUF = @TypeOf(buffer);
     const T = Types.IndexableChild(BUF);
     Types.assert_has_len(BUF);
-    inline for (@typeInfo(matching_buffers).@"struct".fields) |matching_field| {
-        _ = Types.IndexableChild(matching_field.type);
+    const MATCH_BUF_INFO = @typeInfo(@TypeOf(matching_buffers)).@"struct";
+    inline for (MATCH_BUF_INFO.field_types) |matching_field_type| {
+        _ = Types.IndexableChild(matching_field_type);
     }
     assert_with_reason(Utils.can_infer_type_order(TRANSFORMED_TYPE), @src(), "cannot inherently order type " ++ @typeName(TRANSFORMED_TYPE), .{});
     var i: usize = 1;

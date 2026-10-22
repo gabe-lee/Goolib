@@ -23,8 +23,8 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const BUILD_CONIFG = @import("config");
-pub const CONFIG = BUILD_CONIFG.CONFIG;
+const CONFIG_STRUCT = @import("config");
+pub const CONFIG = CONFIG_STRUCT.OPTS;
 
 pub const VERSION = "0.5.0";
 pub const NAME = "Goolib";

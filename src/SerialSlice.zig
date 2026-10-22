@@ -89,7 +89,5 @@ pub fn SerialSlice(comptime TYPE: type, comptime IDX: type) type {
     return extern struct {
         ptr: [*]TYPE = Utils.invalid_ptr_many(TYPE),
         len: IDX = 0,
-
-        
     };
 }

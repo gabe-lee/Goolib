@@ -438,7 +438,7 @@
 // };
 
 // pub const TrueTypeFont = struct {
-//     table_offsets: [@typeInfo(TableId).@"enum".fields.len]u32,
+//     table_offsets: [@typeInfo(TableId).@"enum".field_names.len]u32,
 //     ttf_bytes: []const u8,
 //     index_map: u32,
 //     index_to_loc_format: u16,
@@ -447,7 +447,7 @@
 
 //     pub fn load(bytes: []const u8) !TrueTypeFont {
 //         // Find tables.
-//         var table_offsets = [1]u32{0} ** @typeInfo(TableId).@"enum".fields.len;
+//         var table_offsets = [1]u32{0} ** @typeInfo(TableId).@"enum".field_names.len;
 //         const tables_len = read_int(u16, bytes[4..][0..2], .big);
 //         var cff: u32 = 0;
 //         for (0..tables_len) |i| {
@@ -2302,7 +2302,7 @@
 //             var i: u32 = 0;
 //             clear_stack = true;
 //             const b0: u16 = b.get8();
-//             // const tag_name = if (std.meta.intToEnum(Instruction, b0)) |t| @tagName(t) else |_| "other";
+//             // const tag_name = if (@IntToEnum(Instruction, b0)) |t| @tagName(t) else |_| "other";
 //             // std.log.debug("{}/{} b0 {s}/{}/0x{x} num_vertices {}", .{ b.cursor, b.size, tag_name, b0, b0, ctx.num_vertices });
 
 //             sw: switch (b0) {
@@ -2623,12 +2623,12 @@
 //     return shape;
 // }
 
-// pub fn convert_vertex_list_to_new_shape(vertex_list: *List(Vertex), comptime T: type, shape_allocator: Allocator) ShapeConvertError!Shape(T, void, void{}) {
-//     return convert_vertex_list_to_new_shape_with_userdata(vertex_list, T, void, void{}, shape_allocator);
+// pub fn convert_vertex_list_to_new_shape(vertex_list: *List(Vertex), comptime T: type, shape_allocator: Allocator) ShapeConvertError!Shape(T, void, {}) {
+//     return convert_vertex_list_to_new_shape_with_userdata(vertex_list, T, void, {}, shape_allocator);
 // }
 
-// pub fn convert_vertex_list_to_shape(vertex_list: *List(Vertex), comptime T: type, shape: *Shape(T, void, void{}), shape_allocator: Allocator) ShapeConvertError!void {
-//     return convert_vertex_list_to_shape_with_userdata(vertex_list, T, void, void{}, shape, shape_allocator);
+// pub fn convert_vertex_list_to_shape(vertex_list: *List(Vertex), comptime T: type, shape: *Shape(T, void, {}), shape_allocator: Allocator) ShapeConvertError!void {
+//     return convert_vertex_list_to_shape_with_userdata(vertex_list, T, void, {}, shape, shape_allocator);
 // }
 
 // pub fn convert_vertex_list_to_shape_with_userdata(vertex_list: *List(Vertex), comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT: EDGE_USERDATA, shape: *Shape(T, EDGE_USERDATA, EDGE_USERDATA_DEFAULT), shape_allocator: Allocator) ShapeConvertError!void {
@@ -2733,7 +2733,7 @@
 //         .Y_ORDER = .TOP_TO_BOTTOM,
 //     };
 //     const OUT_GRID = DataGridModule.DataGrid(OUT_DEF);
-//     const RASTER = ShapeModule.ScanlineRasterizer(f32, void, void{}, i32, OUT_DEF);
+//     const RASTER = ShapeModule.ScanlineRasterizer(f32, void, {}, i32, OUT_DEF);
 //     var raster = RASTER.init_with_intersection_capacity(16, alloc);
 //     defer raster.free(alloc);
 //     const output_cells = OUT_GRID.CellList.init_capacity(4096, alloc);
@@ -2745,7 +2745,7 @@
 //         fn free_vert_list(vert_list: *List(Vertex), vert_alloc: Allocator) void {
 //             vert_list.free(vert_alloc);
 //         }
-//         fn free_contour(contour: *Contour(f32, void, void{}), contour_alloc: Allocator) void {
+//         fn free_contour(contour: *Contour(f32, void, {}), contour_alloc: Allocator) void {
 //             contour.free(contour_alloc);
 //         }
 //     };
@@ -2753,10 +2753,10 @@
 //     const ActiveEdgePoolST = ActiveEdgePool(.SINGLE_THREADED);
 //     var active_edge_pool = ActiveEdgePoolST.init_cap(32, alloc);
 //     defer active_edge_pool.free_pool();
-//     // const ContourPoolST = ContourPool(f32, void, void{}, .SINGLE_THREADED);
+//     // const ContourPoolST = ContourPool(f32, void, {}, .SINGLE_THREADED);
 //     // var contour_pool = ContourPoolST.init_cap(8, alloc);
 //     // defer contour_pool.free_pool();
-//     var shape = Shape(f32, void, void{}).init_capacity(4, alloc);
+//     var shape = Shape(f32, void, {}).init_capacity(4, alloc);
 //     defer shape.free(alloc);
 //     var temp_flat_curve_buf = FlattenedCurvesBuffer.init_capacity(128, alloc);
 //     defer temp_flat_curve_buf.free();

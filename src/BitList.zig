@@ -62,7 +62,7 @@
 //         list: List(usize) = .{},
 //         index_len: usize = 0,
 
-//         pub const BITS = std.meta.Int(.unsigned, BITS_PER_INDEX);
+//         pub const BITS = @Int(.unsigned, BITS_PER_INDEX);
 //         pub const TYPE = ELEM_TYPE;
 //         const USIZEBITS = @bitSizeOf(usize);
 //         const EVENLY_DIVISIBLE = USIZEBITS % BITS_PER_INDEX == 0;
@@ -593,7 +593,7 @@
 //     elem_type: type,
 // };
 // pub fn MultiBitList(comptime LIST_NAMES: type, comptime LIST_DEFS: EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).ENUMERATED_LIST) type {
-//     const bit_list_defs = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).build_ordered(LIST_DEFS, void{}, BitListDef(LIST_NAMES).valid);
+//     const bit_list_defs = EnumeratedDefinitions(LIST_NAMES, BitListDef(LIST_NAMES), "name", BitListDefUnnamed).build_ordered(LIST_DEFS, {}, BitListDef(LIST_NAMES).valid);
 //     return struct {
 //         const MultiList = @This();
 //         pub const DEFS = bit_list_defs;
@@ -606,7 +606,7 @@
 //             return DEFS[@intFromEnum(LIST)].elem_type;
 //         }
 //         pub fn list_raw(comptime LIST: LIST_NAMES) type {
-//             return std.meta.Int(.unsigned, DEFS[@intFromEnum(LIST)].bits);
+//             return @Int(.unsigned, DEFS[@intFromEnum(LIST)].bits);
 //         }
 //         fn _list_type(comptime LIST_IDX: Types.enum_tag_type(LIST_NAMES)) type {
 //             return DEFS[LIST_IDX].elem_type;

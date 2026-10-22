@@ -1225,7 +1225,7 @@
 // }
 
 // pub fn EdgeNoUserdata(comptime T: type) type {
-//     return EdgeWithUserdata(T, void, void{});
+//     return EdgeWithUserdata(T, void, {});
 // }
 
 // pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USERDATA_DEFAULT_ZERO: USERDATA) type {
@@ -1841,7 +1841,7 @@
 // }
 
 // pub fn ContourNoUserdata(comptime T: type) type {
-//     return Contour(T, void, void{});
+//     return Contour(T, void, {});
 // }
 
 // pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
@@ -2052,7 +2052,7 @@
 // }
 
 // pub fn ShapeNoUserdata(comptime T: type) type {
-//     return Shape(T, void, void{});
+//     return Shape(T, void, {});
 // }
 
 // pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
@@ -3595,13 +3595,13 @@
 //         DEFAULT_ESTIMATES: void,
 
 //         pub fn no_estimates() Self {
-//             return Self{ .NO_ESTIMATES = void{} };
+//             return Self{ .NO_ESTIMATES = {} };
 //         }
 //         pub fn with_estimates(estimates: Estimates(T)) Self {
 //             return Self{ .WITH_ESTIMATES = estimates };
 //         }
 //         pub fn default_estimates() Self {
-//             return Self{ .DEFAULT_ESTIMATES = void{} };
+//             return Self{ .DEFAULT_ESTIMATES = {} };
 //         }
 
 //         pub fn get_estimates(self: Self) Estimates(T) {
@@ -3641,7 +3641,7 @@
 //         MATRIX_PRESERVE_ORIGINAL: MAT,
 
 //         pub fn none() Self {
-//             return Self{ .NONE = void{} };
+//             return Self{ .NONE = {} };
 //         }
 //         pub fn steps_alter_original(s: []const VEC.TransformStep) Self {
 //             return Self{ .STEPS_ALTER_ORIGINAL = s };
@@ -3658,7 +3658,7 @@
 
 //         pub fn to_no_alter(self: Self) TransformNoAlter(T) {
 //             return switch (self) {
-//                 .NONE, .STEPS_ALTER_ORIGINAL, .MATRIX_ALTER_ORIGINAL => TransformNoAlter(T){ .NONE = void{} },
+//                 .NONE, .STEPS_ALTER_ORIGINAL, .MATRIX_ALTER_ORIGINAL => TransformNoAlter(T){ .NONE = {} },
 //                 .STEPS_PRESERVE_ORIGINAL => |s| TransformNoAlter(T).steps(s),
 //                 .MATRIX_PRESERVE_ORIGINAL => |m| TransformNoAlter(T).matrix(m),
 //             };
@@ -3677,7 +3677,7 @@
 //         MATRIX: MAT,
 
 //         pub fn none() Self {
-//             return Self{ .NONE = void{} };
+//             return Self{ .NONE = {} };
 //         }
 //         pub fn steps(s: []const VEC.TransformStep) Self {
 //             return Self{ .STEPS = s };

@@ -67,10 +67,10 @@ pub fn c_enum_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
     assert_with_reason(Types.type_is_int(C_TYPE), @src(), "C_TYPE not an integer", .{});
     return struct {
         pub fn to_c(self: ZIG_TYPE) C_TYPE {
-            return @intFromEnum(self);
+            return @backingInt(self);
         }
         pub fn from_c(c_integer: C_TYPE) ZIG_TYPE {
-            return @enumFromInt(c_integer);
+            return @fromBackingInt(@intCast(c_integer));
         }
     };
 }

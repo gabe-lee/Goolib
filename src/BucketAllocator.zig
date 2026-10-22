@@ -172,28 +172,28 @@ pub const AllocSize = enum(Log2Usize) {
     _1_GB = 30,
     _2_GB = 31,
 
-    pub const MIN_SLAB_SIZE: AllocSize = @enumFromInt(get_bytes_log2(std.heap.page_size_min));
-    pub const SLAB_SIZE_MAX_PAGE_SIZE: AllocSize = @enumFromInt(get_bytes_log2(std.heap.page_size_max));
+    pub const MIN_SLAB_SIZE: AllocSize = @fromBackingInt(@intCast(get_bytes_log2(std.heap.page_size_min)));
+    pub const SLAB_SIZE_MAX_PAGE_SIZE: AllocSize = @fromBackingInt(@intCast(get_bytes_log2(std.heap.page_size_max)));
 
     pub inline fn bytes_log2(self: AllocSize, comptime UINT_LOG2: type) UINT_LOG2 {
-        return @intCast(@intFromEnum(self));
+        return @intCast(@backingInt(self));
     }
 
     pub inline fn increase_n_sizes(self: AllocSize, n: Log2Usize) AllocSize {
-        const val = @intFromEnum(self);
-        return @enumFromInt(val + n);
+        const val = @backingInt(self);
+        return @fromBackingInt(@intCast(val + n));
     }
 
     pub inline fn bytes(self: AllocSize, comptime UINT: type) UINT {
-        return @as(UINT, 1) << @as(math.Log2Int(UINT), @intCast(@intFromEnum(self)));
+        return @as(UINT, 1) << @as(math.Log2Int(UINT), @intCast(@backingInt(self)));
     }
 
     pub inline fn to_alignment(self: AllocSize) mem.Alignment {
-        return @enumFromInt(@intFromEnum(self));
+        return @fromBackingInt(@intCast(@backingInt(self)));
     }
 
     pub inline fn get_name(self: AllocSize) []const u8 {
-        return get_name_from_bytes_log2(@intFromEnum(self));
+        return get_name_from_bytes_log2(@backingInt(self));
     }
 
     pub fn get_name_from_bytes_log2(val: anytype) []const u8 {
@@ -347,7 +347,7 @@ pub fn define_allocator(comptime options: Options) type {
         leftover_blocks_per_slab[idx] = blocks_per_slab[idx] - 1;
         bucket_to_slab_mapping[idx] = slab_idx;
         if (idx < buckets.len - 1) {
-            const next_size_log2: SizeLog2 = @intCast(@intFromEnum(buckets[idx + 1].block_size));
+            const next_size_log2: SizeLog2 = @intCast(@backingInt(buckets[idx + 1].block_size));
             if (this_block_size_log2 >= next_size_log2) @panic("bucket sizes MUST be in sorted order from smallest to largest, and there cannot be 2 buckets of the same size");
             this_block_size_log2 = next_size_log2;
         }
@@ -429,9 +429,9 @@ pub fn define_allocator(comptime options: Options) type {
         const STAT_LOG_HINT = options.hint_log_usage_statistics.to_hint();
         const TRACK_STATS = options.track_allocation_statistics;
         const BUCKET_IDX_TO_SLAB_IDX = const_bucket_to_slab_mapping;
-        const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the requested allocation would require a bucket size of {s}";
-        const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
-        const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(@as(AllocSize, @enumFromInt(LARGEST_BLOCK_SIZE_LOG2))) ++ ", but the memory provided to free exceeds this limit: {s}";
+        const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(@as(AllocSize, @fromBackingInt(@intCast(LARGEST_BLOCK_SIZE_LOG2)))) ++ ", but the requested allocation would require a bucket size of {s}";
+        const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(@as(AllocSize, @fromBackingInt(@intCast(LARGEST_BLOCK_SIZE_LOG2)))) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
+        const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(@as(AllocSize, @fromBackingInt(@intCast(LARGEST_BLOCK_SIZE_LOG2)))) ++ ", but the memory provided to free exceeds this limit: {s}";
 
         pub const AllocStats = if (!TRACK_STATS) void else struct {
             current_total_memory_allocated: Address = 0,
@@ -445,14 +445,14 @@ pub fn define_allocator(comptime options: Options) type {
             most_slabs_ever_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
             current_slabs_used_by_bucket: [BUCKET_COUNT]Idx = @splat(0),
             number_of_attempted_resizes_to_larger_buckets_by_bucket: [BUCKET_COUNT]u64 = @splat(0),
-            largest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            smallest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) math.maxInt(usize) else void{},
-            largest_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            current_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            largest_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            current_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            largest_attempted_page_allocator_fallback_resize_delta_grow: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
-            largest_attempted_page_allocator_fallback_resize_delta_shrink: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else void{},
+            largest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            smallest_page_allocator_fallback_request_ever: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) math.maxInt(usize) else {},
+            largest_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            current_total_bytes_allocated_from_page_allocator_fallback: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            largest_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            current_number_of_page_allocator_fallback_allocations: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            largest_attempted_page_allocator_fallback_resize_delta_grow: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
+            largest_attempted_page_allocator_fallback_resize_delta_shrink: if (PAGE_ALLOC) Address else void = if (PAGE_ALLOC) 0 else {},
         };
 
         pub const VTABLE: Allocator.VTable = .{
@@ -677,7 +677,6 @@ pub fn define_allocator(comptime options: Options) type {
             }
         }
 
-
         // pub fn log_usage_statistics(self: *const QuickAlloc, log_buffer: *List(u8), log_alloc: Allocator, comptime log_name: []const u8) void {
         //     @branchHint(STAT_LOG_HINT);
         //     log_buffer.clearRetainingCapacity();
@@ -722,7 +721,7 @@ pub fn define_allocator(comptime options: Options) type {
 const FAILED_TO_LOG = "failed to allocate memory for logging: ";
 
 inline fn get_bytes_log2_with_align(len: usize, alignment: mem.Alignment) Log2Usize {
-    const size_log2 = @max(@bitSizeOf(usize) - @clz(len - 1), @intFromEnum(alignment));
+    const size_log2 = @max(@bitSizeOf(usize) - @clz(len - 1), @backingInt(alignment));
     return @intCast(size_log2);
 }
 
@@ -732,7 +731,7 @@ inline fn get_bytes_log2(len: usize) Log2Usize {
 }
 
 inline fn bytes_log2_to_alignment(val: Log2Usize) mem.Alignment {
-    return @enumFromInt(val);
+    return @fromBackingInt(@intCast(val));
 }
 
 //FIXME

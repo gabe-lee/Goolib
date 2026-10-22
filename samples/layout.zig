@@ -445,7 +445,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         try renderer.set_draw_color(CLEAR_COLOR);
         try renderer.draw_clear_fill();
 
-        try manager.do_action_on_all_elements(.PARENTS_FIRST, renderer, void{}, .COMPTIME_FN_PTR, void{}, draw_element);
+        try manager.do_action_on_all_elements(.PARENTS_FIRST, renderer, {}, .COMPTIME_FN_PTR, {}, draw_element);
         try renderer.present();
     }
 

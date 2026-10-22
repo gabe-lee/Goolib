@@ -176,7 +176,7 @@ pub fn make_list_segment_allocator_test(comptime T: type) Fuzz.FuzzTest {
                     return Utils.alloc_fail_str(alloc, @src(), "OP: {s}: segment {any} should have been in a `used` state, but was found in a `free` state with internal data {any}", .{ op_name, lsa_seg, found_seg });
                 }
             }
-            const logical_indexes = state.ls_alloc.segment_list.sort_lists[@intFromEnum(LSAlloc.SORT_NAMES.LOGICAL)].idx_list;
+            const logical_indexes = state.ls_alloc.segment_list.sort_lists[@backingInt(LSAlloc.SORT_NAMES.LOGICAL)].idx_list;
             var offset: u32 = 0;
             for (logical_indexes.ptr[0..logical_indexes.len], 0..) |idx, idx_idx| {
                 const seg = state.ls_alloc.segment_list.primary_list.ptr[idx];

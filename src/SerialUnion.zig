@@ -88,7 +88,7 @@ const UseCachedLen = SerializeModule.UseCachedLen;
 pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime PER_FIELD_SERIAL_SETTINGS: ?type) type {
     Kind.STRUCT.assert_type_is_same_kind(DECLS_, @src());
     const DECL_INFO = KindInfo.get_kind_info(DECLS_).STRUCT;
-    assert_with_reason(DECL_INFO.fields.len == 0, @src(), "`DECLS_` must not have any instance fields, only static declarations", .{});
+    assert_with_reason(DECL_INFO.field_names.len == 0, @src(), "`DECLS_` must not have any instance fields, only static declarations", .{});
     const UNION_ = bare_union_with_same_fields_as_tagged_union(TAGGED_UNION, .@"extern");
     const TAG = @typeInfo(TAGGED_UNION).@"union".tag_type.?;
     const BARE_ALIGN = @alignOf(UNION_);
@@ -106,7 +106,7 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
         pub const TAG_SIZE = @sizeOf(TAG);
         pub const UNION = UNION_;
         pub const TAG_AT_BEGIN = TAG_ALIGN >= BARE_ALIGN;
-        pub const FIELD_COUNT = @typeInfo(UNION).@"union".fields.len;
+        pub const FIELD_COUNT = @typeInfo(UNION).@"union".field_names.len;
         pub const TAG_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_1") else @offsetOf(Self, "_2");
         pub const UNION_OFFSET = if (TAG_AT_BEGIN) @offsetOf(Self, "_2") else @offsetOf(Self, "_1");
         pub const TAG_FIELD: []const u8 = if (TAG_AT_BEGIN) "_1" else "_2";
@@ -235,20 +235,20 @@ pub fn SerialUnion(comptime TAGGED_UNION: type, comptime DECLS_: type, comptime 
                 OP_BUILDER.add_field(TAG_FIELD, .next_field_is(UNION_FIELD), .no_len_needed(), .{ .CACHE = CacheMode.CACHE_TAG });
                 var TAG_BUILDER = OP_BUILDER.start_extern_union_builder_with_cached_tag(UNION_FIELD, null, TAG_FIELD, TAG_TYPE, .{});
                 const old_settings = OP_BUILDER.get_settings();
-                inline for (@typeInfo(UNION).@"union".fields) |u_field| {
+                inline for (@typeInfo(UNION).@"union".field_names) |u_field_name| {
                     const tag_raw = find: {
-                        inline for (@typeInfo(TAG_TYPE).@"enum".fields) |e_field| {
-                            if (std.mem.eql(u8, u_field.name, e_field.name)) {
-                                break :find e_field.value;
+                        inline for (@typeInfo(TAG_TYPE).@"enum".field_names, @typeInfo(TAG_TYPE).@"enum".field_values) |e_field_name, e_field_value| {
+                            if (std.mem.eql(u8, u_field_name, e_field_name)) {
+                                break :find e_field_value;
                             }
                         }
                         unreachable;
                     };
-                    const tag_val: TAG = @enumFromInt(tag_raw);
-                    const field_settings = SerializeModule.get_field_settings(Self, u_field.name);
+                    const tag_val: TAG = @fromBackingInt(@intCast(tag_raw));
+                    const field_settings = SerializeModule.get_field_settings(Self, u_field_name);
                     const new_settings = old_settings.combined_with_optional(field_settings);
                     OP_BUILDER.low_level.internal.object_settings = new_settings;
-                    TAG_BUILDER.add_field(.single_tag_value(tag_val), u_field.name, UseCachedLen.no_len_needed(), .{});
+                    TAG_BUILDER.add_field(.single_tag_value(tag_val), u_field_name, UseCachedLen.no_len_needed(), .{});
                 }
                 OP_BUILDER.low_level.internal.object_settings = old_settings;
                 TAG_BUILDER.finalize();

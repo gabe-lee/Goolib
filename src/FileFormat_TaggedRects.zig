@@ -68,8 +68,6 @@ pub const FormatError = error{
     id_format_does_not_match_any_valid_format,
 };
 
-
-
 pub const Identifier = extern struct {
     magic: u32,
     version: u32,
@@ -115,9 +113,9 @@ pub const VersionInterfaces = struct {
             const ID_MAX = 0b10_000;
 
             pub fn validate(self: Format) FormatError!ValidFormat {
-                const p: u8 = @intFromEnum(self) & POINT_MASK;
+                const p: u8 = @backingInt(self) & POINT_MASK;
                 if (p < POINT_MIN or p > POINT_MAX) return FormatError.point_format_does_not_match_any_valid_format;
-                const i: u8 = @intFromEnum(self) & ID_MASK;
+                const i: u8 = @backingInt(self) & ID_MASK;
                 if (i < ID_MIN or i > ID_MAX) return FormatError.id_format_does_not_match_any_valid_format;
                 return @bitCast(self);
             }
@@ -144,7 +142,7 @@ pub const VersionInterfaces = struct {
             pub fn parse_header(bytes: []const u8) FormatError!Header {
                 if (bytes.len != HEADER_SIZE) return FormatError.header_size_isnt_16_bytes;
                 const num_ptr: *const [4]u8 = @ptrCast(bytes.ptr);
-                const format: Format = @enumFromInt(bytes.ptr[4]);
+                const format: Format = @fromBackingInt(@intCast(bytes.ptr[4]));
                 const header = Header{
                     .num_rects = std.mem.readInt(u32, num_ptr, ENDIAN),
                     .format = try format.validate(),
@@ -152,10 +150,10 @@ pub const VersionInterfaces = struct {
                 return header;
             }
 
-            pub fn read_header_from_file
+            // pub fn read_header_from_file
         };
 
-        pub fn 
+        // pub fn
 
         pub const TaggedRect_U32_U32 = struct {
             pos: VecU32,
@@ -220,5 +218,5 @@ pub const TaggedRects = struct {
     rects: TaggedRectSlice,
     alloc_if_needed: ?Allocator,
 
-    pub fn read_from_file(file: File) TaggedRects {}
+    // pub fn read_from_file(file: File) TaggedRects {}
 };

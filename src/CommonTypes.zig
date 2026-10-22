@@ -502,32 +502,32 @@ pub const Alignment = enum(u64) {
     _L_63 = 1 << 63,
 
     pub fn from_address(addr: usize) Alignment {
-        return @enumFromInt(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(addr))));
+        return @fromBackingInt(@intCast(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(addr)))));
     }
     pub fn from_pointer(ptr: anytype) Alignment {
-        return @enumFromInt(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(@intFromPtr(ptr)))));
+        return @fromBackingInt(@intCast(@as(u64, 1) << @as(math.Log2Int(u64), @intCast(@ctz(@intFromPtr(ptr))))));
     }
     pub fn to_usize(self: Alignment) usize {
-        return @intCast(@intFromEnum(self));
+        return @intCast(@backingInt(self));
     }
     pub fn to_uint(self: Alignment, comptime T: type) T {
-        return @intCast(@intFromEnum(self));
+        return @intCast(@backingInt(self));
     }
     pub fn to_std_align(self: Alignment) std.mem.Alignment {
-        const raw: usize = @intCast(@intFromEnum(self));
+        const raw: usize = @intCast(@backingInt(self));
         const log2: math.Log2Int(usize) = @intCast(63 - @clz(raw));
-        return @enumFromInt(log2);
+        return @fromBackingInt(@intCast(log2));
     }
     pub fn from_uint(alignment: anytype) Alignment {
-        return @enumFromInt(@as(u64, @intCast(alignment)));
+        return @fromBackingInt(@intCast(@as(u64, @intCast(alignment))));
     }
     pub fn from_std_align(alignment: std.mem.Alignment) Alignment {
-        const log2: math.Log2Int(usize) = @intFromEnum(alignment);
+        const log2: math.Log2Int(usize) = @backingInt(alignment);
         const raw: usize = @as(usize, 1) << log2;
-        return @enumFromInt(@as(u64, @intCast(raw)));
+        return @fromBackingInt(@intCast(@as(u64, @intCast(raw))));
     }
     pub fn from_type(comptime T: type) Alignment {
-        return @enumFromInt(@as(u64, @alignOf(T)));
+        return @fromBackingInt(@intCast(@as(u64, @alignOf(T))));
     }
     pub fn align_address_forward(self: Alignment, addr: anytype) @TypeOf(addr) {
         const T = @TypeOf(addr);
@@ -644,14 +644,14 @@ pub const Bool1 = enum(u1) {
     TRUE = 1,
 
     pub fn multiply(self: Bool1, val: anytype) Math.Upgraded2Numbers(u1, @TypeOf(val)).T {
-        return Math.upgrade_multiply(@intFromEnum(self), val);
+        return Math.upgrade_multiply(@backingInt(self), val);
     }
     pub fn multiply_out(self: Bool1, val: anytype, comptime OUT: type) OUT {
-        return Math.upgrade_multiply_out(@intFromEnum(self), val, OUT);
+        return Math.upgrade_multiply_out(@backingInt(self), val, OUT);
     }
 
     pub fn is_true(self: Bool1) bool {
-        return @bitCast(@intFromEnum(self));
+        return @bitCast(@backingInt(self));
     }
 };
 

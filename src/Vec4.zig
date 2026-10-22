@@ -127,39 +127,42 @@ pub fn define_vec4_type(comptime T: type) type {
             return new_splat(num_cast(val, T));
         }
 
-        pub fn vec(self: Vec4) VEC {
-            return @bitCast(self);
+        pub fn to_vec(self: Vec4) VEC {
+            return .{ self.x, self.y, self.z, self.w };
+        }
+        pub fn from_vec(vec: VEC) Vec4 {
+            return .{ .x = vec[0], .y = vec[1], .z = vec[2], .w = vec[3] };
         }
         pub fn vec_ptr(self: *Vec4) *VEC {
             return @ptrCast(@alignCast(self));
         }
 
         pub inline fn get(self: Vec4, component: Component) T {
-            return self.vec()[@intFromEnum(component)];
+            return self.to_vec()[@backingInt(component)];
         }
         pub inline fn get_rgba(self: Vec4, component: Component_RGBA) T {
-            return self.vec()[@intFromEnum(component)];
+            return self.to_vec()[@backingInt(component)];
         }
         pub inline fn get_bgra(self: Vec4, component: Component_BGRA) T {
-            return self.vec()[@intFromEnum(component)];
+            return self.to_vec()[@backingInt(component)];
         }
         pub inline fn set(self: *Vec4, component: Component, val: T) void {
-            self.vec()[@intFromEnum(component)] = val;
+            self.to_vec()[@backingInt(component)] = val;
         }
         pub inline fn set_rgba(self: *Vec4, component: Component_RGBA, val: T) void {
-            self.vec()[@intFromEnum(component)] = val;
+            self.to_vec()[@backingInt(component)] = val;
         }
         pub inline fn set_bgra(self: *Vec4, component: Component_BGRA, val: T) void {
-            self.vec()[@intFromEnum(component)] = val;
+            self.to_vec()[@backingInt(component)] = val;
         }
         pub inline fn ptr(self: *Vec4, component: Component) *T {
-            return &self.vec_ptr()[@intFromEnum(component)];
+            return &self.vec_ptr()[@backingInt(component)];
         }
         pub inline fn ptr_rgba(self: *Vec4, component: Component_RGBA) *T {
-            return &self.vec_ptr()[@intFromEnum(component)];
+            return &self.vec_ptr()[@backingInt(component)];
         }
         pub inline fn ptr_bgra(self: *Vec4, component: Component_BGRA) *T {
-            return &self.vec_ptr()[@intFromEnum(component)];
+            return &self.vec_ptr()[@backingInt(component)];
         }
 
         pub fn downgrade_to_vec2(self: Vec4) Vec2 {
@@ -170,36 +173,36 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn swizzle(self: Vec4, new_x: Component, new_y: Component, new_z: Component, new_w: Component) Vec4 {
-            return new(self.vec()[@intFromEnum(new_x)], self.vec()[@intFromEnum(new_y)], self.vec()[@intFromEnum(new_z)], self.vec()[@intFromEnum(new_w)]);
+            return new(self.to_vec()[@backingInt(new_x)], self.to_vec()[@backingInt(new_y)], self.to_vec()[@backingInt(new_z)], self.to_vec()[@backingInt(new_w)]);
         }
         pub fn swizzle_rgba(self: Vec4, new_r: Component_RGBA, new_g: Component_RGBA, new_b: Component_RGBA, new_a: Component_RGBA) Vec4 {
-            return new(self.vec()[@intFromEnum(new_r)], self.vec()[@intFromEnum(new_g)], self.vec()[@intFromEnum(new_b)], self.vec()[@intFromEnum(new_a)]);
+            return new(self.to_vec()[@backingInt(new_r)], self.to_vec()[@backingInt(new_g)], self.to_vec()[@backingInt(new_b)], self.to_vec()[@backingInt(new_a)]);
         }
         pub fn swizzle_bgra(self: Vec4, new_b: Component_BGRA, new_g: Component_BGRA, new_r: Component_BGRA, new_a: Component_BGRA) Vec4 {
-            return new(self.vec()[@intFromEnum(new_b)], self.vec()[@intFromEnum(new_g)], self.vec()[@intFromEnum(new_r)], self.vec()[@intFromEnum(new_a)]);
+            return new(self.to_vec()[@backingInt(new_b)], self.to_vec()[@backingInt(new_g)], self.to_vec()[@backingInt(new_r)], self.to_vec()[@backingInt(new_a)]);
         }
 
         pub fn inverse(self: Vec4) Vec4 {
-            return @bitCast(ONE.vec() / self.vec());
+            return .from_vec(ONE.to_vec() / self.to_vec());
         }
 
         pub fn ceil(self: Vec4) Vec4 {
             if (IS_INT) return self;
-            return @bitCast(@ceil(self.vec()));
+            return .from_vec(@ceil(self.to_vec()));
         }
 
         pub fn floor(self: Vec4) Vec4 {
             if (IS_INT) return self;
-            return @bitCast(@floor(self.vec()));
+            return .from_vec(@floor(self.to_vec()));
         }
 
         pub fn round(self: Vec4) Vec4 {
             if (IS_INT) return self;
-            return @bitCast(@round(self.vec()));
+            return .from_vec(@round(self.to_vec()));
         }
 
         pub fn dot_product(self: Vec4, other: Vec4) T {
-            const products = self.vec() * other.vec();
+            const products = self.to_vec() * other.to_vec();
             return @reduce(.Add, products);
         }
         pub inline fn dot(self: Vec4, other: Vec4) T {
@@ -213,25 +216,25 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn add(self: Vec4, other: Vec4) Vec4 {
-            return @bitCast(self.vec() + other.vec());
+            return .from_vec(self.to_vec() + other.to_vec());
         }
 
         pub fn subtract(self: Vec4, other: Vec4) Vec4 {
-            return @bitCast(self.vec() - other.vec());
+            return .from_vec(self.to_vec() - other.to_vec());
         }
 
         pub fn multiply(self: Vec4, other: Vec4) Vec4 {
-            return @bitCast(self.vec() * other.vec());
+            return .from_vec(self.to_vec() * other.to_vec());
         }
 
         pub fn divide(self: Vec4, other: Vec4) Vec4 {
-            assert_with_reason(!@reduce(.Or, other.vec() == ZERO.vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.vec()});
-            return @bitCast(self.vec() / other.vec());
+            assert_with_reason(!@reduce(.Or, other.to_vec() == ZERO.to_vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.to_vec()});
+            return .from_vec(self.to_vec() / other.to_vec());
         }
 
         pub fn scale(self: Vec4, val: anytype) Vec4 {
             const val_vec: @Vector(4, @TypeOf(val)) = @splat(val);
-            return @bitCast(MathX.upgrade_multiply_out(self.vec(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_multiply_out(self.to_vec(), val_vec, VEC));
         }
         pub fn inverse_scale(self: Vec4, val: anytype) Vec4 {
             if (@TypeOf(val) == bool) {
@@ -240,7 +243,7 @@ pub fn define_vec4_type(comptime T: type) type {
                 assert_with_reason(val != 0, @src(), "cannot `inverse_scale()` when the scale value is 0, (divide by zero)", .{});
             }
             const val_vec: @Vector(4, @TypeOf(val)) = @splat(val);
-            return @bitCast(MathX.upgrade_divide_out(self.vec(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_divide_out(self.to_vec(), val_vec, VEC));
         }
 
         pub fn add_scale(self: Vec4, add_vec: Vec4, scale_add_vec_by: anytype) Vec4 {
@@ -252,11 +255,11 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn squared(self: Vec4) Vec4 {
-            return @bitCast(self.vec() * self.vec());
+            return .from_vec(self.to_vec() * self.to_vec());
         }
 
         pub fn component_sum(self: Vec4) T {
-            return @reduce(.Add, self.vec());
+            return @reduce(.Add, self.to_vec());
         }
 
         fn lerp_internal(p1: Vec4, p2: Vec4, percent: anytype) Vec4 {
@@ -268,10 +271,10 @@ pub fn define_vec4_type(comptime T: type) type {
                 assert_is_float(@TypeOf(percent), @src());
                 break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
             };
-            const nums = MathX.upgrade_3_numbers_for_math(p1.vec(), p2.vec(), delta);
+            const nums = MathX.upgrade_3_numbers_for_math(p1.to_vec(), p2.to_vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
             const result = @mulAdd(TU, nums.c, nums.b, @mulAdd(TU, -nums.c, nums.a, nums.a));
-            return @bitCast(num_cast(result, VEC));
+            return .from_vec(num_cast(result, VEC));
         }
 
         pub fn lerp(p1: Vec4, p2: Vec4, percent: anytype) Vec4 {
@@ -328,25 +331,25 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn negate(self: Vec4) Vec4 {
-            return @bitCast(-self.vec());
+            return .from_vec(-self.to_vec());
         }
 
         pub fn equals(self: Vec4, other: Vec4) bool {
-            return @reduce(.And, self.vec() == other.vec());
+            return @reduce(.And, self.to_vec() == other.to_vec());
         }
 
         pub fn approx_equal(self: Vec4, other: Vec4) bool {
-            return MathX.approx_equal_vec(VEC, self.vec(), other.vec());
+            return MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec());
         }
         pub fn approx_equal_with_epsilon(self: Vec4, other: Vec4, epsilon: Vec4) bool {
-            return MathX.approx_equal_with_epsilon_vec(VEC, self.vec(), other.vec(), epsilon);
+            return MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon);
         }
 
         pub fn is_zero(self: Vec4) bool {
-            return @reduce(.And, self.vec() == ZERO.vec());
+            return @reduce(.And, self.to_vec() == ZERO.to_vec());
         }
         pub fn non_zero(self: Vec4) bool {
-            return !@reduce(.And, self.vec() == ZERO.vec());
+            return !@reduce(.And, self.to_vec() == ZERO.to_vec());
         }
 
         pub fn rate_required_to_reach_point_at_time(self: Vec4, point: Vec4, time: anytype) Vec4 {
@@ -359,7 +362,7 @@ pub fn define_vec4_type(comptime T: type) type {
 
         pub fn change_component_type(self: Vec4, comptime NEW_T: type) define_vec4_type(NEW_T) {
             const V = define_vec4_type(NEW_T);
-            return @bitCast(num_cast(self.vec(), V.VEC));
+            return .from_vec(num_cast(self.to_vec(), V.VEC));
         }
         pub fn change_component_type_normalized(self: Vec4, comptime NEW_T: type) define_vec4_type(NEW_T) {
             const V = define_vec4_type(NEW_T);

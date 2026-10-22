@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = LIBC,
     });
 
-    goolib.addOptions("config", code_options);
+    goolib.addImport("config", code_options.createModule());
 
     //OPTIONAL DEPENDANCIES
     SDL3.sub_build(b, goolib, opts);

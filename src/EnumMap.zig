@@ -44,19 +44,19 @@ pub fn EnumMap(comptime ENUM: type, comptime T: type) type {
         map: [Types.enum_defined_field_count(ENUM)]T = undefined,
 
         pub fn get(self: Self, tag: ENUM) T {
-            return self.map[@intFromEnum(tag)];
+            return self.map[@backingInt(tag)];
         }
         pub fn get_indirect(self: *const Self, tag: ENUM) T {
-            return self.map[@intFromEnum(tag)];
+            return self.map[@backingInt(tag)];
         }
         pub fn get_ptr(self: *Self, tag: ENUM) *T {
-            return &self.map[@intFromEnum(tag)];
+            return &self.map[@backingInt(tag)];
         }
         pub fn get_ptr_const(self: *const Self, tag: ENUM) *const T {
-            return &self.map[@intFromEnum(tag)];
+            return &self.map[@backingInt(tag)];
         }
         pub fn set(self: *Self, tag: ENUM, val: T) void {
-            self.map[@intFromEnum(tag)] = val;
+            self.map[@backingInt(tag)] = val;
         }
     };
 }
@@ -83,30 +83,30 @@ pub fn EnumMapOfMaps(comptime ENUM_PRIMARY: type, comptime ENUM_SECONDARY: [Type
         const NUM_PRIMARY = num_primary;
         const SECONDARY_TAGS = ENUM_SECONDARY;
 
-        pub fn sub_map(self: *Self, comptime primary: ENUM_PRIMARY) SubMap(SECONDARY_TAGS[@intFromEnum(primary)]) {
-            return SubMap(SECONDARY_TAGS[@intFromEnum(primary)]){
-                .map = @ptrCast(&self.map[SECONDARY_OFFSETS[@intFromEnum(primary)]]),
+        pub fn sub_map(self: *Self, comptime primary: ENUM_PRIMARY) SubMap(SECONDARY_TAGS[@backingInt(primary)]) {
+            return SubMap(SECONDARY_TAGS[@backingInt(primary)]){
+                .map = @ptrCast(&self.map[SECONDARY_OFFSETS[@backingInt(primary)]]),
             };
         }
 
-        pub fn get(self: Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) T {
-            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+        pub fn get(self: Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@backingInt(primary)]) T {
+            const idx = SECONDARY_OFFSETS[@backingInt(primary)] + num_cast(@backingInt(secondary), usize);
             return self.map[idx];
         }
-        pub fn get_indirect(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) T {
-            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+        pub fn get_indirect(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@backingInt(primary)]) T {
+            const idx = SECONDARY_OFFSETS[@backingInt(primary)] + num_cast(@backingInt(secondary), usize);
             return self.map[idx];
         }
-        pub fn get_ptr(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) *T {
-            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+        pub fn get_ptr(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@backingInt(primary)]) *T {
+            const idx = SECONDARY_OFFSETS[@backingInt(primary)] + num_cast(@backingInt(secondary), usize);
             return &self.map[idx];
         }
-        pub fn get_ptr_const(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)]) *const T {
-            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+        pub fn get_ptr_const(self: *const Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@backingInt(primary)]) *const T {
+            const idx = SECONDARY_OFFSETS[@backingInt(primary)] + num_cast(@backingInt(secondary), usize);
             return &self.map[idx];
         }
-        pub fn set(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@intFromEnum(primary)], val: T) void {
-            const idx = SECONDARY_OFFSETS[@intFromEnum(primary)] + num_cast(@intFromEnum(secondary), usize);
+        pub fn set(self: *Self, comptime primary: ENUM_PRIMARY, secondary: SECONDARY_TAGS[@backingInt(primary)], val: T) void {
+            const idx = SECONDARY_OFFSETS[@backingInt(primary)] + num_cast(@backingInt(secondary), usize);
             self.map[idx] = val;
         }
 
@@ -118,19 +118,19 @@ pub fn EnumMapOfMaps(comptime ENUM_PRIMARY: type, comptime ENUM_SECONDARY: [Type
                 map: [*]T = undefined,
 
                 pub fn get(self: Self2, tag: ENUM) T {
-                    return self.map[@intFromEnum(tag)];
+                    return self.map[@backingInt(tag)];
                 }
                 pub fn get_indirect(self: *const Self2, tag: ENUM) T {
-                    return self.map[@intFromEnum(tag)];
+                    return self.map[@backingInt(tag)];
                 }
                 pub fn get_ptr(self: *Self2, tag: ENUM) *T {
-                    return &self.map[@intFromEnum(tag)];
+                    return &self.map[@backingInt(tag)];
                 }
                 pub fn get_ptr_const(self: *const Self2, tag: ENUM) *const T {
-                    return &self.map[@intFromEnum(tag)];
+                    return &self.map[@backingInt(tag)];
                 }
                 pub fn set(self: *Self2, tag: ENUM, val: T) void {
-                    self.map[@intFromEnum(tag)] = val;
+                    self.map[@backingInt(tag)] = val;
                 }
             };
         }

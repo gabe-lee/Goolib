@@ -68,19 +68,19 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
     const ENUM_NAMES = ENUMS_INFO.tag_type.?;
     const ENUM_NAMES_INFO = KindInfo.get_kind_info(ENUM_NAMES).ENUM;
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(ENUM_NAMES), @src(), "all enum tag values on the tagged-union type `ENUMS` must start from 0 with no gaps while increasing to the max tag value", .{});
-    const NUM_ENUMS = ENUMS_INFO.fields.len;
+    const NUM_ENUMS = ENUMS_INFO.field_names.len;
     comptime var ENUM_TYPES: [NUM_ENUMS]type = undefined;
-    inline for (ENUMS_INFO.fields) |u_field| {
-        Kind.ENUM.assert_type_is_same_kind(u_field.type, @src());
+    inline for (ENUMS_INFO.field_names, ENUMS_INFO.field_types) |u_field_name, u_field_type| {
+        Kind.ENUM.assert_type_is_same_kind(u_field_type, @src());
         const tag_val = find: {
-            inline for (ENUM_NAMES_INFO.fields) |e_field| {
-                if (std.mem.eql(u8, u_field.name, e_field.name)) {
-                    break :find e_field.value;
+            inline for (ENUM_NAMES_INFO.field_names, ENUM_NAMES_INFO.field_values) |e_field_name, e_field_value| {
+                if (std.mem.eql(u8, u_field_name, e_field_name)) {
+                    break :find e_field_value;
                 }
             }
             unreachable;
         };
-        ENUM_TYPES[tag_val] = u_field.type;
+        ENUM_TYPES[tag_val] = u_field_type;
     }
     comptime var ENUM_BIT_COUNTS: [NUM_ENUMS]u16 = @splat(0);
     comptime var ENUM_TAG_TYPES: [NUM_ENUMS]type = undefined;
@@ -102,10 +102,10 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
         comptime var COMPOSITE: E_INT_RAW = 0;
         comptime var HAS_NONZERO: bool = false;
         const DO_ZIGZAG = @hasDecl(E_TYPE, "ZIGZAG_ENCODE") and @TypeOf(@field(E_TYPE, "ZIGZAG_ENCODE")) == bool and @field(E_TYPE, "ZIGZAG_ENCODE") == true;
-        if (E_INFO.is_exhaustive) {
+        if (E_INFO.mode == .exhaustive) {
             ENUM_ZIGZAGS[i] = DO_ZIGZAG;
-            inline for (E_INFO.fields) |e_field| {
-                const val: E_INT = e_field.value;
+            inline for (E_INFO.field_values) |e_field_value| {
+                const val: E_INT = e_field_value;
                 const val_raw: E_INT_RAW = if (DO_ZIGZAG) @bitCast(MathX.zig_zag_encode(val)) else @bitCast(val);
                 if (val_raw != 0) {
                     HAS_NONZERO = true;
@@ -126,7 +126,7 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
         ENUM_VAL_SHIFTS_DOWN_FROM_COMPOSITE[i] = TOTAL_BIT_COUNT;
         TOTAL_BIT_COUNT += COMPOSITE_TOTAL_BITS;
     }
-    const RAW_INT = std.meta.Int(.unsigned, TOTAL_BIT_COUNT);
+    const RAW_INT = @Int(.unsigned, TOTAL_BIT_COUNT);
     const RAW_SHIFT_INT = Log2Int(RAW_INT);
     comptime var TRUE_SHIFTS: [NUM_ENUMS]RAW_SHIFT_INT = undefined;
     comptime var VAL_MASKS: [NUM_ENUMS]RAW_INT = undefined;
@@ -168,12 +168,12 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
         const RAW = RAW_INT;
 
         pub inline fn EnumForName(comptime enum_name: EnumName) type {
-            return TYPES[@intFromEnum(enum_name)];
+            return TYPES[@backingInt(enum_name)];
         }
 
         pub fn get(self: Self, comptime enum_name: EnumName) EnumForName(enum_name) {
-            const IDX = comptime @intFromEnum(enum_name);
-            var raw: RAW = @intFromEnum(self);
+            const IDX = comptime @backingInt(enum_name);
+            var raw: RAW = @backingInt(self);
             raw &= MASK[IDX];
             if (FULL_SHIFT_DOWN[IDX]) {
                 raw >>= FULL_SHIFT[IDX];
@@ -182,12 +182,12 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
             }
             const raw_typed: TAG_RAW_TYPES[IDX] = @intCast(raw);
             const tag_typed = if (ZIGZAG[IDX]) MathX.zig_zag_decode(TAG_TYPES[IDX], raw_typed) else bit_cast(raw_typed, TAG_TYPES[IDX]);
-            return @enumFromInt(tag_typed);
+            return @fromBackingInt(@intCast(tag_typed));
         }
 
         pub fn set(self: *Self, comptime enum_name: EnumName, val: EnumForName(enum_name)) void {
-            const IDX = comptime @intFromEnum(enum_name);
-            const tag_typed: TAG_TYPES[IDX] = @intFromEnum(val);
+            const IDX = comptime @backingInt(enum_name);
+            const tag_typed: TAG_TYPES[IDX] = @backingInt(val);
             const raw_typed: TAG_RAW_TYPES[IDX] = if (ZIGZAG[IDX]) bit_cast(MathX.zig_zag_encode(tag_typed), TAG_RAW_TYPES[IDX]) else @bitCast(tag_typed);
             var new_raw: RAW = @intCast(raw_typed);
             if (FULL_SHIFT_DOWN[IDX]) {
@@ -195,10 +195,10 @@ pub fn CompositeEnum(comptime ENUMS: anytype) type {
             } else {
                 new_raw >>= FULL_SHIFT[IDX];
             }
-            var old_raw: RAW = @intFromEnum(self.*);
+            var old_raw: RAW = @backingInt(self.*);
             old_raw &= INVERSE_MASK[IDX];
             old_raw |= new_raw;
-            self.* = @enumFromInt(old_raw);
+            self.* = @fromBackingInt(@intCast(old_raw));
         }
 
         pub inline fn with_enum_set(self: Self, comptime enum_name: EnumName, val: EnumForName(enum_name)) Self {
@@ -258,12 +258,12 @@ test CompositeEnum {
         const e4_raw = rand.int(i16);
         const e5_raw = rand.int(u7);
         const e6_raw = rand.intRangeAtMost(i3, -1, 1);
-        const e1_exp: E1 = @enumFromInt(e1_raw);
-        const e2_exp: E2 = @enumFromInt(e2_raw);
+        const e1_exp: E1 = @fromBackingInt(@intCast(e1_raw));
+        const e2_exp: E2 = @fromBackingInt(@intCast(e2_raw));
         const e3_exp: E3 = if (e3_bool) E3.x else E3.y;
-        const e4_exp: E4 = @enumFromInt(e4_raw);
-        const e5_exp: E5 = @enumFromInt(e5_raw);
-        const e6_exp: E6 = @enumFromInt(e6_raw);
+        const e4_exp: E4 = @fromBackingInt(@intCast(e4_raw));
+        const e5_exp: E5 = @fromBackingInt(@intCast(e5_raw));
+        const e6_exp: E6 = @fromBackingInt(@intCast(e6_raw));
         ce.set(.ENUM_1, e1_exp);
         ce.set(.ENUM_2, e2_exp);
         ce.set(.ENUM_3, e3_exp);

@@ -102,7 +102,7 @@ pub fn define_chain_list(comptime options: ChainListOptions) type {
         const RING_CAP_MINUS_2 = RING_CAP - 2;
         const RING_IDX_MASK: Idx = RING_CAP - 1;
         const MEMSET = options.memset_uninit_val != null;
-        const MEMSET_VAL: if (MEMSET) Elem else void = if (MEMSET) @as(*const Elem, @ptrCast(@alignCast(options.memset_uninit_val.?))).* else void{};
+        const MEMSET_VAL: if (MEMSET) Elem else void = if (MEMSET) @as(*const Elem, @ptrCast(@alignCast(options.memset_uninit_val.?))).* else {};
         const IDX_SHIFT = @ctz(RING_CAP);
         const RETURN_ERRORS = options.alloc_error_behavior == .RETURN_ERRORS;
 

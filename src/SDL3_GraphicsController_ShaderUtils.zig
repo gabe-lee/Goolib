@@ -248,7 +248,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
             return list.get(idx_a).offset > list.get(idx_b).offset;
         }
     };
-    _fields_list.insertion_sort_advanced(void{}, void{}, .COMPTIME_FN_BODY, void{}, SORT.align_lesser_then_size_lesser);
+    _fields_list.insertion_sort_advanced({}, {}, .COMPTIME_FN_BODY, {}, SORT.align_lesser_then_size_lesser);
 
     comptime var num_enums: usize = 0;
     for (_fields) |f| {
@@ -282,7 +282,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
 
     // PACKING ALGORITHM (std140 + HLSL cbuffer boundary packing)
     for (_fields) |field| {
-        const fidx = @intFromEnum(field.field);
+        const fidx = @backingInt(field.field);
         assert_with_reason(field_init[fidx] == false, @src(), "field `{s}` was defined more than once", .{@tagName(field.field)});
         field_init[fidx] = true;
         comptime var found_empty_space: bool = false;
@@ -424,14 +424,14 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
 
     comptime var struct_field_names: [SLOT_COUNT][]const u8 = undefined;
     comptime var struct_field_types: [SLOT_COUNT]type = undefined;
-    comptime var struct_field_attrs: [SLOT_COUNT]std.builtin.Type.StructField.Attributes = @splat(.{});
+    comptime var struct_field_attrs: [SLOT_COUNT]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
 
     comptime var cpu_pad_idx: usize = 0;
     for (all_slots[0..SLOT_COUNT], 0..) |slot, s_i| {
         const min_align: usize = if (s_i == 0) GPU_UNIFORM_BOUNDARY_ALIGN else 1;
         switch (slot) {
             .FIELD => |fidx| {
-                const fenum: FIELDS = @enumFromInt(fidx);
+                const fenum: FIELDS = @fromBackingInt(@intCast(fidx));
                 struct_field_names[s_i] = @tagName(fenum);
                 struct_field_types[s_i] = field_types[fidx];
                 struct_field_attrs[s_i] = .{ .@"align" = @max(@alignOf(field_types[fidx]), min_align) };
@@ -472,7 +472,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
             .{@alignOf(GeneratedData)},
         );
         for (0.._NUM_FIELDS) |fidx| {
-            const fenum: FIELDS = @enumFromInt(fidx);
+            const fenum: FIELDS = @fromBackingInt(@intCast(fidx));
             const actual_off = @offsetOf(GeneratedData, @tagName(fenum));
             assert_with_reason(
                 actual_off == field_locations[fidx],
@@ -488,7 +488,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
     comptime var longest_field_name_plus_type: usize = 17;
     comptime var shortest_field_name_plus_type: usize = 12;
     for (0.._NUM_FIELDS) |fidx| {
-        const F: FIELDS = @enumFromInt(fidx);
+        const F: FIELDS = @fromBackingInt(@intCast(fidx));
         total_len_of_field_names += @tagName(F).len;
         const name_plus_type = @tagName(F).len + @tagName(field_hlsl_names[fidx]).len + 1;
         if (name_plus_type > longest_field_name_plus_type) longest_field_name_plus_type = name_plus_type;
@@ -505,7 +505,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
     for (all_slots[0..]) |slot| {
         switch (slot) {
             .FIELD => |fidx| {
-                const fenum: FIELDS = @enumFromInt(fidx);
+                const fenum: FIELDS = @fromBackingInt(@intCast(fidx));
                 const n1 = @tagName(field_hlsl_names[fidx]).len;
                 comptime_writer.writeAll(@tagName(field_hlsl_names[fidx])) catch |err| assert_comptime_write_failure(@src(), err);
                 comptime_writer.writeByte(SPACE) catch |err| assert_comptime_write_failure(@src(), err);
@@ -613,8 +613,8 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
         /// Convenient initializer from partial anonymous struct (omitted fields and padding stay zeroed)
         pub fn init(values: anytype) Self {
             var self = Self{};
-            inline for (@typeInfo(@TypeOf(values)).@"struct".fields) |f| {
-                @field(self.data, f.name) = @field(values, f.name);
+            inline for (@typeInfo(@TypeOf(values)).@"struct".field_names) |f_name| {
+                @field(self.data, f_name) = @field(values, f_name);
             }
             return self;
         }
@@ -642,7 +642,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
         }
 
         pub fn type_for_field_name(comptime field: FIELD) type {
-            return TYPES[@intFromEnum(field)];
+            return TYPES[@backingInt(field)];
         }
 
         // Direct typed enum accessors targeting `self.data`
@@ -674,8 +674,8 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
         }
         pub fn field_offsets(comptime OFFSET_INT: type) FieldOffsets(OFFSET_INT) {
             var offs: FieldOffsets(OFFSET_INT) = undefined;
-            inline for (@typeInfo(FIELD).@"enum".fields) |enum_field| {
-                @field(offs, enum_field.name) = @intCast(OFFSETS[enum_field.value]);
+            inline for (@typeInfo(FIELD).@"enum".field_names, @typeInfo(FIELD).@"enum".field_values) |enum_field_name, enum_field_value| {
+                @field(offs, enum_field_name) = @intCast(OFFSETS[enum_field_value]);
             }
             return offs;
         }
@@ -1516,7 +1516,7 @@ fn pack_vertex_locations(comptime input_types: []const GPUType) PackedVertexLayo
     var target_size_int: u8 = 4;
     while (target_size_int >= 1) : (target_size_int -= 1) {
         for (chunks_to_pack[0..total_chunks]) |chunk| {
-            if (@intFromEnum(chunk.size) == target_size_int) {
+            if (@backingInt(chunk.size) == target_size_int) {
                 sorted_chunks[sorted_count] = chunk;
                 sorted_count += 1;
             }
@@ -1637,13 +1637,13 @@ pub fn write_hlsl_enum_stub(comptime ENUM_TYPE: type, writer: *std.Io.Writer) st
     _ = try writer.writeAll(LOCAL);
     try writer.writeByte(NEWLINE);
     const INFO = @typeInfo(ENUM_TYPE).@"enum";
-    inline for (INFO.fields) |field| {
+    inline for (INFO.field_names, INFO.field_values) |field_name, field_value| {
         _ = try writer.writeAll(DEFINE_SPACE);
         _ = try writer.writeAll(LOCAL);
         _ = try writer.writeAll(DOUBLE_UNDERSCORE);
-        _ = try writer.writeAll(field.name);
+        _ = try writer.writeAll(field_name);
         try writer.writeByte(SPACE);
-        try writer.printInt(field.value, 10, .lower, .{});
+        try writer.printInt(field_value, 10, .lower, .{});
         try writer.writeByte(NEWLINE);
     }
 }
@@ -1683,7 +1683,7 @@ pub const HLSL_INTERP_KIND = enum(u8) {
     };
 
     pub fn print_len(self: HLSL_INTERP_KIND) usize {
-        return NAMES[@intFromEnum(self)].len;
+        return NAMES[@backingInt(self)].len;
     }
 };
 
@@ -1797,64 +1797,64 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
         return HLSL_Semantic{ .SV_CullDistance = n };
     }
     pub fn sv_coverage() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_Coverage = void{} };
+        return HLSL_Semantic{ .SV_Coverage = {} };
     }
     pub fn sv_depth() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_Depth = void{} };
+        return HLSL_Semantic{ .SV_Depth = {} };
     }
     pub fn sv_depth_greater_or_equal() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_DepthGreaterEqual = void{} };
+        return HLSL_Semantic{ .SV_DepthGreaterEqual = {} };
     }
     pub fn sv_depth_lesser_or_equal() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_DepthLessEqual = void{} };
+        return HLSL_Semantic{ .SV_DepthLessEqual = {} };
     }
     pub fn sv_dispatch_thread_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_DispatchThreadID = void{} };
+        return HLSL_Semantic{ .SV_DispatchThreadID = {} };
     }
     pub fn sv_domain_location() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_DomainLocation = void{} };
+        return HLSL_Semantic{ .SV_DomainLocation = {} };
     }
     pub fn sv_group_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_GroupID = void{} };
+        return HLSL_Semantic{ .SV_GroupID = {} };
     }
     pub fn sv_group_index() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_GroupIndex = void{} };
+        return HLSL_Semantic{ .SV_GroupIndex = {} };
     }
     pub fn sv_group_thread_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_GroupThreadID = void{} };
+        return HLSL_Semantic{ .SV_GroupThreadID = {} };
     }
     pub fn sv_gs_instance_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_GSInstanceID = void{} };
+        return HLSL_Semantic{ .SV_GSInstanceID = {} };
     }
     pub fn sv_inner_coverage() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_InnerCoverage = void{} };
+        return HLSL_Semantic{ .SV_InnerCoverage = {} };
     }
     pub fn sv_inside_tess_factor() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_InsideTessFactor = void{} };
+        return HLSL_Semantic{ .SV_InsideTessFactor = {} };
     }
     pub fn sv_instance_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_InstanceID = void{} };
+        return HLSL_Semantic{ .SV_InstanceID = {} };
     }
     pub fn sv_is_front_face() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_IsFrontFace = void{} };
+        return HLSL_Semantic{ .SV_IsFrontFace = {} };
     }
     pub fn sv_output_control_point_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_OutputControlPointID = void{} };
+        return HLSL_Semantic{ .SV_OutputControlPointID = {} };
     }
     pub fn sv_position() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_Position = void{} };
+        return HLSL_Semantic{ .SV_Position = {} };
     }
     pub fn sv_primitive_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_PrimitiveID = void{} };
+        return HLSL_Semantic{ .SV_PrimitiveID = {} };
     }
     pub fn sv_render_target_array_index() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_RenderTargetArrayIndex = void{} };
+        return HLSL_Semantic{ .SV_RenderTargetArrayIndex = {} };
     }
     pub fn sv_sample_index() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_SampleIndex = void{} };
+        return HLSL_Semantic{ .SV_SampleIndex = {} };
     }
     pub fn sv_stencil_ref() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_StencilRef = void{} };
+        return HLSL_Semantic{ .SV_StencilRef = {} };
     }
     pub fn sv_target(n: u3) HLSL_Semantic {
         return HLSL_Semantic{ .SV_Target = n };
@@ -1865,16 +1865,16 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
         return HLSL_Semantic{ .SV_Target = @intCast(n) };
     }
     pub fn sv_tess_factor() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_TessFactor = void{} };
+        return HLSL_Semantic{ .SV_TessFactor = {} };
     }
     pub fn sv_vertex_id() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_VertexID = void{} };
+        return HLSL_Semantic{ .SV_VertexID = {} };
     }
     pub fn sv_viewport_array_index() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_ViewportArrayIndex = void{} };
+        return HLSL_Semantic{ .SV_ViewportArrayIndex = {} };
     }
     pub fn sv_shading_rate() HLSL_Semantic {
-        return HLSL_Semantic{ .SV_ShadingRate = void{} };
+        return HLSL_Semantic{ .SV_ShadingRate = {} };
     }
     pub fn user(n: u32) HLSL_Semantic {
         return HLSL_Semantic{ .USER = n };
@@ -1930,7 +1930,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
 
     pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime field_name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
         if (Assert.should_assert()) {
-            const allowed = ALLOWED_TYPES[@intFromEnum(self)];
+            const allowed = ALLOWED_TYPES[@backingInt(self)];
             if (allowed.len > 0) {
                 var found_valid_type = false;
                 for (allowed) |gpu_t| {
@@ -1954,7 +1954,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
                         GPUType.GPU_i32_3,
                         GPUType.GPU_i32_4,
                     });
-                    assert_with_reason(found_valid_interp, src, "field `{s}` with type `{s}` cannot have interpolation mode `{s}`", .{ field_name, gpu_type, HLSL_INTERP_KIND.NAMES[@intFromEnum(interp)] });
+                    assert_with_reason(found_valid_interp, src, "field `{s}` with type `{s}` cannot have interpolation mode `{s}`", .{ field_name, gpu_type, HLSL_INTERP_KIND.NAMES[@backingInt(interp)] });
                 },
             }
         }
@@ -2088,7 +2088,7 @@ pub fn VertexShaderInputStruct(
     // 1. Verify all fields are uniquely defined
     comptime var field_defined: [_NUM_FIELDS]bool = @splat(false);
     for (fields) |f| {
-        const idx = @intFromEnum(f.field_name);
+        const idx = @backingInt(f.field_name);
         assert_with_reason(!field_defined[idx], @src(), "(VertexShaderInputStruct '{s}') field `{s}` defined more than once", .{ NAME, @tagName(f.field_name) });
         field_defined[idx] = true;
     }
@@ -2211,7 +2211,7 @@ pub fn VertexShaderInputStruct(
     comptime var chunks_to_pack: [total_chunks]ChunkToPack = undefined;
     comptime var c_idx: usize = 0;
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const info = get_hlsl_info(f.gpu_type.hlsl_name);
         for (0..info.cols) |col| {
             chunks_to_pack[c_idx] = .{
@@ -2234,7 +2234,7 @@ pub fn VertexShaderInputStruct(
         var size_scan: u8 = 4;
         while (size_scan >= 1) : (size_scan -= 1) {
             for (chunks_to_pack) |chk| {
-                if (chk.slot_index == target_slot and @intFromEnum(chk.size) == size_scan) {
+                if (chk.slot_index == target_slot and @backingInt(chk.size) == size_scan) {
                     sorted_chunks[sorted_count] = chk;
                     sorted_count += 1;
                 }
@@ -2243,9 +2243,9 @@ pub fn VertexShaderInputStruct(
     }
 
     // Bin pack chunks into vertex locations
-    comptime var location_states: [MAX_LOCATIONS]VertexLocationState = [_]VertexLocationState{.{}} ** MAX_LOCATIONS;
+    comptime var location_states: [MAX_LOCATIONS]VertexLocationState = @splat(.{});
     comptime var location_slots: [MAX_LOCATIONS]u32 = @splat(0);
-    comptime var location_base_types: [MAX_LOCATIONS]?BaseType = [_]?BaseType{null} ** MAX_LOCATIONS;
+    comptime var location_base_types: [MAX_LOCATIONS]?BaseType = @splat(null);
     comptime var active_locations: usize = 0;
 
     const ChunkPlacement = struct {
@@ -2259,7 +2259,7 @@ pub fn VertexShaderInputStruct(
     comptime var field_chunk_counts: [_NUM_FIELDS]u8 = undefined;
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const info = get_hlsl_info(f.gpu_type.hlsl_name);
         field_chunk_counts[fidx] = info.cols;
     }
@@ -2279,7 +2279,7 @@ pub fn VertexShaderInputStruct(
                 field_placements[chk.field_idx][chk.chunk_idx] = .{
                     .loc = @intCast(l_idx),
                     .comp_start = @intCast(fit_offset / 4),
-                    .comp_count = @intFromEnum(chk.size),
+                    .comp_count = @backingInt(chk.size),
                     .loc_byte_offset = fit_offset,
                 };
                 location_states[l_idx] = new_state;
@@ -2304,7 +2304,7 @@ pub fn VertexShaderInputStruct(
             field_placements[chk.field_idx][chk.chunk_idx] = .{
                 .loc = @intCast(l_idx),
                 .comp_start = 0,
-                .comp_count = @intFromEnum(chk.size),
+                .comp_count = @backingInt(chk.size),
                 .loc_byte_offset = fit_offset,
             };
             location_states[l_idx] = new_state;
@@ -2341,7 +2341,7 @@ pub fn VertexShaderInputStruct(
     comptime var field_types: [_NUM_FIELDS]type = undefined;
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const placement = field_placements[fidx][0];
         field_offsets[fidx] = location_byte_offsets[placement.loc] + placement.loc_byte_offset;
         field_types[fidx] = f.gpu_type.cpu_type;
@@ -2382,7 +2382,7 @@ pub fn VertexShaderInputStruct(
             comptime var s_idx: usize = 0;
             for (in_fields) |f| {
                 if (f.from_vertex_buffer_slot == target_slot) {
-                    const fidx = @intFromEnum(f.field_name);
+                    const fidx = @backingInt(f.field_name);
                     slot_fields[s_idx] = .{
                         .field_idx = fidx,
                         .offset = in_offsets[fidx],
@@ -2422,7 +2422,7 @@ pub fn VertexShaderInputStruct(
 
             comptime var field_names: [total_fields][]const u8 = undefined;
             comptime var field_types_: [total_fields]type = undefined;
-            comptime var field_attrs: [total_fields]std.builtin.Type.StructField.Attributes = @splat(.{});
+            comptime var field_attrs: [total_fields]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
 
             comptime var curr_offset: usize = 0;
             comptime var f_idx: usize = 0;
@@ -2560,7 +2560,7 @@ pub fn VertexShaderInputStruct(
 
     _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
@@ -2584,7 +2584,7 @@ pub fn VertexShaderInputStruct(
     _ = comptime_writer.writeAll("    " ++ NAME ++ " v;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const count = field_chunk_counts[fidx];
         const field_info = get_hlsl_info(f.gpu_type.hlsl_name);
 
@@ -2731,7 +2731,7 @@ pub fn VertexShaderInputStruct(
         }
 
         pub fn type_for_field_name(comptime field: FIELD) type {
-            return TYPES[@intFromEnum(field)];
+            return TYPES[@backingInt(field)];
         }
 
         /// Returns vertex buffer descriptions for SDL3/GPU pipeline creation
@@ -2928,7 +2928,7 @@ pub fn VertexToFragmentStruct(
     comptime var c_idx: usize = 0;
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const info = get_hlsl_info(f.gpu_type.hlsl_name);
         const is_sys = f.semantic != .USER and f.semantic != ._PADDING;
 
@@ -2960,7 +2960,7 @@ pub fn VertexToFragmentStruct(
     var size_scan: u8 = 4;
     while (size_scan >= 1) : (size_scan -= 1) {
         for (chunks_to_pack) |chk| {
-            if (!chk.is_system_value and @intFromEnum(chk.size) == size_scan) {
+            if (!chk.is_system_value and @backingInt(chk.size) == size_scan) {
                 sorted_chunks[sorted_count] = chk;
                 sorted_count += 1;
             }
@@ -2991,7 +2991,7 @@ pub fn VertexToFragmentStruct(
     comptime var field_chunk_counts: [_NUM_FIELDS]u8 = undefined;
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const info = get_hlsl_info(f.gpu_type.hlsl_name);
         field_chunk_counts[fidx] = info.cols;
     }
@@ -3020,7 +3020,7 @@ pub fn VertexToFragmentStruct(
             field_placements[chk.field_idx][chk.chunk_idx] = .{
                 .reg = @intCast(r_idx),
                 .comp_start = 0,
-                .comp_count = @intFromEnum(chk.size),
+                .comp_count = @backingInt(chk.size),
             };
             continue;
         }
@@ -3037,7 +3037,7 @@ pub fn VertexToFragmentStruct(
                 field_placements[chk.field_idx][chk.chunk_idx] = .{
                     .reg = @intCast(r_idx),
                     .comp_start = @intCast(fit_offset / 4),
-                    .comp_count = @intFromEnum(chk.size),
+                    .comp_count = @backingInt(chk.size),
                 };
                 placed = true;
                 break;
@@ -3066,7 +3066,7 @@ pub fn VertexToFragmentStruct(
             field_placements[chk.field_idx][chk.chunk_idx] = .{
                 .reg = @intCast(r_idx),
                 .comp_start = @intCast(fit_offset / 4),
-                .comp_count = @intFromEnum(chk.size),
+                .comp_count = @backingInt(chk.size),
             };
         }
     }
@@ -3098,7 +3098,7 @@ pub fn VertexToFragmentStruct(
 
         // Interpolation qualifier
         if (reg.interp != .DEFAULT) {
-            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@backingInt(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         // HLSL Type
@@ -3154,7 +3154,7 @@ pub fn VertexToFragmentStruct(
     _ = comptime_writer.writeAll("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const count = field_chunk_counts[fidx];
 
         for (0..count) |col| {
@@ -3209,7 +3209,7 @@ pub fn VertexToFragmentStruct(
 
         // Interpolation qualifier
         if (reg.interp != .DEFAULT) {
-            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@intFromEnum(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
+            _ = comptime_writer.writeAll(HLSL_INTERP_KIND.NAMES[@backingInt(reg.interp)]) catch |err| assert_comptime_write_failure(@src(), err);
         }
 
         // HLSL Type
@@ -3265,7 +3265,7 @@ pub fn VertexToFragmentStruct(
     _ = comptime_writer.writeAll("    " ++ NAME ++ " vf;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const count = field_chunk_counts[fidx];
 
         _ = comptime_writer.writeAll("    vf.") catch |err| assert_comptime_write_failure(@src(), err);
@@ -3428,7 +3428,7 @@ pub fn FragmentShaderOutputStruct(
     // Uniqueness check
     comptime var field_defined: [_NUM_FIELDS]bool = @splat(false);
     for (fields) |f| {
-        const idx = @intFromEnum(f.field_name);
+        const idx = @backingInt(f.field_name);
         assert_with_reason(
             !field_defined[idx],
             @src(),
@@ -3558,7 +3558,7 @@ pub fn FragmentShaderOutputStruct(
     comptime var tc_idx: usize = 0;
     for (fields) |f| {
         if (f.semantic == .SV_Target) {
-            const fidx = @intFromEnum(f.field_name);
+            const fidx = @backingInt(f.field_name);
             const info = get_hlsl_info(f.gpu_type.hlsl_name);
             target_chunks[tc_idx] = .{
                 .field_idx = fidx,
@@ -3577,7 +3577,7 @@ pub fn FragmentShaderOutputStruct(
         var size_scan: u8 = 4;
         while (size_scan >= 1) : (size_scan -= 1) {
             for (target_chunks) |chk| {
-                if (chk.slot == slot_idx and @intFromEnum(chk.size) == size_scan) {
+                if (chk.slot == slot_idx and @backingInt(chk.size) == size_scan) {
                     sorted_chunks[sorted_count] = chk;
                     sorted_count += 1;
                 }
@@ -3586,8 +3586,8 @@ pub fn FragmentShaderOutputStruct(
     }
 
     const MAX_TARGET_SLOTS = 8;
-    comptime var target_states: [MAX_TARGET_SLOTS]VertexLocationState = [_]VertexLocationState{.{}} ** MAX_TARGET_SLOTS;
-    comptime var target_base_types: [MAX_TARGET_SLOTS]?BaseType = [_]?BaseType{null} ** MAX_TARGET_SLOTS;
+    comptime var target_states: [MAX_TARGET_SLOTS]VertexLocationState = @splat(.{});
+    comptime var target_base_types: [MAX_TARGET_SLOTS]?BaseType = @splat(null);
     comptime var target_active: [MAX_TARGET_SLOTS]bool = @splat(false);
 
     const TargetPlacement = struct {
@@ -3605,7 +3605,7 @@ pub fn FragmentShaderOutputStruct(
             did_fit,
             @src(),
             "(FragmentShaderOutputStruct '{s}') field `{s}` (size {d}) does not fit in SV_Target{d} (total components exceed 4)",
-            .{ NAME, @tagName(fields[chk.field_idx].field_name), @intFromEnum(chk.size), chk.slot },
+            .{ NAME, @tagName(fields[chk.field_idx].field_name), @backingInt(chk.size), chk.slot },
         );
 
         target_states[chk.slot] = new_state;
@@ -3616,7 +3616,7 @@ pub fn FragmentShaderOutputStruct(
         field_target_placements[chk.field_idx] = .{
             .slot = chk.slot,
             .comp_start = @intCast(fit_offset / 4),
-            .comp_count = @intFromEnum(chk.size),
+            .comp_count = @backingInt(chk.size),
         };
     }
 
@@ -3648,7 +3648,7 @@ pub fn FragmentShaderOutputStruct(
     // Unpacked Logical Struct
     _ = comptime_writer.writeAll("struct " ++ NAME ++ " {\n") catch |err| assert_comptime_write_failure(@src(), err);
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         _ = comptime_writer.writeAll(SPACE_4) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeAll(@tagName(f.gpu_type.hlsl_name)) catch |err| assert_comptime_write_failure(@src(), err);
         _ = comptime_writer.writeByte(' ') catch |err| assert_comptime_write_failure(@src(), err);
@@ -3745,7 +3745,7 @@ pub fn FragmentShaderOutputStruct(
     _ = comptime_writer.writeAll("    " ++ PACKED_NAME ++ " pck;\n") catch |err| assert_comptime_write_failure(@src(), err);
 
     for (fields) |f| {
-        const fidx = @intFromEnum(f.field_name);
+        const fidx = @backingInt(f.field_name);
         const f_info = get_hlsl_info(f.gpu_type.hlsl_name);
 
         switch (f.semantic) {
@@ -3810,7 +3810,7 @@ pub fn FragmentShaderOutputStruct(
 
     comptime var field_types: [_NUM_FIELDS]type = undefined;
     for (fields) |f| {
-        field_types[@intFromEnum(f.field_name)] = f.gpu_type.cpu_type;
+        field_types[@backingInt(f.field_name)] = f.gpu_type.cpu_type;
     }
 
     const field_types_const = field_types;
@@ -3839,7 +3839,7 @@ pub fn FragmentShaderOutputStruct(
         pub const HLSL_STUB = hlsl_stub_inner_const;
 
         pub fn type_for_field_name(comptime field: FIELD) type {
-            return TYPES[@intFromEnum(field)];
+            return TYPES[@backingInt(field)];
         }
 
         pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -3862,7 +3862,7 @@ pub fn AnyFragmentShaderOutputStruct(comptime INNER: type) type {
         pub const ENUMS: [INNER.ENUMS.len]type = INNER.ENUMS;
         pub const FIELD: type = INNER.FIELD;
         pub fn type_for_field_name(comptime field: FIELD) type {
-            return INNER.TYPES[@intFromEnum(field)];
+            return INNER.TYPES[@backingInt(field)];
         }
         pub fn write_hlsl_fragment_output_structs(writer: *std.Io.Writer) std.Io.Writer.Error!void {
             _ = try writer.writeAll(INNER.HLSL_FRAGMENT_STUB[0..]);

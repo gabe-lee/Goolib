@@ -95,8 +95,11 @@ pub fn define_vec3_type(comptime T: type) type {
             return Vec3{ .x = num_cast(val, T), .y = num_cast(val, T), .z = num_cast(val, T) };
         }
 
-        pub fn vec(self: Vec3) VEC {
-            return @bitCast(self);
+        pub fn to_vec(self: Vec3) VEC {
+            return .{ self.x, self.y, self.z };
+        }
+        pub fn from_vec(vec: VEC) Vec3 {
+            return .{ .x = vec[0], .y = vec[1], .z = vec[2] };
         }
 
         // pub fn downgrade_to_vec2_xy(self: Vec3) Vec2 {
@@ -104,30 +107,30 @@ pub fn define_vec3_type(comptime T: type) type {
         // }
 
         pub fn swizzle(self: Vec3, new_x: Component, new_y: Component, new_z: Component) Vec3 {
-            return Vec3{ .x = self.vec[@intFromEnum(new_x)], .y = self.vec[@intFromEnum(new_y)], .z = self.vec[@intFromEnum(new_z)] };
+            return Vec3{ .x = self.to_vec[@backingInt(new_x)], .y = self.to_vec[@backingInt(new_y)], .z = self.to_vec[@backingInt(new_z)] };
         }
 
         pub fn inverse(self: Vec3) Vec3 {
-            return @bitCast(ONE.vec() / self.vec());
+            return .from_vec(ONE.to_vec() / self.to_vec());
         }
 
         pub fn ceil(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return @bitCast(@ceil(self.vec()));
+            return .from_vec(@ceil(self.to_vec()));
         }
 
         pub fn floor(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return @bitCast(@floor(self.vec()));
+            return .from_vec(@floor(self.to_vec()));
         }
 
         pub fn round(self: Vec3) Vec3 {
             if (IS_INT) return self;
-            return @bitCast(@round(self.vec()));
+            return .from_vec(@round(self.to_vec()));
         }
 
         pub fn dot_product(self: Vec3, other: Vec3) T {
-            const products = self.vec() * other.vec();
+            const products = self.to_vec() * other.to_vec();
             return @reduce(.Add, products);
         }
         pub inline fn dot(self: Vec3, other: Vec3) T {
@@ -189,25 +192,25 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn add(self: Vec3, other: Vec3) Vec3 {
-            return @bitCast(self.vec() + other.vec());
+            return .from_vec(self.to_vec() + other.to_vec());
         }
 
         pub fn subtract(self: Vec3, other: Vec3) Vec3 {
-            return @bitCast(self.vec() - other.vec());
+            return .from_vec(self.to_vec() - other.to_vec());
         }
 
         pub fn multiply(self: Vec3, other: Vec3) Vec3 {
-            return @bitCast(self.vec() * other.vec());
+            return .from_vec(self.to_vec() * other.to_vec());
         }
 
         pub fn divide(self: Vec3, other: Vec3) Vec3 {
-            assert_with_reason(!@reduce(.Or, other.vec() == ZERO.vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.vec()});
-            return @bitCast(self.vec() / other.vec());
+            assert_with_reason(!@reduce(.Or, other.to_vec() == ZERO.to_vec()), @src(), "cannot divide two vectors when one of the components of the divisor vector is 0, got divisor = {any}", .{other.to_vec()});
+            return .from_vec(self.to_vec() / other.to_vec());
         }
 
         pub fn scale(self: Vec3, val: anytype) Vec3 {
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return @bitCast(MathX.upgrade_multiply_out(self.vec(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_multiply_out(self.to_vec(), val_vec, VEC));
         }
         pub fn inverse_scale(self: Vec3, val: anytype) Vec3 {
             if (@TypeOf(val) == bool) {
@@ -216,7 +219,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 assert_with_reason(val != 0, @src(), "cannot `inverse_scale()` when the scale value is 0, (divide by zero)", .{});
             }
             const val_vec: @Vector(3, @TypeOf(val)) = @splat(val);
-            return @bitCast(MathX.upgrade_divide_out(self.vec(), val_vec, VEC));
+            return .from_vec(MathX.upgrade_divide_out(self.to_vec(), val_vec, VEC));
         }
 
         pub fn add_scale(self: Vec3, add_vec: Vec3, scale_add_vec_by: anytype) Vec3 {
@@ -228,11 +231,11 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn squared(self: Vec3) Vec3 {
-            return @bitCast(self.vec() * self.vec());
+            return .from_vec(self.to_vec() * self.to_vec());
         }
 
         pub fn component_sum(self: Vec3) T {
-            return @reduce(.Add, self.vec());
+            return @reduce(.Add, self.to_vec());
         }
 
         pub fn distance_to(self: Vec3, other: Vec3) T {
@@ -257,13 +260,13 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn length_using_squares(self_squared: Vec3) T {
-            assert_with_reason(@reduce(.And, self_squared.vec() >= ZERO.vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec()});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.to_vec()});
             const sum = self_squared.component_sum();
             return num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
         }
 
         pub fn normalize(self: Vec3) Vec3 {
-            assert_with_reason(@reduce(.Or, self.vec() != ZERO.vec()), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
+            assert_with_reason(@reduce(.Or, self.to_vec() != ZERO.to_vec()), @src(), "at least one component of `self` must be nonzero, otherwise a it will cause a divide by zero", .{});
             const len = self.length();
             return self.inverse_scale(len);
         }
@@ -274,14 +277,14 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn normalize_using_squares(self: Vec3, self_squared: Vec3) Vec3 {
-            assert_with_reason(@reduce(.And, self_squared.vec() >= ZERO.vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec()});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.to_vec()});
             const sum = self_squared.component_sum();
             const len = num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
             return self.inverse_scale(len);
         }
 
         pub fn normalize_may_be_zero(self: Vec3, comptime zero_behavior: NormalizeZero) Vec3 {
-            if (@reduce(.Add, self.vec() == ZERO.vec())) {
+            if (@reduce(.Add, self.to_vec() == ZERO.to_vec())) {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
@@ -370,7 +373,7 @@ pub fn define_vec3_type(comptime T: type) type {
         /// this equals `a.x / b.x` or `a.y / b.y` or `a.z / b.z`
         pub fn colinear_ratio_a_of_b(a: Vec3, b: Vec3) T {
             inline for (0..3) |i| {
-                if (b.vec()[i] != 0) return a.vec()[i] / b.vec()[i];
+                if (b.to_vec()[i] != 0) return a.to_vec()[i] / b.to_vec()[i];
             }
             return 0;
         }
@@ -398,10 +401,10 @@ pub fn define_vec3_type(comptime T: type) type {
                 assert_is_float(@TypeOf(percent), @src());
                 break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
             };
-            const nums = MathX.upgrade_3_numbers_for_math(p1.vec(), p2.vec(), delta);
+            const nums = MathX.upgrade_3_numbers_for_math(p1.to_vec(), p2.to_vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
             const result = @mulAdd(TU, nums.c, nums.b, @mulAdd(TU, -nums.c, nums.a, nums.a));
-            return @bitCast(num_cast(result, VEC));
+            return .from_vec(num_cast(result, VEC));
         }
 
         pub fn lerp(p1: Vec3, p2: Vec3, percent: anytype) Vec3 {
@@ -515,25 +518,25 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn negate(self: Vec3) Vec3 {
-            return @bitCast(-self.vec());
+            return .from_vec(-self.to_vec());
         }
 
         pub fn equals(self: Vec3, other: Vec3) bool {
-            return @reduce(.And, self.vec() == other.vec());
+            return @reduce(.And, self.to_vec() == other.to_vec());
         }
 
         pub fn approx_equal(self: Vec3, other: Vec3) bool {
-            return MathX.approx_equal_vec(VEC, self.vec(), other.vec());
+            return MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec());
         }
         pub fn approx_equal_with_epsilon(self: Vec3, other: Vec3, epsilon: Vec3) bool {
-            return MathX.approx_equal_with_epsilon_vec(VEC, self.vec(), other.vec(), epsilon);
+            return MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon);
         }
 
         pub fn is_zero(self: Vec3) bool {
-            return @reduce(.And, self.vec() == ZERO.vec());
+            return @reduce(.And, self.to_vec() == ZERO.to_vec());
         }
         pub fn non_zero(self: Vec3) bool {
-            return !@reduce(.And, self.vec() == ZERO.vec());
+            return !@reduce(.And, self.to_vec() == ZERO.to_vec());
         }
 
         /// 'rise' (component not in `reference_plane`) / 'run' (the length of the 2D vector formed by the components belonging to the `reference_plane`)
@@ -839,19 +842,19 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn as_4x1_matrix_column_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 1 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_1x4_matrix_row_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 1 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_4x1_matrix_column_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 0 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
         pub fn as_1x4_matrix_row_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 0 };
-            return @bitCast(raw);
+            return .from_vec(raw);
         }
 
         pub fn apply_affine_matrix_transform(self: Vec3, matrix: anytype) Vec3 {
@@ -867,7 +870,7 @@ pub fn define_vec3_type(comptime T: type) type {
             const DEF = Matrix.assert_anytype_is_matrix_and_get_def(matrix, @src());
             assert_with_reason(DEF.COLS == 4 and DEF.ROWS == 4, @src(), "affine matrix to apply MUST be a 4x4 matrix, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
             const result = Matrix.Advanced.multiply_matrices(DEF, matrix, SEFL_DEF, self_as_mat, T, .COLUMN_MAJOR, 0);
-            return @bitCast(.{ result[0][0], result[0][1], result[0][2] });
+            return .from_vec(.{ result[0][0], result[0][1], result[0][2] });
         }
 
         pub const TransformStep = union(TransformKind) {

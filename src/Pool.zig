@@ -51,7 +51,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
         next_unused_idx_in_block: u32 = 0,
         first_free: IDX_TYPE = 0,
         free_count: IDX_TYPE = 0,
-        lock: if (NEEDS_LOCK) std.Thread.Mutex else void = if (NEEDS_LOCK) std.Thread.Mutex{} else void{},
+        lock: if (NEEDS_LOCK) std.Thread.Mutex else void = if (NEEDS_LOCK) std.Thread.Mutex{} else {},
 
         pub const Slot = union {
             item: T,

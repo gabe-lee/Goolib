@@ -99,11 +99,11 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
 
         param_table: *const ParamTable,
         allocator_edge_list_primary: Allocator = std.heap.page_allocator,
-        allocator_edge_list_secondary: if (SWEEP_2) Allocator else void = if (SWEEP_2) std.heap.page_allocator else void{},
+        allocator_edge_list_secondary: if (SWEEP_2) Allocator else void = if (SWEEP_2) std.heap.page_allocator else {},
         allocator_sweep_list: Allocator = std.heap.page_allocator,
         allocator_result_list: Allocator = std.heap.page_allocator,
         primary_edge_list: PrimaryEdgeList = .{},
-        secondary_edge_list: if (SWEEP_2) SecondaryEdgeList else void = if (SWEEP_2) SecondaryEdgeList{} else void{},
+        secondary_edge_list: if (SWEEP_2) SecondaryEdgeList else void = if (SWEEP_2) SecondaryEdgeList{} else {},
         sweep_list: SweepList = .{},
         result_list: ResultList = .{},
         sweep_list_next_free: u32 = 0,
@@ -114,11 +114,11 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
         pub const InitOptions = struct {
             param_table: *const ParamTable,
             initial_capacity_edge_list_primary: u32 = 0,
-            initial_capacity_edge_list_secondary: if (SWEEP_2) u32 else void = if (SWEEP_2) 0 else void{},
+            initial_capacity_edge_list_secondary: if (SWEEP_2) u32 else void = if (SWEEP_2) 0 else {},
             initial_capacity_sweep_list: u32 = 0,
             initial_capacity_result_list: u32 = 0,
             allocator_edge_list_primary: Allocator = std.heap.page_allocator,
-            allocator_edge_list_secondary: if (SWEEP_2) Allocator else void = if (SWEEP_2) std.heap.page_allocator else void{},
+            allocator_edge_list_secondary: if (SWEEP_2) Allocator else void = if (SWEEP_2) std.heap.page_allocator else {},
             allocator_sweep_list: Allocator = std.heap.page_allocator,
             allocator_result_list: Allocator = std.heap.page_allocator,
             object_id_equal_func: *const fn (id_a: ObjId, id_b: ObjId) bool,
@@ -164,8 +164,8 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
         pub const PrimaryEdge = struct {
             obj_id: ObjId,
             val_id: ParamId,
-            next_min_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else void{},
-            next_max_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else void{},
+            next_min_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else {},
+            next_max_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else {},
             is_max: bool,
         };
         pub const SecondaryEdge = struct {
@@ -175,8 +175,8 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
         };
         pub const ActiveSweepMember = struct {
             obj_id: ObjId,
-            next_min_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else void{},
-            next_max_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else void{},
+            next_min_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else {},
+            next_max_val_id: if (SWEEP_2) ParamId else void = if (SWEEP_2) .{} else {},
         };
         pub const SweepMember = union(ActiveOrNextFree) {
             ACTIVE: ActiveSweepMember,
@@ -200,7 +200,7 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
                 .sweep_list = SweepList.init_capacity(opts.initial_capacity_sweep_list, opts.allocator_sweep_list),
                 .result_list = ResultList.init_capacity(opts.initial_capacity_result_list, opts.allocator_result_list),
                 .primary_edge_list = PrimaryEdgeList.init_capacity(opts.initial_capacity_edge_list_primary, opts.allocator_edge_list_primary),
-                .secondary_edge_list = if (SWEEP_2) SecondaryEdgeList.init_capacity(opts.initial_capacity_edge_list_secondary, opts.allocator_edge_list_secondary) else void{},
+                .secondary_edge_list = if (SWEEP_2) SecondaryEdgeList.init_capacity(opts.initial_capacity_edge_list_secondary, opts.allocator_edge_list_secondary) else {},
                 .object_id_equal_func = opts.object_id_equal_func,
             };
         }
@@ -487,8 +487,8 @@ pub fn param_table_sweep_and_prune_list(comptime options: ParamTableSweepPruneLi
 //         allocator_edge_list_y: Allocator = std.heap.page_allocator,
 //         allocator_sweep_list: Allocator = std.heap.page_allocator,
 //         allocator_result_list: Allocator = std.heap.page_allocator,
-//         x_edge_list: if (SWEEP_X) EdgeList else void = if (SWEEP_X) EdgeList{} else void{},
-//         y_edge_list: if (SWEEP_Y) EdgeList else void = if (SWEEP_Y) EdgeList{} else void{},
+//         x_edge_list: if (SWEEP_X) EdgeList else void = if (SWEEP_X) EdgeList{} else {},
+//         y_edge_list: if (SWEEP_Y) EdgeList else void = if (SWEEP_Y) EdgeList{} else {},
 //         sweep_list: SweepList,
 //         sweep_list_next_free: u32,
 //         sweep_list_free_count: u32,

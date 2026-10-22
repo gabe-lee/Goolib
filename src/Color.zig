@@ -58,10 +58,10 @@ pub const Channel = enum(u8) {
     _,
 
     pub inline fn to_index(self: Channel) u8 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
     pub inline fn from_index(idx: u8) Channel {
-        return @enumFromInt(idx);
+        return @fromBackingInt(@intCast(idx));
     }
 };
 
@@ -170,7 +170,7 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
             else => void,
         };
 
-        pub const CHANNEL_COUNT = @typeInfo(CHANNEL).@"enum".fields.len;
+        pub const CHANNEL_COUNT = @typeInfo(CHANNEL).@"enum".field_names.len;
         pub const BYTE_SIZE = @sizeOf(T) * CHANNEL_COUNT;
         pub const ZERO = Color{};
 
@@ -218,10 +218,10 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         }
 
         pub inline fn get(self: Color, channel: CHANNEL) T {
-            return self.raw[@intFromEnum(channel)];
+            return self.raw[@backingInt(channel)];
         }
         pub inline fn set(self: *Color, channel: CHANNEL, val: T) void {
-            self.raw[@intFromEnum(channel)] = val;
+            self.raw[@backingInt(channel)] = val;
         }
         pub inline fn set_all_channels(self: *Color, val: T) void {
             inline for (0..CHANNEL_COUNT) |c| {
@@ -230,7 +230,7 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         }
         pub inline fn with_set(self: Color, channel: CHANNEL, val: T) Color {
             var new_self = self;
-            new_self.raw[@intFromEnum(channel)] = val;
+            new_self.raw[@backingInt(channel)] = val;
             return new_self;
         }
 
@@ -515,14 +515,14 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
 
 pub fn define_packed_color_type(comptime integer_type: type, comptime order: SDL_ChannelOrder, comptime red_bits: comptime_int, comptime green_bits: comptime_int, comptime blue_bits: comptime_int, comptime alpha_bits: comptime_int) type {
     assert_with_reason(Types.type_is_unsigned_int_aligned(integer_type), @src(), "type `integer_type` MUST be one of: u8, u16, u32, u64, u128, usize... got type `{s}`", .{@typeName(integer_type)});
-    const R_INT = std.meta.Int(.unsigned, red_bits);
-    const G_INT = std.meta.Int(.unsigned, green_bits);
-    const B_INT = std.meta.Int(.unsigned, blue_bits);
-    const A_INT = std.meta.Int(.unsigned, alpha_bits);
+    const R_INT = @Int(.unsigned, red_bits);
+    const G_INT = @Int(.unsigned, green_bits);
+    const B_INT = @Int(.unsigned, blue_bits);
+    const A_INT = @Int(.unsigned, alpha_bits);
     const CHANNEL_BITS = red_bits + green_bits + blue_bits + alpha_bits;
     const CHANNEL_BYTES = ((CHANNEL_BITS + 7) >> 3);
     const INT_BITS = @typeInfo(integer_type).int.bits;
-    const PAD = std.meta.Int(.unsigned, INT_BITS - CHANNEL_BITS);
+    const PAD = @Int(.unsigned, INT_BITS - CHANNEL_BITS);
     switch (order) {
         ._RGB, .ARGB => return packed struct {
             b: B_INT = 0,
@@ -672,7 +672,7 @@ pub fn define_color_rgba_type(comptime T: type) type {
 
         const T_RGBA = @This();
         const T_RGB = define_color_rgb_type(T);
-        const T_RAW = std.meta.Int(.unsigned, @bitSizeOf(T_RGBA));
+        const T_RAW = @Int(.unsigned, @bitSizeOf(T_RGBA));
         const MAX = switch (T) {
             f16, f32, f64, f80, f128, comptime_float => 1.0,
             else => std.math.maxInt(T),
@@ -715,7 +715,7 @@ pub fn define_color_rgb_type(comptime T: type) type {
 
         const T_RGB = @This();
         const T_RGBA = define_color_rgba_type(T);
-        const T_RAW = std.meta.Int(.unsigned, @bitSizeOf(T_RGBA));
+        const T_RAW = @Int(.unsigned, @bitSizeOf(T_RGBA));
         const MAX = switch (T) {
             f16, f32, f64, f80, f128, comptime_float => 1.0,
             else => std.math.maxInt(T),

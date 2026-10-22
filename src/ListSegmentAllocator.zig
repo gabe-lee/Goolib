@@ -458,7 +458,7 @@ pub fn ListSegmentAllocator(comptime T: type) type {
         }
 
         fn debug_logical_no_gaps(self: *Self, comptime src: std.builtin.SourceLocation) void {
-            const logical_indexes = self.segment_list.sort_lists[@intFromEnum(SORT_NAMES.LOGICAL)].idx_list;
+            const logical_indexes = self.segment_list.sort_lists[@backingInt(SORT_NAMES.LOGICAL)].idx_list;
             var offset: u32 = 0;
             for (logical_indexes.ptr[0..logical_indexes.len], 0..) |idx, idx_idx| {
                 const seg = self.segment_list.primary_list.ptr[idx];
@@ -468,7 +468,7 @@ pub fn ListSegmentAllocator(comptime T: type) type {
         }
 
         fn debug_print_nearby_logicals(self: *Self, logical_sort_idx: usize, comptime CONTEXT: []const u8, comptime src: std.builtin.SourceLocation) void {
-            const logical_indexes = self.segment_list.sort_lists[@intFromEnum(SORT_NAMES.LOGICAL)].idx_list;
+            const logical_indexes = self.segment_list.sort_lists[@backingInt(SORT_NAMES.LOGICAL)].idx_list;
             const USED = [5]u8{ 'U', 'S', 'E', 'D', ' ' };
             const FREE = [5]u8{ 'F', 'R', 'E', 'E', ' ' };
             var buf_1: [107]u8 = @splat(' ');

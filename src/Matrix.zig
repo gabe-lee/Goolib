@@ -399,7 +399,7 @@ pub fn RowEchelonForm(comptime _DEF: MatrixDef, comptime CELL_TYPE: type, compti
             .CACHE_PIVOT_X_INDEXES => [DEF.ROWS]usize,
             .CACHE_PIVOT_VALUES => [DEF.ROWS]DEF.T,
         } = switch (PIVOT_MODE) {
-            .DO_NOT_CACHE_PIVOTS => void{},
+            .DO_NOT_CACHE_PIVOTS => {},
             .CACHE_PIVOT_X_INDEXES => @as([DEF.ROWS]usize, @splat(0)),
             .CACHE_PIVOT_VALUES => @as([DEF.ROWS]CELL_TYPE, @splat(0)),
         },

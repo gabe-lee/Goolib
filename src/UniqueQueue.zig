@@ -74,8 +74,8 @@ pub fn UniqueQueue(
         unique_ptr: if (DO_UNIQUE) [*]T_UNIQUE else void = if (DO_UNIQUE) Utils.invalid_ptr_many(T_UNIQUE) else void,
         queue_len: u32 = 0,
         queue_cap: u32 = 0,
-        unique_len: if (DO_UNIQUE) u32 else void = if (DO_UNIQUE) 0 else void{},
-        unique_cap: if (DO_UNIQUE) u32 else void = if (DO_UNIQUE) 0 else void{},
+        unique_len: if (DO_UNIQUE) u32 else void = if (DO_UNIQUE) 0 else {},
+        unique_cap: if (DO_UNIQUE) u32 else void = if (DO_UNIQUE) 0 else {},
         queue_cursor: u32 = 0,
 
         pub const DO_UNIQUE = UNIQUE_CHECKS == .CHECK_PREVIOUSLY_QUEUED_UNIQUES;

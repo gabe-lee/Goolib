@@ -307,7 +307,7 @@ pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime AB
     const max_sign_bits = @max(sign_a_bits, sign_b_bits);
     const final_signed: std.builtin.Signedness = if (max_sign_bits == 1) .signed else .unsigned;
     const final_bits = @min(max_val_bits + max_sign_bits, ABSOLUTE_MAX_BITS);
-    return std.meta.Int(final_signed, final_bits);
+    return @Int(final_signed, final_bits);
 }
 
 pub const NumberUpgradeModeAndType = struct {
@@ -824,7 +824,7 @@ pub fn LinearEstimate(comptime T: type) type {
         estimate: T,
 
         pub fn do_not_estimate_linear() Self {
-            return Self{ .exact = void{} };
+            return Self{ .exact = {} };
         }
         pub fn estimate_linear_when_linear_coeff_more_than_N_times_quadratic(N: T) Self {
             return Self{ .estimate = N };
@@ -840,7 +840,7 @@ pub fn QuadraticEstimate(comptime T: type) type {
         estimate: T,
 
         pub fn do_not_estimate_quadratic() Self {
-            return Self{ .exact = void{} };
+            return Self{ .exact = {} };
         }
         pub fn estimate_quadratic_when_quadratic_coeff_more_than_N_times_cubic(N: T) Self {
             return Self{ .estimate = N };
@@ -856,7 +856,7 @@ pub fn DoubleRootEstimate(comptime T: type) type {
         estimate: T,
 
         pub fn do_not_estimate_double_roots() Self {
-            return Self{ .exact = void{} };
+            return Self{ .exact = {} };
         }
         pub fn estimate_double_roots_when_u_minus_v_less_than_N_times_u_plus_v(N: T) Self {
             return Self{ .estimate = N };
@@ -1642,41 +1642,41 @@ pub const PowerOf2 = enum(u8) {
     pub const USIZE_BITS_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
 
     pub fn to_alloc_align(self: PowerOf2) std.mem.Alignment {
-        const raw = @intFromEnum(self);
+        const raw = @backingInt(self);
         const raw_cast: math.Log2Int(usize) = @intCast(raw);
-        return @enumFromInt(raw_cast);
+        return @fromBackingInt(@intCast(raw_cast));
     }
 
     pub fn align_of_type(comptime T: type) PowerOf2 {
-        return @enumFromInt(@as(u8, @alignOf(T)));
+        return @fromBackingInt(@intCast(@as(u8, @alignOf(T))));
     }
 
     pub fn num_bits(power: PowerOf2) u8 {
-        return @intFromEnum(power) + 1;
+        return @backingInt(power) + 1;
     }
 
     pub fn bit_shift(power: PowerOf2) u8 {
-        return @intFromEnum(power);
+        return @backingInt(power);
     }
 
     pub fn unsigned_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
-        return std.meta.Int(.unsigned, @intCast(@intFromEnum(limit)));
+        return @Int(.unsigned, @intCast(@backingInt(limit)));
     }
     pub fn unsigned_integer_type_that_holds_all_values_up_to_and_including(comptime power: PowerOf2) type {
-        return std.meta.Int(.unsigned, @intCast(@intFromEnum(power) + 1));
+        return @Int(.unsigned, @intCast(@backingInt(power) + 1));
     }
     pub fn signed_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
-        return std.meta.Int(.signed, @intCast(@intFromEnum(limit) + 1));
+        return @Int(.signed, @intCast(@backingInt(limit) + 1));
     }
     pub fn signed_integer_type_that_holds_all_values_up_to_and_including(comptime power: PowerOf2) type {
-        return std.meta.Int(.signed, @intCast(@intFromEnum(power) + 2));
+        return @Int(.signed, @intCast(@backingInt(power) + 2));
     }
     pub fn composite_unsigned_integer_type_that_holds_unsigned_integer_types_with_values_less_than(comptime limits: []const PowerOf2) type {
         comptime var total_limit: u16 = 0;
         inline for (limits) |lim| {
-            total_limit += @as(u16, @intCast(@intFromEnum(lim)));
+            total_limit += @as(u16, @intCast(@backingInt(lim)));
         }
-        return std.meta.Int(.unsigned, total_limit);
+        return @Int(.unsigned, total_limit);
     }
 
     pub fn alignment_power(int_or_ptr: anytype) PowerOf2 {
@@ -1686,17 +1686,17 @@ pub const PowerOf2 = enum(u8) {
             .int => {
                 const i = @abs(int_or_ptr);
                 const tz = @min(@ctz(i), 255);
-                return @enumFromInt(tz);
+                return @fromBackingInt(@intCast(tz));
             },
             .@"enum" => {
-                const i = @abs(@intFromEnum(int_or_ptr));
+                const i = @abs(@backingInt(int_or_ptr));
                 const tz = @min(@ctz(i), 255);
-                return @enumFromInt(tz);
+                return @fromBackingInt(@intCast(tz));
             },
             .pointer => {
                 const i = @intFromPtr(int_or_ptr);
                 const tz = @min(@ctz(i), 255);
-                return @enumFromInt(tz);
+                return @fromBackingInt(@intCast(tz));
             },
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
         }
@@ -1706,38 +1706,38 @@ pub const PowerOf2 = enum(u8) {
     }
     pub fn value_is_aligned_at_least(self: PowerOf2, int_or_ptr: anytype) bool {
         const val_align = alignment_power(int_or_ptr);
-        return @intFromEnum(val_align) >= @intFromEnum(self);
+        return @backingInt(val_align) >= @backingInt(self);
     }
     pub inline fn exactly_aligned_to(int_or_ptr: anytype, min_align: PowerOf2) bool {
         return min_align.value_is_aligned_exactly(int_or_ptr);
     }
     pub fn value_is_aligned_exactly(self: PowerOf2, int_or_ptr: anytype) bool {
         const val_align = alignment_power(int_or_ptr);
-        return @intFromEnum(val_align) == @intFromEnum(self);
+        return @backingInt(val_align) == @backingInt(self);
     }
     pub fn power_of_2(n: anytype) PowerOf2 {
         const T = @TypeOf(n);
         const INFO = @typeInfo(T);
         const i: u8 = switch (INFO) {
             .int => @intCast(@abs(n)),
-            .@"enum" => @intCast(@abs(@intFromEnum(n))),
+            .@"enum" => @intCast(@abs(@backingInt(n))),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
         };
-        return @enumFromInt(i);
+        return @fromBackingInt(@intCast(i));
     }
     pub fn value(self: PowerOf2) u64 {
-        return @as(u64, 1) << @intCast(@intFromEnum(self));
+        return @as(u64, 1) << @intCast(@backingInt(self));
     }
     pub fn value_as_type(self: PowerOf2, comptime INT: type) INT {
-        return @as(INT, 1) << @intCast(@intFromEnum(self));
+        return @as(INT, 1) << @intCast(@backingInt(self));
     }
     pub fn value_large(comptime self: PowerOf2) ValueLarge(self) {
         const INT = ValueLarge(self);
-        return @as(INT, 1) << @intCast(@intFromEnum(self));
+        return @as(INT, 1) << @intCast(@backingInt(self));
     }
     pub fn ValueLarge(comptime self: PowerOf2) type {
-        const bits: u16 = @as(u16, @intCast(@intFromEnum(self))) + 1;
-        return std.meta.Int(.unsigned, bits);
+        const bits: u16 = @as(u16, @intCast(@backingInt(self))) + 1;
+        return @Int(.unsigned, bits);
     }
 
     pub fn usize_blocks_needed(count: anytype, bit_size: anytype) usize {
@@ -1750,7 +1750,7 @@ pub const PowerOf2 = enum(u8) {
         const i = switch (INFO) {
             .int => int_or_ptr,
             .comptime_int => if (comptime int_or_ptr < 0) @as(i64, int_or_ptr) else @as(u64, int_or_ptr),
-            .@"enum" => @intFromEnum(int_or_ptr),
+            .@"enum" => @backingInt(int_or_ptr),
             .pointer => @intFromPtr(int_or_ptr),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
         };
@@ -1764,7 +1764,7 @@ pub const PowerOf2 = enum(u8) {
         const i = switch (INFO) {
             .int => int_or_ptr,
             .comptime_int => if (comptime int_or_ptr < 0) @as(i64, int_or_ptr) else @as(u64, int_or_ptr),
-            .@"enum" => @intFromEnum(int_or_ptr),
+            .@"enum" => @backingInt(int_or_ptr),
             .pointer => @intFromPtr(int_or_ptr),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
         };
@@ -1778,7 +1778,7 @@ pub const PowerOf2 = enum(u8) {
         var i = switch (INFO) {
             .int => @abs(int_or_ptr),
             .comptime_int => if (comptime int_or_ptr < 0) @abs(@as(i128, int_or_ptr)) else @as(u128, int_or_ptr),
-            .@"enum" => @abs(@intFromEnum(int_or_ptr)),
+            .@"enum" => @abs(@backingInt(int_or_ptr)),
             .pointer => @intFromPtr(int_or_ptr),
             else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
         };
@@ -1801,20 +1801,20 @@ pub const PowerOf2 = enum(u8) {
         if (comptime BITS > 16384) i |= i >> 16384;
         if (comptime BITS > 32768) i |= i >> 32768;
         i = i +% 1;
-        return @enumFromInt(@ctz(i));
+        return @fromBackingInt(@intCast(@ctz(i)));
     }
     pub fn round_up_to_power_of_2_at_least(power: PowerOf2, int_or_ptr: anytype) PowerOf2 {
         const rounded = round_down_to_power_of_2(int_or_ptr);
-        return @enumFromInt(@max(@intFromEnum(power), @intFromEnum(rounded)));
+        return @fromBackingInt(@intCast(@max(@backingInt(power), @backingInt(rounded))));
     }
     pub fn round_up_to_power_of_2_at_least_value_type(power: PowerOf2, int_or_ptr: anytype) PowerOf2 {
         const T = @TypeOf(int_or_ptr);
         const INFO = @typeInfo(T);
         const pow = round_up_to_power_of_2_at_least(power, int_or_ptr);
         switch (INFO) {
-            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
-            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
-            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+            .int => return @as(T, 1) << @intCast(@backingInt(pow)),
+            .@"enum" => return @fromBackingInt(@intCast(@as(Types.enum_tag_type(T), 1) << @intCast(@backingInt(pow)))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@backingInt(pow))),
         }
     }
 
@@ -1823,16 +1823,16 @@ pub const PowerOf2 = enum(u8) {
         const INFO = @typeInfo(T);
         const pow = round_up_to_power_of_2(int_or_ptr);
         switch (INFO) {
-            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
-            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
-            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+            .int => return @as(T, 1) << @intCast(@backingInt(pow)),
+            .@"enum" => return @fromBackingInt(@intCast(@as(Types.enum_tag_type(T), 1) << @intCast(@backingInt(pow)))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@backingInt(pow))),
         }
     }
 
     pub fn round_down_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
         const pow = round_up_to_power_of_2(int_or_ptr);
-        const lower = @intFromEnum(pow) - 1;
-        return @enumFromInt(lower);
+        const lower = @backingInt(pow) - 1;
+        return @fromBackingInt(@intCast(lower));
     }
 
     pub fn round_down_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {
@@ -1840,9 +1840,9 @@ pub const PowerOf2 = enum(u8) {
         const INFO = @typeInfo(T);
         const pow = round_down_to_power_of_2(int_or_ptr);
         switch (INFO) {
-            .int => return @as(T, 1) << @intCast(@intFromEnum(pow)),
-            .@"enum" => return @enumFromInt(@as(Types.enum_tag_type(T), 1) << @intCast(@intFromEnum(pow))),
-            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@intFromEnum(pow))),
+            .int => return @as(T, 1) << @intCast(@backingInt(pow)),
+            .@"enum" => return @fromBackingInt(@intCast(@as(Types.enum_tag_type(T), 1) << @intCast(@backingInt(pow)))),
+            .pointer => return @ptrFromInt(@as(usize, 1) << @intCast(@backingInt(pow))),
         }
     }
 };

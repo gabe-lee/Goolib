@@ -49,7 +49,6 @@ pub const Mem = @import("./Utils_Mem.zig");
 pub const Format = @import("./Utils_Format.zig");
 pub const Compare = @import("./Utils_Compare.zig");
 pub const Search = @import("./Utils_Search.zig");
-pub const DataManipulation = @import("./Utils_DataManipulation.zig");
 pub const RecipeInference = @import("./Utils_RecipeInference.zig");
 pub const Traverser = @import("./Utils_Traverser.zig");
 pub const DebugPrint = @import("./Utils_DebugPrint.zig");
@@ -63,7 +62,6 @@ comptime {
         _ = @import("./Utils_Format.zig");
         _ = @import("./Utils_Compare.zig");
         _ = @import("./Utils_Search.zig");
-        _ = @import("./Utils_DataManipulation.zig");
         _ = @import("./Utils_RecipeInference.zig");
         _ = @import("./Utils_Traverser.zig");
         _ = @import("./Utils_DebugPrint.zig");
@@ -74,7 +72,7 @@ pub fn DEBUG_VAR(value: anytype) if (Assert.IS_DEBUG) @TypeOf(value) else void {
     if (comptime Assert.IS_DEBUG) {
         return value;
     } else {
-        return void{};
+        return {};
     }
 }
 
@@ -82,7 +80,7 @@ pub fn DEBUG_VAR_IF(comptime COND: bool, value: anytype) if (Assert.IS_DEBUG and
     if (comptime Assert.IS_DEBUG and COND) {
         return value;
     } else {
-        return void{};
+        return {};
     }
 }
 
@@ -210,7 +208,7 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
                 raw_from = @ptrCast(@alignCast(from_src_not_null));
             }
         } else if (Types.pointer_is_many(ptr_type)) {
-            if (Types.pointer_type_has_sentinel(ptr_type) and (build.mode == .Debug or build.mode == .ReleaseSafe)) {
+            if (Types.pointer_type_has_sentinel(ptr_type) and (build.mode == .debug or build.mode == .safe)) {
                 const sentinel = Types.pointer_type_sentinel(ptr_type);
                 const len_check_slice = Types.make_const_slice_from_sentinel_ptr_max_len(child_type, sentinel.*, from_src_not_null, count);
                 assert_with_reason(len_check_slice.len >= count, "memcopy `from_src` ({s}) cannot provide {d} items (has {d} items)", .{ @typeName(FROM), count, len_check_slice.len });
@@ -241,7 +239,7 @@ pub fn memcopy(from_src: anytype, to_dst: anytype, count: usize) void {
                 raw_to = @ptrCast(@alignCast(to_dst_not_null));
             }
         } else if (Types.pointer_is_many(ptr_type)) {
-            if (Types.pointer_type_has_sentinel(ptr_type) and (build.mode == .Debug or build.mode == .ReleaseSafe)) {
+            if (Types.pointer_type_has_sentinel(ptr_type) and (build.mode == .debug or build.mode == .safe)) {
                 const sentinel = Types.pointer_type_sentinel(ptr_type);
                 const len_check_slice = Types.make_const_slice_from_sentinel_ptr_max_len(child_type, sentinel.*, to_dst_not_null, count);
                 assert_with_reason(len_check_slice.len >= count, @src(), "`to_dst` ({s}) cannot recieve {d} items (has {d} capacity)", .{ @typeName(TO), count, to_dst_not_null.len });
@@ -260,12 +258,12 @@ pub inline fn matches_any(comptime T: type, val: T, set: []const T) bool {
     return false;
 }
 
-pub inline fn debug_switch(debug_val: anytype, else_val: anytype) if (build.mode == .Debug) @TypeOf(debug_val) else @TypeOf(else_val) {
-    return if (build.mode == .Debug) debug_val else else_val;
+pub inline fn debug_switch(debug_val: anytype, else_val: anytype) if (build.mode == .debug) @TypeOf(debug_val) else @TypeOf(else_val) {
+    return if (build.mode == .debug) debug_val else else_val;
 }
 
-pub inline fn safe_switch(debug_rel_safe_val: anytype, else_val: anytype) if (build.mode == .Debug or build.mode == .ReleaseSafe) @TypeOf(debug_rel_safe_val) else @TypeOf(else_val) {
-    return if (build.mode == .Debug or build.mode == .ReleaseSafe) debug_rel_safe_val else else_val;
+pub inline fn safe_switch(debug_rel_safe_val: anytype, else_val: anytype) if (build.mode == .debug or build.mode == .safe) @TypeOf(debug_rel_safe_val) else @TypeOf(else_val) {
+    return if (build.mode == .debug or build.mode == .safe) debug_rel_safe_val else else_val;
 }
 
 pub inline fn comp_switch(comptime cond: bool, true_val: anytype, false_val: anytype) if (cond) @TypeOf(true_val) else @TypeOf(false_val) {
@@ -338,8 +336,8 @@ pub fn deep_equal(val_a: anytype, val_b: anytype) bool {
 
         .@"struct" => |s_info| {
             if (A != B) return false;
-            inline for (s_info.fields) |field| {
-                if (!deep_equal(@field(val_a, field.name), @field(val_b, field.name))) return false;
+            inline for (s_info.field_names) |field_name| {
+                if (!deep_equal(@field(val_a, field_name), @field(val_b, field_name))) return false;
             }
             return true;
         },
@@ -461,8 +459,8 @@ pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
 
         .@"struct" => {
             if (A != B) return false;
-            inline for (INFO_A.@"struct".fields) |field| {
-                if (!shallow_equal(@field(val_a, field.name), @field(val_b, field.name))) return false;
+            inline for (INFO_A.@"struct".field_names) |field_name| {
+                if (!shallow_equal(@field(val_a, field_name), @field(val_b, field_name))) return false;
             }
             return true;
         },
@@ -522,11 +520,14 @@ pub fn shallow_equal(val_a: anytype, val_b: anytype) bool {
                 }
             }
         },
+        .spirv => {
+            @compileError("not implemented for Spir-V types");
+        },
     }
 }
 
-pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]bool) std.meta.Int(.unsigned, count) {
-    const RESULT = std.meta.Int(.unsigned, count);
+pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]bool) @Int(.unsigned, count) {
+    const RESULT = @Int(.unsigned, count);
     var result: RESULT = 0;
     inline for (bools, 0..) |b, shift| {
         result |= @as(RESULT, @intCast(@intFromBool(b))) << @intCast(shift);
@@ -539,13 +540,13 @@ pub fn bools_to_switchable_integer(comptime count: comptime_int, bools: [count]b
 // fn bools_to_named_switchable_enum_output(comptime IN_STRUCT: type) type {
 //     assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type, got type `{s}`", .{@typeName(IN_STRUCT)});
 //     assert_with_reason(Types.type_is_struct_with_all_fields_same_type(IN_STRUCT, bool), @src(), "type `IN_STRUCT` must be a struct type with all `bool` fields, got type `{s}`", .{@typeName(IN_STRUCT)});
-//     const bits :u16= @intCast(@typeInfo(@TypeOf(bools_struct)).@"struct".fields.len);
-//     const int = std.meta.Int(.unsigned, bits);
+//     const bits :u16= @intCast(@typeInfo(@TypeOf(bools_struct)).@"struct".field_names.len);
+//     const int = @Int(.unsigned, bits);
 
 // }
 
-// pub fn bools_to_named_switchable_enum(bools_struct: anytype) enum(std.meta.Int(.unsigned, )) {
-//     const RESULT = std.meta.Int(.unsigned, count);
+// pub fn bools_to_named_switchable_enum(bools_struct: anytype) enum(@Int(.unsigned, )) {
+//     const RESULT = @Int(.unsigned, count);
 //     var result: RESULT = 0;
 //     inline for (bools, 0..) |b, shift| {
 //         result |= @as(RESULT, @intCast(@intFromBool(b))) << @intCast(shift);
@@ -877,7 +878,7 @@ test mem_remove_sparse_by_filter_func {
         buf = ARR[0..];
         rand.bytes(buf);
         c = P.count_evens(buf);
-        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, void{}, P.val_is_odd);
+        mem_remove_sparse_by_filter_func(u8, buf.ptr, &buf.len, 0, {}, P.val_is_odd);
         try Test.expect_true(P.all_vals_even_and_match_count(buf, c), "P.all_vals_even_and_match_count(buf)", "mem_remove_sparse_by_filter_func(..., val_is_odd) did not remove all odd values or removed some even values", .{});
         buf = ARR[0..];
         rand.bytes(buf);
@@ -1053,7 +1054,7 @@ pub fn real_int_type(comptime T: type) type {
             bits |= bits >> 4;
             bits |= bits >> 8;
             bits += 1;
-            return std.meta.Int(sign, bits);
+            return @Int(sign, bits);
         },
         .comptime_int => return u64,
         else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real int type", .{@typeName(T)}),
@@ -1081,7 +1082,7 @@ pub fn real_type(comptime T: type) type {
             bits |= bits >> 4;
             bits |= bits >> 8;
             bits += 1;
-            return std.meta.Int(sign, bits);
+            return @Int(sign, bits);
         },
         .comptime_int => return u64,
         else => assert_unreachable(@src(), "type `{s}` cannot be converted to a real float type", .{@typeName(T)}),

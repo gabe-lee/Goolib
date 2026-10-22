@@ -89,7 +89,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
     @setEvalBranchQuota(EVAL_QUOTA);
     assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(TargetEnum), @src(), "all tags in `TargetEnum` must start from 0 and increase to max value with no gaps", .{});
     return struct {
-        pub const NUM_BITS = @typeInfo(TargetEnum).@"enum".fields.len;
+        pub const NUM_BITS = @typeInfo(TargetEnum).@"enum".field_names.len;
         pub const BitFlagInt = @Int(.unsigned, NUM_BITS);
         pub const Log2BitFlagInt = math.Log2Int(BitFlagInt);
         pub const EnumTagInt = @typeInfo(TargetEnum).@"enum".tag_type;
@@ -99,17 +99,17 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             if (Types.type_is_int(WeightType)) break :get math.maxInt(WeightType);
             if (Types.type_is_float(WeightType)) break :get math.inf(WeightType);
             assert_unreachable(null, "`OptionalRecipeWeightType` was not `null`, but the type provided wasn't an integer or float, got type `{s}`", .{@typeName(WeightType)});
-        } else void{};
+        } else {};
         const recipe_tags_equal: *const fn (a: SolutionTag, b: SolutionTag) bool = if (OptionalWeightInfo != null and OptionalWeightInfo.?.tags_equal != null) OptionalWeightInfo.?.tags_equal.? else &defualt_tags_equal;
         fn defualt_tags_equal(a: SolutionTag, b: SolutionTag) bool {
             return Utils.shallow_equal(a, b);
         }
-        pub const NEUTRAL_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 1 else void{};
-        pub const ZERO_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 0 else void{};
+        pub const NEUTRAL_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 1 else {};
+        pub const ZERO_RECIPE_WEIGHT: WeightType = if (HAS_WEIGHT) 0 else {};
         pub const ALL_TARGETS: [NUM_BITS]TargetEnum = make: {
             var out: [NUM_BITS]TargetEnum = undefined;
             for (0..NUM_BITS) |i| {
-                out[i] = @enumFromInt(@as(Log2BitFlagInt, @intCast(i)));
+                out[i] = @fromBackingInt(@intCast(@as(Log2BitFlagInt, @intCast(i))));
             }
             break :make out;
         };
@@ -240,7 +240,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             recipes_in_prefered_order: []const Recipe,
 
             pub fn recipe_list(this_target: TargetEnum, recipes_in_prefered_order: []const Recipe) RecipeList {
-                const shift: Log2BitFlagInt = @intCast(@intFromEnum(this_target));
+                const shift: Log2BitFlagInt = @intCast(@backingInt(this_target));
                 const bit: BitFlagInt = @as(BitFlagInt, 1) << shift;
                 return RecipeList{
                     .this_target = this_target,
@@ -256,13 +256,13 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             UNAVAILABLE: void,
 
             pub fn user_provided() RecipeSolution {
-                return RecipeSolution{ .USER_PROVIDED = void{} };
+                return RecipeSolution{ .USER_PROVIDED = {} };
             }
             pub fn infered_by_recipe(recipe: SolutionTag) RecipeSolution {
                 return RecipeSolution{ .INFERED_BY_RECIPE = recipe };
             }
             pub fn unavailable() RecipeSolution {
-                return RecipeSolution{ .UNAVAILABLE = void{} };
+                return RecipeSolution{ .UNAVAILABLE = {} };
             }
         };
         pub const AllRecipes = [NUM_BITS]RecipeList;
@@ -329,13 +329,13 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
         }
 
         fn get_recipes_for_target(target: TargetEnum, recipes: AllRecipes) []const Recipe {
-            const target_index = @intFromEnum(target);
+            const target_index = @backingInt(target);
             return recipes[target_index].recipes_in_prefered_order;
         }
 
         pub const Target = struct {
             target_enum: TargetEnum,
-            native_weight: WeightType = if (HAS_WEIGHT) 1 else void{},
+            native_weight: WeightType = if (HAS_WEIGHT) 1 else {},
 
             pub fn user_provided(tar: TargetEnum) Target {
                 return Target{ .target_enum = tar };
@@ -374,7 +374,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             var best_recipe_weights: [NUM_BITS]WeightType = @splat(MAX_RECIPE_WEIGHT);
             var recipes: AllRecipes = UNINIT_RECIPES;
             for (user_provided_entities) |target| {
-                const target_bit_shift: Log2BitFlagInt = @intCast(@intFromEnum(target.target_enum));
+                const target_bit_shift: Log2BitFlagInt = @intCast(@backingInt(target.target_enum));
                 const target_bit: BitFlagInt = @as(BitFlagInt, 1) << target_bit_shift;
                 assert_with_reason(available_bits & target_bit == 0, @src(), "target `{s}` was provided more than once", .{@tagName(target.target_enum)});
                 best_recipe_weights[target_bit_shift] = target.native_weight;
@@ -386,7 +386,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
                 recipe_lists_found |= recipe_list.target_bit;
                 for (recipe_list.recipes_in_prefered_order) |recipe| {
                     for (recipe.dependancies) |dep| {
-                        const dep_bit_shift: Log2BitFlagInt = @intCast(@intFromEnum(dep.target));
+                        const dep_bit_shift: Log2BitFlagInt = @intCast(@backingInt(dep.target));
                         const dep_bit: BitFlagInt = @as(BitFlagInt, 1) << dep_bit_shift;
                         assert_with_reason(recipe_list.target_bit & dep_bit == 0, @src(), "recipe variant `{any}` for target `{s}` references itself in its dependancies", .{ recipe.variant_tag, @tagName(recipe_list.this_target) });
                     }
@@ -398,7 +398,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             while (change_in_resolutions) {
                 change_in_resolutions = false;
                 next_target: for (ALL_TARGETS) |target| {
-                    const target_shift: Log2BitFlagInt = @intCast(@intFromEnum(target));
+                    const target_shift: Log2BitFlagInt = @intCast(@backingInt(target));
                     const target_bit: BitFlagInt = @as(BitFlagInt, 1) << target_shift;
                     var currently_available = available_bits & target_bit != 0;
                     if (comptime !USE_WEIGHT) {
@@ -412,7 +412,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
                         resolve: switch (RecipeResolveBranch.CHECKING) {
                             .CHECKING => {
                                 for (recipe.dependancies) |dep| {
-                                    const dep_bit_shift: Log2BitFlagInt = @intCast(@intFromEnum(dep.target));
+                                    const dep_bit_shift: Log2BitFlagInt = @intCast(@backingInt(dep.target));
                                     const dep_bit: BitFlagInt = @as(BitFlagInt, 1) << dep_bit_shift;
                                     if (available_bits & dep_bit == 0) continue :resolve .NOT_AVAILABLE;
                                 }
@@ -422,7 +422,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
                                 var total_recipe_weight: WeightType = ZERO_RECIPE_WEIGHT;
                                 if (comptime USE_WEIGHT) {
                                     for (recipe.dependancies) |dep| {
-                                        const dep_bit_idx: Log2BitFlagInt = @intCast(@intFromEnum(dep.target));
+                                        const dep_bit_idx: Log2BitFlagInt = @intCast(@backingInt(dep.target));
                                         const current_dep_weight = best_recipe_weights[dep_bit_idx];
                                         total_recipe_weight += dep.weight.eval(target_n) * current_dep_weight;
                                     }
@@ -472,7 +472,7 @@ pub fn RecipeInferenceEngine(comptime EVAL_QUOTA: u32, comptime TargetEnum: type
             }
             if (comptime USE_WEIGHT) {
                 for (user_provided_entities) |target| {
-                    const target_bit_shift: Log2BitFlagInt = @intCast(@intFromEnum(target.target_enum));
+                    const target_bit_shift: Log2BitFlagInt = @intCast(@backingInt(target.target_enum));
                     const target_bit: BitFlagInt = @as(BitFlagInt, 1) << target_bit_shift;
                     switch (resolutions[target_bit_shift]) {
                         .USER_PROVIDED => {},
@@ -628,7 +628,7 @@ test RecipeInferenceEngine {
     if (PRINT_RESULTS) {
         std.debug.print("\n\ntest RecipeInferenceEngine results:\n=====================================\nunder-provided results (not enough funcs to infer all):\n", .{});
         for (results, 0..) |res, r| {
-            const tag: Op = @enumFromInt(@as(Engine.EnumTagInt, @intCast(r)));
+            const tag: Op = @fromBackingInt(@intCast(@as(Engine.EnumTagInt, @intCast(r))));
             switch (res) {
                 .INFERED_BY_RECIPE => |infer| std.debug.print("\t{s}: method is infered by '{s}'\n", .{ @tagName(tag), infer }),
                 .USER_PROVIDED => std.debug.print("\t{s}: method is user provided!\n", .{@tagName(tag)}),
@@ -640,7 +640,7 @@ test RecipeInferenceEngine {
     if (PRINT_RESULTS) {
         std.debug.print("\nby-weight results (select the best function based on user-provided hueristics, possibly overriding user-provided functions):\n", .{});
         for (results, 0..) |res, r| {
-            const tag: Op = @enumFromInt(@as(Engine.EnumTagInt, @intCast(r)));
+            const tag: Op = @fromBackingInt(@intCast(@as(Engine.EnumTagInt, @intCast(r))));
             switch (res) {
                 .INFERED_BY_RECIPE => |infer| std.debug.print("\t{s}: method is infered by '{s}'\n", .{ @tagName(tag), infer }),
                 .USER_PROVIDED => std.debug.print("\t{s}: method is user provided!\n", .{@tagName(tag)}),
@@ -652,7 +652,7 @@ test RecipeInferenceEngine {
     if (PRINT_RESULTS) {
         std.debug.print("\nby-order results (choose the first recipe in the recipe list that is available regardless of weight (only if no user func provided)):\n", .{});
         for (results, 0..) |res, r| {
-            const tag: Op = @enumFromInt(@as(Engine.EnumTagInt, @intCast(r)));
+            const tag: Op = @fromBackingInt(@intCast(@as(Engine.EnumTagInt, @intCast(r))));
             switch (res) {
                 .INFERED_BY_RECIPE => |infer| std.debug.print("\t{s}: method is infered by '{s}'\n", .{ @tagName(tag), infer }),
                 .USER_PROVIDED => std.debug.print("\t{s}: method is user provided!\n", .{@tagName(tag)}),

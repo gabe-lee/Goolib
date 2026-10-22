@@ -790,7 +790,7 @@
 //                 .NO_CUSTOM_ROUTINE => {
 //                     if (_STRUCT) |STRUCT| {
 //                         inline for (STRUCT.fields, 0..) |field, f| {
-//                             const next_field: WithNextField = if (f + 1 == STRUCT.fields.len) WithNextField.this_is_last_field() else WithNextField.next_field_is(STRUCT.fields[f + 1].name);
+//                             const next_field: WithNextField = if (f + 1 == STRUCT.field_names.len) WithNextField.this_is_last_field() else WithNextField.next_field_is(STRUCT.fields[f + 1].name);
 //                             builder.add_field(field.name, next_field, .no_len_needed(), .{});
 //                         }
 //                     } else {
@@ -1077,7 +1077,7 @@
 //             },
 //             .UNION => |UNION| {
 //                 assert_with_reason(UNION.layout == .@"extern", @src(), "only packed unions can be re-typed as numeric types, got type `{s}`", .{@typeName(IN_TYPE)});
-//                 const INT = std.meta.Int(.unsigned, @bitSizeOf(IN_TYPE));
+//                 const INT = @Int(.unsigned, @bitSizeOf(IN_TYPE));
 //                 assert_with_reason(@sizeOf(INT) == @sizeOf(IN_TYPE), @src(), "the size of the input union {d} did not match the size of the infered integer used to back it {d}, this packed union is not eligible for direct numeric inference, but may still be used in a packed struct", .{ @sizeOf(IN_TYPE), @sizeOf(INT) });
 //                 return INT;
 //             },
@@ -2013,7 +2013,7 @@
 //     const SEPARATED_STRUCT_FIELDS_TYPE = struct {
 //         NAME: [_FINAL_NUM_ALLOCS][]const u8 = undefined,
 //         TYPE: [_FINAL_NUM_ALLOCS]type = @splat(Allocator),
-//         ATTR: [_FINAL_NUM_ALLOCS]std.builtin.Type.StructField.Attributes = @splat(std.builtin.Type.StructField.Attributes{
+//         ATTR: [_FINAL_NUM_ALLOCS]std.builtin.Type.Struct.FieldAttributes = @splat(std.builtin.Type.Struct.FieldAttributes{
 //             .@"align" = @alignOf(Allocator),
 //             .@"comptime" = false,
 //             .default_value_ptr = @ptrCast(&DummyAllocator.allocator_panic_free_noop),

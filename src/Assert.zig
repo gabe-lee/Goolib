@@ -34,8 +34,8 @@ const ANSI = Root.ANSI;
 const Common = Root.CommonTypes;
 const MathX = Root.Math;
 
-pub const SHOULD_ASSERT = build.mode == .Debug or build.mode == .ReleaseSafe;
-pub const IS_DEBUG = build.mode == .Debug;
+pub const SHOULD_ASSERT = build.mode == .debug or build.mode == .safe;
+pub const IS_DEBUG = build.mode == .debug;
 
 pub fn should_assert() bool {
     return @inComptime() or SHOULD_ASSERT;
@@ -87,7 +87,7 @@ pub inline fn comptime_info_header(comptime in_comptime: bool, comptime src_loc:
 
 pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     const in_comptime = @inComptime();
-    if (in_comptime or build.mode == .Debug or build.mode == .ReleaseSafe) {
+    if (in_comptime or build.mode == .debug or build.mode == .safe) {
         if (!condition) {
             if (in_comptime) {
                 @compileError(std.fmt.comptimePrint(err_header(in_comptime, src_loc, reason_fmt), reason_args));
@@ -123,7 +123,7 @@ pub inline fn assert_with_reason_always_panic(condition: bool, comptime src_loc:
 
 pub inline fn warn_with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
     const in_comptime = @inComptime();
-    if (in_comptime or build.mode == .Debug or build.mode == .ReleaseSafe) {
+    if (in_comptime or build.mode == .debug or build.mode == .safe) {
         if (!condition) {
             if (in_comptime) {
                 @compileLog(std.fmt.comptimePrint(comptime_warn_header(in_comptime, src_loc, reason_fmt), reason_args));
@@ -144,7 +144,7 @@ pub inline fn warn_with_reason_always(condition: bool, comptime src_loc: ?Source
 }
 
 pub inline fn warn_unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
-    if (@inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe) {
+    if (@inComptime() or build.mode == .debug or build.mode == .safe) {
         if (@inComptime()) {
             @compileLog(std.fmt.comptimePrint(comptime_warn_header(true, src_loc, reason_fmt), reason_args));
         } else {
@@ -287,7 +287,7 @@ pub fn AssertHandler(comptime MODE: Common.AssertBehavior) type {
             const Self = @This();
 
             pub inline fn _should_assert() bool {
-                return @inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe;
+                return @inComptime() or build.mode == .debug or build.mode == .safe;
             }
 
             pub inline fn _with_reason(cond: bool, comptime src: ?SourceLocation, reason_fmt: []const u8, args: anytype) void {
@@ -361,21 +361,21 @@ pub fn WarnHandler(comptime MODE: Common.WarnBehavior) type {
             const Self = @This();
 
             pub inline fn _should_warn() bool {
-                return @inComptime() or build.mode == .Debug;
+                return @inComptime() or build.mode == .debug;
             }
 
             pub inline fn _with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
-                if (@inComptime() or build.mode == .Debug) {
+                if (@inComptime() or build.mode == .debug) {
                     warn_with_reason(condition, src_loc, reason_fmt, reason_args);
                 }
             }
             pub inline fn _unconditional(comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {
-                if (@inComptime() or build.mode == .Debug) {
+                if (@inComptime() or build.mode == .debug) {
                     warn_unconditional(src_loc, reason_fmt, reason_args);
                 }
             }
             pub inline fn _exact_size_mismatch(a: anytype, b: anytype, comptime src_loc: ?SourceLocation) void {
-                if (@inComptime() or build.mode == .Debug) {
+                if (@inComptime() or build.mode == .debug) {
                     warn_with_reason(MathX.upgrade_equal_to(a, b), src_loc, "left input 'a' ({d}) does not match right input 'b' ({d})", .{ a, b });
                 }
             }
@@ -384,7 +384,7 @@ pub fn WarnHandler(comptime MODE: Common.WarnBehavior) type {
             const Self = @This();
 
             pub inline fn _should_warn() bool {
-                return @inComptime() or build.mode == .Debug or build.mode == .ReleaseSafe;
+                return @inComptime() or build.mode == .debug or build.mode == .safe;
             }
 
             pub inline fn _with_reason(condition: bool, comptime src_loc: ?SourceLocation, reason_fmt: []const u8, reason_args: anytype) void {

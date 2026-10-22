@@ -1274,7 +1274,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             self.stack.len = 0;
             var dummy_idx: IDX = 0;
             _, const root_elem_idx = try self.append_new_elem_from_requester_and_parent_and_prev_siblings(root_element, NULL_IDX, &dummy_idx, &dummy_idx);
-            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), root_elem_idx, self, void{}, .COMPTIME_FN_PTR, add_children_to_elems_list, void{}, .TRACK_MAX_STACK_LEN, &self.real_max_stack);
+            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), root_elem_idx, self, {}, .COMPTIME_FN_PTR, add_children_to_elems_list, {}, .TRACK_MAX_STACK_LEN, &self.real_max_stack);
             self.real_max_elems = @max(self.real_max_elems, self.elems.len);
         }
 
@@ -1283,22 +1283,22 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             defer self.auto_debug(@src());
             switch (comptime DRIVING_AXIS) {
                 .X => {
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, .all_child_paths(), 0, self, Axis.X, .COMPTIME_FN_PTR, recheck_secondary_size_with_with_known_primary_size, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, .all_child_paths(), 0, self, Axis.X, .COMPTIME_FN_PTR, recheck_secondary_size_with_with_known_primary_size, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
                 },
                 .Y => {
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, .all_child_paths(), 0, self, Axis.Y, .COMPTIME_FN_PTR, recheck_secondary_size_with_with_known_primary_size, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
-                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.Y, .PRIMARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .ANY_ORDER_NO_IDX_GAPS_ROOT_IDX_TO_LAST_IDX, .all_child_paths(), 0, self, Axis.Y, .COMPTIME_FN_PTR, recheck_secondary_size_with_with_known_primary_size, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .CHILDREN_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, propagate_min_size_to_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
+                    self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, AxisStage.new(.X, .SECONDARY_STAGE), .COMPTIME_FN_PTR, fit_and_expand_children_to_fill_parent, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
                 },
             }
             self.finalize_root_aabbs(root_clip_aabb);
-            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, void{}, .COMPTIME_FN_PTR, position_and_align_child_elements, void{}, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), .PARENTS_FIRST, .all_child_paths(), 0, self, {}, .COMPTIME_FN_PTR, position_and_align_child_elements, {}, .MAX_STACK_LEN_NOT_IMPORTANT, {});
         }
 
         fn propagate_min_size_to_parent(elems: Elems, idx: IDX, self: *LayoutManager, comptime CT: AxisStage) anyerror!Elems {
@@ -1420,7 +1420,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             defer self.auto_debug(@src());
             parent.num_axis_lines = 1;
             parent.first_axis_line.min_size.set(CT.AXIS, 0);
-            self.for_each_contained_child(parent, void{}, CT, add_child_to_first_axis_line_max_of_min_size);
+            self.for_each_contained_child(parent, {}, CT, add_child_to_first_axis_line_max_of_min_size);
             // self.distribute_secondary_extra_space_to_all_axis_lines(parent, CT.AXIS);
         }
 
@@ -1440,12 +1440,12 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         }
 
         fn set_max_of_min_size_for_line(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, _: void, comptime AXIS: Axis) void {
-            self.for_each_child_on_axis_line(parent, line_idx, line, void{}, AXIS, update_line_min_size_with_child_max_size);
+            self.for_each_child_on_axis_line(parent, line_idx, line, {}, AXIS, update_line_min_size_with_child_max_size);
         }
         fn add_all_children_to_first_axis_line_max_of_min_size_wrapped(self: *LayoutManager, parent: *LayoutElement, comptime CT: AxisStage) void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
-            self.for_each_axis_line(parent, void{}, CT.AXIS, set_max_of_min_size_for_line);
+            self.for_each_axis_line(parent, {}, CT.AXIS, set_max_of_min_size_for_line);
         }
 
         fn distribute_primary_extra_space_to_axis_line_members(self: *LayoutManager, axis_line: *AxisLine, space: T, comptime AXIS: Axis) void {
@@ -1511,7 +1511,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
 
         fn collect_total_minimum_axis_line_secondary_size_and_grow_children_to_secondary_size(self: *LayoutManager, parent: *LayoutElement, line_idx: IDX, line: *AxisLine, ctx: AxisLineTotalSec, comptime AXIS: Axis) void {
             ctx.total_axis_lines_size.* += line.min_size.get(AXIS) + ctx.gap;
-            self.for_each_child_on_axis_line(parent, line_idx, line, void{}, AXIS, grow_growable_child_to_axis_line_secondary_min_size);
+            self.for_each_child_on_axis_line(parent, line_idx, line, {}, AXIS, grow_growable_child_to_axis_line_secondary_min_size);
         }
 
         fn grow_growable_child_to_axis_line_secondary_min_size(_: *LayoutManager, _: *LayoutElement, _: IDX, line: *AxisLine, _: IDX, child: *LayoutElement, _: void, comptime AXIS: Axis) void {
@@ -2069,7 +2069,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
                 }
             }
             if (parent.first_floating_child != NULL_IDX) {
-                self.for_each_floating_child(parent, void{}, void{}, finalize_floating_child_aabb);
+                self.for_each_floating_child(parent, {}, {}, finalize_floating_child_aabb);
             }
             return self.elems;
         }
@@ -2077,7 +2077,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
         pub fn do_action_on_all_elements(self: *LayoutManager, comptime ORDER: Utils.Traverser.Order, context_rt: anytype, comptime CONTEXT_CT: anytype, comptime ACTION_TYPE: Utils.Traverser.FuncType, action_rt: Traverse.RTFN(ACTION_TYPE, @TypeOf(context_rt), @TypeOf(CONTEXT_CT)), comptime ACTION_CT: Traverse.CTFN(ACTION_TYPE, @TypeOf(context_rt), @TypeOf(CONTEXT_CT))) anyerror!void {
             self.auto_debug(@src());
             defer self.auto_debug(@src());
-            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), ORDER, .all_child_paths(), 0, context_rt, CONTEXT_CT, ACTION_TYPE, ACTION_CT, action_rt, .MAX_STACK_LEN_NOT_IMPORTANT, void{});
+            self.elems, self.stack = try Traverse.do_action_on_all_nodes(self.elems, self.stack, self.stack_reallocator(), ORDER, .all_child_paths(), 0, context_rt, CONTEXT_CT, ACTION_TYPE, ACTION_CT, action_rt, .MAX_STACK_LEN_NOT_IMPORTANT, {});
         }
 
         pub fn free_mem(self: *LayoutManager) void {

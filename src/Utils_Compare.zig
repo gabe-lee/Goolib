@@ -136,8 +136,8 @@ pub fn shallow_equals(a: anytype, b: anytype) bool {
             assert_with_reason(T_SAME, @src(), "cannot compare two structs with different types, got `{s}` and `{s}`", .{ @typeName(T_A), @typeName(T_B) });
             if (STRUCT.layout == .@"packed") return a == b;
 
-            inline for (STRUCT.fields) |field_info| {
-                if (!shallow_equals(@field(a, field_info.name), @field(b, field_info.name))) return false;
+            inline for (STRUCT.field_names) |field_info_name| {
+                if (!shallow_equals(@field(a, field_info_name), @field(b, field_info_name))) return false;
             }
             return true;
         },
@@ -251,8 +251,8 @@ pub fn has_object_equals(comptime T: type) bool {
             }
             if (info.layout == .@"packed") return true;
 
-            inline for (info.fields) |field_info| {
-                if (!has_object_equals(@FieldType(T, field_info.name))) return false;
+            inline for (info.field_names) |field_info_name| {
+                if (!has_object_equals(@FieldType(T, field_info_name))) return false;
             }
             return true;
         },
@@ -264,8 +264,8 @@ pub fn has_object_equals(comptime T: type) bool {
                 return true;
             }
             if (info.tag_type == null) return false;
-            inline for (info.fields) |field_info| {
-                if (!has_object_equals(@FieldType(T, field_info.name))) return false;
+            inline for (info.field_names) |field_info_name| {
+                if (!has_object_equals(@FieldType(T, field_info_name))) return false;
             }
         },
         .array => |info| {

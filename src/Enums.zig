@@ -109,9 +109,9 @@
 
 //         /// Initializes the set using a struct of bools
 //         pub fn new_from_bools(init_values: std.enums.EnumFieldStruct(E, bool, false)) Self {
-//             @setEvalBranchQuota(2 * @typeInfo(E).@"enum".fields.len);
+//             @setEvalBranchQuota(2 * @typeInfo(E).@"enum".field_names.len);
 //             var result: Self = .{};
-//             if (@typeInfo(E).@"enum".is_exhaustive) {
+//             if (@typeInfo(E).@"enum".mode == .exhaustive) {
 //                 inline for (0..Self.len) |i| {
 //                     const key = comptime Indexer.keyForIndex(i);
 //                     const tag = @tagName(key);

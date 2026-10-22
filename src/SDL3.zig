@@ -79,14 +79,15 @@ comptime {
 /// 3. This notice may not be removed or altered from any source distribution.
 ///
 /// ### SDL3 Zig Bindings license: https://github.com/castholm/SDL/blob/main/LICENSE.txt
-pub const C = @cImport({
-    @cDefine("SDL_DISABLE_OLD_NAMES", {});
-    @cInclude("SDL3/SDL.h");
-    @cInclude("SDL3/SDL_revision.h");
-    if (CONFIG.SDL_USER_HANDLES_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
-    if (CONFIG.SDL_USER_PROVIDES_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
-    @cInclude("SDL3/SDL_main.h");
-});
+// pub const C = @cImport({
+//     @cDefine("SDL_DISABLE_OLD_NAMES", {});
+//     @cInclude("SDL3/SDL.h");
+//     @cInclude("SDL3/SDL_revision.h");
+//     if (CONFIG.SDL_USER_HANDLES_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
+//     if (CONFIG.SDL_USER_PROVIDES_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
+//     @cInclude("SDL3/SDL_main.h");
+// });
+pub const C = @import("sdl3_c");
 
 fn c_non_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
     return struct {
@@ -133,10 +134,10 @@ fn c_enum_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
     assert_with_reason(Types.type_is_int(C_TYPE), @src(), "C_TYPE not an integer", .{});
     return struct {
         pub fn to_c(self: ZIG_TYPE) C_TYPE {
-            return @intFromEnum(self);
+            return @backingInt(self);
         }
         pub fn from_c(c_integer: C_TYPE) ZIG_TYPE {
-            return @enumFromInt(c_integer);
+            return @fromBackingInt(@intCast(c_integer));
         }
     };
 }
@@ -146,16 +147,16 @@ fn c_enum_conversions_compat(comptime ZIG_TYPE: type, comptime C_TYPE_INTER: typ
     assert_with_reason(Types.type_is_int(C_TYPE_FINAL), @src(), "C_TYPE not an integer", .{});
     return struct {
         pub fn to_c_inter(self: ZIG_TYPE) C_TYPE_INTER {
-            return @intFromEnum(self);
+            return @backingInt(self);
         }
         pub fn from_c_inter(c_integer: C_TYPE_INTER) ZIG_TYPE {
-            return @enumFromInt(c_integer);
+            return @fromBackingInt(@intCast(c_integer));
         }
         pub fn to_c(self: ZIG_TYPE) C_TYPE_FINAL {
-            return @intCast(@intFromEnum(self));
+            return @intCast(@backingInt(self));
         }
         pub fn from_c(c_integer: C_TYPE_FINAL) ZIG_TYPE {
-            return @enumFromInt(@as(C_TYPE_INTER, @intCast(c_integer)));
+            return @fromBackingInt(@intCast(@as(C_TYPE_INTER, @intCast(c_integer))));
         }
     };
 }
@@ -197,11 +198,11 @@ inline fn positive_or_invalid_err(result_int: anytype) Error!@TypeOf(result_int)
 inline fn to_enum_or_invalid_err(comptime E: type, result_int: anytype) Error!E {
     const E_INFO = @typeInfo(E).@"enum";
     const E_INT = E_INFO.tag_type;
-    if (build.mode == .Debug or build.mode == .ReleaseSafe) {
-        const enum_val: E = std.meta.intToEnum(E, result_int) catch return Error.SDL_invalid_value;
+    if (build.mode == .debug or build.mode == .safe) {
+        const enum_val: E = @as(E, @fromBackingInt(@intCast(result_int))) catch return Error.SDL_invalid_value;
         return enum_val;
     } else {
-        return @as(E, @enumFromInt(@as(E_INT, @intCast(result_int))));
+        return @as(E, @fromBackingInt(@intCast(@as(E_INT, @intCast(result_int)))));
     }
 }
 inline fn positive_or_null_err(result_int: anytype) Error!@TypeOf(result_int) {
@@ -616,7 +617,7 @@ pub const IOStream = opaque {
         return PropertiesID{ .id = try nonzero_or_null_err(C.SDL_GetIOProperties(self.to_c())) };
     }
     pub fn get_status(self: *IOStream) IOStatus {
-        return @enumFromInt(C.SDL_GetIOStatus(self.to_c()));
+        return @fromBackingInt(@intCast(C.SDL_GetIOStatus(self.to_c())));
     }
     pub fn get_size(self: *IOStream) i64 {
         return C.SDL_GetIOSize(self.to_c());
@@ -804,7 +805,7 @@ pub const IOMode = enum(u8) {
     BinaryAppendReadWrite = 11,
 
     inline fn to_c(self: IOMode) [*:0]const u8 {
-        return STR[@intFromEnum(self)];
+        return STR[@backingInt(self)];
     }
 
     const STR = [12][*:0]const u8{
@@ -1146,7 +1147,7 @@ pub const InitFlags = Flags(enum(u32) {
     EVENTS = C.SDL_INIT_EVENTS,
     SENSOR = C.SDL_INIT_SENSOR,
     CAMERA = C.SDL_INIT_CAMERA,
-}, enum(u32) {});
+}, enum(u32) { NONE = 0 });
 
 pub const UserFolder = enum(C.SDL_Folder) {
     HOME = C.SDL_FOLDER_HOME,
@@ -1181,7 +1182,7 @@ pub const FileDialogCallback = fn (userdata: ?*anyopaque, selected_files: ?[*:nu
 
 pub const GlobFlags = Flags(enum(u32) {
     CASE_INSENSITIVE = C.SDL_GLOB_CASEINSENSITIVE,
-}, null);
+}, enum(u32) { NONE = 0 });
 
 pub const Filesystem = struct {
     //TODO
@@ -2500,10 +2501,10 @@ pub const TextureAccessMode = enum(c_uint) {
     TARGET = C.SDL_TEXTUREACCESS_TARGET,
 
     inline fn to_c(self: TextureAccessMode) c_uint {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
     inline fn from_c(val: c_uint) TextureAccessMode {
-        return @enumFromInt(val);
+        return @fromBackingInt(@intCast(val));
     }
 };
 
@@ -2527,10 +2528,10 @@ pub const BlendOperation = enum(c_uint) {
     MAXIMUM = C.SDL_BLENDOPERATION_MAXIMUM,
 
     inline fn to_c(self: BlendOperation) c_uint {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
     inline fn from_c(val: c_uint) BlendOperation {
-        return @enumFromInt(val);
+        return @fromBackingInt(@intCast(val));
     }
 };
 pub const SimpleTexture = extern struct {
@@ -2897,10 +2898,10 @@ pub const DisplayOrientation = enum(c_int) {
     PORTRAIT_FLIPPED = C.SDL_ORIENTATION_PORTRAIT_FLIPPED,
 
     inline fn to_c(self: DisplayOrientation) c_int {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
     inline fn from_c(val: c_int) DisplayOrientation {
-        return @enumFromInt(val);
+        return @fromBackingInt(@intCast(val));
     }
 };
 
@@ -3306,7 +3307,7 @@ pub const Window = opaque {
         return ptr_cast_or_null_err(*WindowICCProfile, C.SDL_GetWindowICCProfile(self.to_c_ptr(), &size));
     }
     pub fn get_pixel_format(self: *Window) PixelFormat {
-        return @enumFromInt(C.SDL_GetWindowPixelFormat(self.to_c_ptr()));
+        return @fromBackingInt(@intCast(C.SDL_GetWindowPixelFormat(self.to_c_ptr())));
     }
     pub fn get_all_windows() Error!WindowsList {
         var len: c_int = 0;
@@ -3710,7 +3711,7 @@ pub const VSync = enum(c_int) {
     _,
 
     pub fn every_n_frames(n: c_int) VSync {
-        return @enumFromInt(n);
+        return @fromBackingInt(@intCast(n));
     }
 
     pub const to_c = c_enum_conversions(VSync, c_int).to_c;
@@ -4006,10 +4007,10 @@ pub const ScaleMode = enum(c_int) {
     LINEAR = C.SDL_SCALEMODE_LINEAR,
 
     inline fn to_c(self: ScaleMode) c_uint {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
     inline fn from_c(val: c_uint) ScaleMode {
-        return @enumFromInt(val);
+        return @fromBackingInt(@intCast(val));
     }
 };
 
@@ -4465,7 +4466,7 @@ pub const GamepadButton = enum(u8) {
     pub const COUNT: u8 = C.SDL_GAMEPAD_BUTTON_COUNT;
 
     pub inline fn from_int(val: anytype) GamepadButton {
-        return @enumFromInt(@as(u8, @intCast(val)));
+        return @fromBackingInt(@intCast(@as(u8, @intCast(val))));
     }
 
     pub const to_c = c_enum_conversions(GamepadButton, u8).to_c;
@@ -5976,10 +5977,10 @@ pub const KeyButtonState = enum(u1) {
     }
 
     pub inline fn from_bool(val: bool) KeyButtonState {
-        return @enumFromInt(@intFromBool(val));
+        return @fromBackingInt(@intCast(@intFromBool(val)));
     }
     pub inline fn to_bool(self: KeyButtonState) bool {
-        return @bitCast(@intFromEnum(self));
+        return @bitCast(@backingInt(self));
     }
 };
 
@@ -6402,12 +6403,12 @@ pub const EventType = enum(C.SDL_EventType) {
 
     pub fn user_event_int(int: u32) EventType {
         assert(int >= USER_BEGIN and int <= USER_END);
-        return @enumFromInt(int);
+        return @fromBackingInt(@intCast(int));
     }
     pub fn user_event(comptime E: type, val: E) EventType {
-        const int = @intFromEnum(val);
+        const int = @backingInt(val);
         assert(int >= USER_BEGIN and int <= USER_END);
-        return @enumFromInt(@as(u32, @intCast(int)));
+        return @fromBackingInt(@intCast(@as(u32, @intCast(int))));
     }
 
     pub const to_c = c_enum_conversions(EventType, C.SDL_EventType).to_c;
@@ -8130,7 +8131,7 @@ pub const GPU_VertexElementFormat = enum(c_uint) {
         }
         if (Types.type_is_struct(zig_type)) {
             if (Types.type_is_struct_with_all_fields_same_type_any(zig_type)) {
-                const ARRAY_LEN = INFO.@"struct".fields.len;
+                const ARRAY_LEN = INFO.@"struct".field_names.len;
                 const ARRAY_CHILD = INFO.@"struct".fields[0].type;
                 const ARRAY = [ARRAY_LEN]ARRAY_CHILD;
                 return best_fit_from_zig_type(ARRAY);

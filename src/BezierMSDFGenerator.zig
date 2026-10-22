@@ -105,27 +105,27 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
             pub const EdgeColorFlags = Flags.Flags(EdgeColor, enum(u8) {});
             pub fn as_flags(self: EdgeColor) EdgeColorFlags {
-                return EdgeColorFlags{ .raw = @intFromEnum(self) };
+                return EdgeColorFlags{ .raw = @backingInt(self) };
             }
             pub fn from_flags(flags: EdgeColorFlags) EdgeColor {
-                return @enumFromInt(flags.raw);
+                return @fromBackingInt(@intCast(flags.raw));
             }
 
             pub fn has_all_channels(self: EdgeColor, channels: EdgeColor) bool {
-                return @intFromEnum(self) & @intFromEnum(channels) == @intFromEnum(channels);
+                return @backingInt(self) & @backingInt(channels) == @backingInt(channels);
             }
             pub fn has_channel(self: EdgeColor, channels: EdgeColor) bool {
-                return @intFromEnum(self) & @intFromEnum(channels) != 0;
+                return @backingInt(self) & @backingInt(channels) != 0;
             }
             pub fn has_no_channels(self: EdgeColor, channels: EdgeColor) bool {
-                return @intFromEnum(self) & @intFromEnum(channels) == 0;
+                return @backingInt(self) & @backingInt(channels) == 0;
             }
 
             pub fn raw(self: EdgeColor) u8 {
-                return @intFromEnum(self);
+                return @backingInt(self);
             }
             pub fn from_raw(val: u8) EdgeColor {
-                return @enumFromInt(val);
+                return @fromBackingInt(@intCast(val));
             }
             pub fn bit_and(self: EdgeColor, other: EdgeColor) EdgeColor {
                 return .from_raw(self.raw() & other.raw());
@@ -357,7 +357,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
             pub fn edge_type(self: EdgeSegment) EdgeType {
-                return @enumFromInt(@intFromEnum(self.points));
+                return @fromBackingInt(@intCast(@backingInt(self.points)));
             }
             pub fn tangent_at_interp(self: EdgeSegment, percent: Float) Vector {
                 switch (self.points) {

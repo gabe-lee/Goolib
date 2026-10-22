@@ -62,10 +62,10 @@ pub const BitsPerPixel = enum(u16) {
     BPP_32 = 32,
 
     pub fn bytes_per_pixel(self: BitsPerPixel) u32 {
-        return @as(u32, @intCast(@intFromEnum(self))) >> 3;
+        return @as(u32, @intCast(@backingInt(self))) >> 3;
     }
     pub fn raw(self: BitsPerPixel) u16 {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 
     pub fn max_colors_in_palette(self: BitsPerPixel) u32 {
@@ -109,13 +109,13 @@ pub const Compression = union(CompressionMode) {
     BIT_FIELDS: BitfieldMasks,
 
     pub fn none() Compression {
-        return Compression{ .NONE = void{} };
+        return Compression{ .NONE = {} };
     }
     pub fn run_length_4_bit() Compression {
-        return Compression{ .RUN_LENGTH_4_BIT = void{} };
+        return Compression{ .RUN_LENGTH_4_BIT = {} };
     }
     pub fn run_length_8_bit() Compression {
-        return Compression{ .RUN_LENGTH_8_BIT = void{} };
+        return Compression{ .RUN_LENGTH_8_BIT = {} };
     }
     pub fn bit_fields(masks: BitfieldMasks) Compression {
         return Compression{ .BITFIELDS = masks };
@@ -166,7 +166,7 @@ pub const BitmapSaveSettings = struct {
     bits_per_pixel: BitsPerPixel = .BPP_32,
     color_planes: u16 = 1,
     color_space: ColorSpace = .SRGB,
-    compression: Compression = Compression{ .NONE = void{} },
+    compression: Compression = Compression{ .NONE = {} },
     horizontal_resolution: Resulution = Resulution.new_dpi(72),
     vertical_resolution: Resulution = Resulution.new_dpi(72),
     colors_in_palette: u32 = 0,
@@ -216,13 +216,13 @@ pub fn DataConversion(comptime DATA_IN: type) type {
         CONVERT_USING_FUNC: *const fn (data: DATA_IN) BGRA,
 
         pub fn no_conversion_needed_alpha() Self {
-            return Self{ .NO_CONVERSION_NEEDED_ALPHA = void{} };
+            return Self{ .NO_CONVERSION_NEEDED_ALPHA = {} };
         }
         pub fn no_conversion_needed_bgr() Self {
-            return Self{ .NO_CONVERSION_NEEDED_BGR = void{} };
+            return Self{ .NO_CONVERSION_NEEDED_BGR = {} };
         }
         pub fn no_conversion_needed_bgra() Self {
-            return Self{ .NO_CONVERSION_NEEDED_BGRA = void{} };
+            return Self{ .NO_CONVERSION_NEEDED_BGRA = {} };
         }
         pub fn convert_using_func(func: *const fn (data: DATA_IN) BGRA) Self {
             return Self{ .CONVERT_USING_FUNC = func };
@@ -371,7 +371,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     try writer.writeInt(u32, data_grid.height, .little); //0x16
     try writer.writeInt(u16, settings.color_planes, .little); //0x1A
     try writer.writeInt(u16, settings.bits_per_pixel.raw(), .little); //0x1C
-    try writer.writeInt(u32, @intFromEnum(settings.compression), .little); //0x1E
+    try writer.writeInt(u32, @backingInt(settings.compression), .little); //0x1E
     try writer.writeInt(u32, total_pixel_data_length, .little); //0x22
     try writer.writeInt(u32, settings.horizontal_resolution.raw, .little); //0x26
     try writer.writeInt(u32, settings.vertical_resolution.raw, .little); //0x2A
@@ -401,7 +401,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
             try writer.writeInt(u32, 0, .little); //0x42
         },
     }
-    try writer.writeInt(u32, @intFromEnum(settings.color_space), .little); //0x44
+    try writer.writeInt(u32, @backingInt(settings.color_space), .little); //0x44
     inline for (0..9) |_| { // 0x46 ... 0x6A
         // Color space endpoints
         //TODO support these
@@ -410,7 +410,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     try writer.writeInt(u32, 0, .little); // 0x6A // gamma red
     try writer.writeInt(u32, 0, .little); // 0x6E // gamma rgreen
     try writer.writeInt(u32, 0, .little); // 0x72 // gamma blue
-    try writer.writeInt(u32, @intFromEnum(settings.intent), .little); // 0x76
+    try writer.writeInt(u32, @backingInt(settings.intent), .little); // 0x76
     try writer.writeInt(u32, 0, .little); // 0x7A // icc profile data offset from V5 header
     try writer.writeInt(u32, 0, .little); // 0x7E // icc profile size
     try writer.writeInt(u32, 0, .little); // 0x82 // reserved
