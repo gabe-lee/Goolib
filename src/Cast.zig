@@ -440,11 +440,11 @@ pub fn ByteSliceSameProps(comptime POINTER_OR_SLICE: type) type {
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
-        .@"addrspace" = PTR.address_space,
+        .@"addrspace" = PTR.attrs.@"addrspace",
         .@"align" = PTR.attrs.@"align" orelse @alignOf(PTR.child),
-        .@"allowzero" = PTR.is_allowzero,
-        .@"const" = PTR.is_const,
-        .@"volatile" = PTR.is_volatile,
+        .@"allowzero" = PTR.attrs.@"allowzero",
+        .@"const" = PTR.attrs.@"const",
+        .@"volatile" = PTR.attrs.@"volatile",
     }, u8, if (PTR.child == u8) PTR.sentinel() else null);
 }
 pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
@@ -452,11 +452,11 @@ pub fn ByteSliceSamePropsAlign1(comptime POINTER_OR_SLICE: type) type {
     assert_with_reason(INFO == .pointer, @src(), "type of `POINTER_OR_SLICE` must be a pointer type, got type `{s}`", .{@typeName(POINTER_OR_SLICE)});
     const PTR = INFO.pointer;
     return @Pointer(.slice, .{
-        .@"addrspace" = PTR.address_space,
+        .@"addrspace" = PTR.attrs.@"addrspace",
         .@"align" = 1,
-        .@"allowzero" = PTR.is_allowzero,
-        .@"const" = PTR.is_const,
-        .@"volatile" = PTR.is_volatile,
+        .@"allowzero" = PTR.attrs.@"allowzero",
+        .@"const" = PTR.attrs.@"const",
+        .@"volatile" = PTR.attrs.@"volatile",
     }, u8, if (PTR.child == u8) PTR.sentinel() else null);
 }
 
@@ -556,11 +556,11 @@ pub fn ChangePtrElemSameAttrs(
 ) type {
     const info = @typeInfo(source).pointer;
     return @Pointer(size, .{
-        .@"addrspace" = info.address_space,
+        .@"addrspace" = info.attrs.@"addrspace",
         .@"align" = info.attrs.@"align",
-        .@"allowzero" = info.is_allowzero,
-        .@"const" = info.is_const,
-        .@"volatile" = info.is_volatile,
+        .@"allowzero" = info.attrs.@"allowzero",
+        .@"const" = info.attrs.@"const",
+        .@"volatile" = info.attrs.@"volatile",
     }, child, null);
 }
 pub fn ChangePtrElemSameAttrsDiffAlign(
@@ -571,11 +571,11 @@ pub fn ChangePtrElemSameAttrsDiffAlign(
 ) type {
     const info = @typeInfo(source).pointer;
     return @Pointer(size, .{
-        .@"addrspace" = info.address_space,
+        .@"addrspace" = info.attrs.@"addrspace",
         .@"align" = alignment,
-        .@"allowzero" = info.is_allowzero,
-        .@"const" = info.is_const,
-        .@"volatile" = info.is_volatile,
+        .@"allowzero" = info.attrs.@"allowzero",
+        .@"const" = info.attrs.@"const",
+        .@"volatile" = info.attrs.@"volatile",
     }, child, null);
 }
 

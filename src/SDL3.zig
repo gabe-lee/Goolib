@@ -2493,7 +2493,7 @@ pub const SurfaceFlags = Flags(enum(C.SDL_SurfaceFlags) {
     LOCK_NEEDED = C.SDL_SURFACE_LOCK_NEEDED,
     LOCKED = C.SDL_SURFACE_LOCKED,
     SIMD_ALIGNED = C.SDL_SURFACE_SIMD_ALIGNED,
-}, enum(C.SDL_SurfaceFlags) {});
+}, enum(C.SDL_SurfaceFlags) { NONE });
 
 pub const TextureAccessMode = enum(c_uint) {
     STATIC = C.SDL_TEXTUREACCESS_STATIC,
@@ -4957,7 +4957,7 @@ pub const MouseButtonFlags = Flags(enum(u32) {
     SIDE_1 = C.SDL_BUTTON_X1MASK,
     SIDE_2 = C.SDL_BUTTON_X2MASK,
     _,
-}, enum(u32) {});
+}, enum(u32) { NONE });
 
 pub const MouseWheelEvent = extern struct {
     type: EventType = .NONE,
@@ -6215,7 +6215,7 @@ pub const PenInputFlags = Flags(enum(u32) {
     BUTTON_5 = C.SDL_PEN_INPUT_BUTTON_5,
     ERASER_TIP = C.SDL_PEN_INPUT_ERASER_TIP,
     _,
-}, enum(u32) {});
+}, enum(u32) { NONE });
 
 pub const Mouse = struct {
     //TODO

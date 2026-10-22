@@ -917,7 +917,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         hit_brick,
         win,
         lose,
-    }) = .initEmpty();
+    }) = .empty;
 
     // Update the game state.
     while (app.timekeeper.consume()) {

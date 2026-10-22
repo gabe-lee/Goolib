@@ -85,7 +85,7 @@ pub fn DEBUG_VAR_IF(comptime COND: bool, value: anytype) if (Assert.IS_DEBUG and
 }
 
 pub fn meta_ptr_align(comptime ptr: builtin.Type.Pointer) usize {
-    return ptr.alignment orelse @alignOf(ptr.child);
+    return ptr.attrs.@"align" orelse @alignOf(ptr.child);
 }
 
 pub inline fn inline_swap(comptime T: type, a: *T, b: *T, temp: *T) void {

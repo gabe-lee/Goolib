@@ -52,7 +52,7 @@ pub const FENCE_NAMES = enum(u8) {
 pub const INDEX_BUFFER_NAMES = enum(u8) {
     VERT_INDEXES,
 };
-pub const INDIRECT_BUFFER_NAMES = enum(u8) {};
+pub const INDIRECT_BUFFER_NAMES = enum(noreturn) {};
 pub const UPLOAD_BUFFER_NAMES = enum(u8) {
     MAIN_UPLOAD_BUFFER,
 };

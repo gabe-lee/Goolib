@@ -2201,7 +2201,7 @@ pub fn GraphicsController(
                 return SDL3.GPU_ColorTargetInfo{
                     .texture = try self.target.get_texture(controller),
                     .mip_level = self.mip_level,
-                    .clear_color = @bitCast(self.clear_color),
+                    .clear_color = self.clear_color,
                     .load_op = self.load_op,
                     .store_op = self.store_op,
                     .resolve_texture = if (self.resolve_target) |res_target| try res_target.get_texture(controller) else null,

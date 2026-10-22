@@ -50,7 +50,7 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
     assert_with_reason(G_INFO.tag_type == E_INFO.tag_type, @src(), "parameter `GROUPS` must have the exact same tag type as `FLAGS_ENUM`", .{});
     const F: E_INFO.tag_type = @as(E_INFO.tag_type, math.maxInt(@Int(.unsigned, @bitSizeOf(E_INFO.tag_type))));
     const A: E_INFO.tag_type = combine: {
-        if (!E_INFO.mode == .exhaustive) break :combine F;
+        if (E_INFO.mode != .exhaustive) break :combine F;
         var a: E_INFO.tag_type = 0;
         for (E_INFO.field_values) |field_value| {
             a |= field_value;

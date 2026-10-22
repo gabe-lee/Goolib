@@ -582,7 +582,7 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         hit_brick,
         win,
         lose,
-    }) = .initEmpty();
+    }) = .empty;
 
     // Update the game state.
     while (timekeeper.consume()) {
@@ -878,11 +878,11 @@ fn app_update(appstate: ?*anyopaque) !SDL.AppResult {
         {
             var buf: [13]u8 = undefined;
             var time: f32 = @min(@as(f32, @floatFromInt(score)) / Timekeeper.updates_per_s, 999.999);
-            var text = try std.fmt.bufPrintZ(&buf, "TIME {d: >7.3}", .{time});
+            var text = try std.fmt.bufPrintSentinel(&buf, "TIME {d: >7.3}", .{time}, 0);
             try renderer.set_draw_color(score_color);
             try renderer.draw_debug_text(FVec.new(8, 8), text.ptr);
             time = @min(@as(f32, @floatFromInt(best_win)) / Timekeeper.updates_per_s, 999.999);
-            text = try std.fmt.bufPrintZ(&buf, "BEST {d: >7.3}", .{time});
+            text = try std.fmt.bufPrintSentinel(&buf, "BEST {d: >7.3}", .{time}, 0);
             try renderer.set_draw_color(SDL.Color_RGBA_u8.ONE);
             try renderer.draw_debug_text(FVec.new(window_size.x / 2 - 8 * 12, 8), text.ptr);
         }
