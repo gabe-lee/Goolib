@@ -43,10 +43,10 @@ const IVec: type = SDL.Vec_c_int;
 const Cast = Goolib.Cast;
 const c_strings_equal = Goolib.Utils.c_strings_equal;
 const ANSI = Goolib.ANSI;
-const GooListSlice = Goolib.GooListSlice;
-const ListU16 = GooListSlice.ListFullDefinition(u16, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
-const ListFVec = GooListSlice.ListFullDefinition(FVec, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
-const ListU32 = GooListSlice.ListFullDefinition(u32, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+const ListSlice = Goolib.ListSlice;
+const ListU16 = ListSlice.ListFullDefinition(u16, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+const ListFVec = ListSlice.ListFullDefinition(FVec, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+const ListU32 = ListSlice.ListFullDefinition(u32, u16, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
 const Allocator = std.mem.Allocator;
 const alloc = std.heap.smp_allocator;
 

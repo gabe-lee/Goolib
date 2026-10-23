@@ -39,8 +39,8 @@ const Common = Root.CommonTypes;
 const Vec4 = Root.Vec4.define_vec4_type;
 const Vec3 = Root.Vec3.define_vec3_type;
 const Vec2 = Root.Vec2.define_vec2_type;
-const GooListSlice = Root.GooListSlice;
-const List = GooListSlice.ListAllocated;
+const ListSlice = Root.ListSlice;
+const List = ListSlice.ListAllocated;
 const DummyAlloc = Root.DummyAllocator;
 
 const ValidateMode = Common.WarningMode;

@@ -34,11 +34,11 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
-const List = Root.GooListSlice.ListAllocated;
+const List = Root.ListSlice.ListAllocated;
 pub const Simple = @import("./Pool_Simple.zig");
 
 pub const PoolDef = struct {
-    LIST_DEF: Root.GooListSlice.ListDef,
+    LIST_DEF: Root.ListSlice.ListDef,
     BLOCK_SIZE: comptime_int,
     THREADING: Root.CommonTypes.ThreadingMode,
 };

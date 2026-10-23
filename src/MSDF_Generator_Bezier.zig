@@ -36,17 +36,17 @@ const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
 const Flags = Root.Flags;
-const IList = Root.IList.IList;
-const List = Root.IList_List.List;
+const ListModule = Root.ListSlice;
+const List = ListModule.ListAllocated;
 const Vec2 = Root.Vec2;
 const AABB2 = Root.AABB2;
 const MathX = Root.Math;
 const Bezier = Root.Bezier;
 const ShapeWinding = Root.CommonTypes.ShapeWinding;
 
-const BitmapModule = Root.Bitmap;
-const Bitmap = BitmapModule.Bitmap;
-const BitmapDef = Root.Bitmap.BitmapDefinition;
+// const BitmapModule = Root.Bitmap;
+// const Bitmap = BitmapModule.Bitmap;
+// const BitmapDef = Root.Bitmap.BitmapDefinition;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -1254,11 +1254,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         };
 
         pub const Contour = struct {
-            edges: List(EdgeSegmentRef),
+            edges: ListModule(EdgeSegmentRef),
 
             pub fn init(cap: usize, alloc: Allocator) Contour {
                 return Contour{
-                    .edges = List(EdgeSegmentRef).init_capacity(cap, alloc),
+                    .edges = ListModule(EdgeSegmentRef).init_capacity(cap, alloc),
                 };
             }
             pub fn free(self: *Contour, alloc: Allocator) void {
@@ -1350,12 +1350,12 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         };
 
         pub const Shape = struct {
-            contours: List(Contour) = .{},
+            contours: ListModule(Contour) = .{},
             y_orientation: YAxisOrientation = .Y_UPWARD,
 
             pub fn init(cap: usize, alloc: Allocator) Shape {
                 return Shape{
-                    .contours = List(Contour).init_capacity(cap, alloc),
+                    .contours = ListModule(Contour).init_capacity(cap, alloc),
                 };
             }
             pub fn free(self: *Shape, alloc: Allocator) void {
@@ -1472,12 +1472,12 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             }
 
             pub const Scanline = struct {
-                intersections: List(SingleScanlineIntersection) = .{},
+                intersections: ListModule(SingleScanlineIntersection) = .{},
                 last_index: usize = 0,
 
                 pub fn init_cap(cap: usize, alloc: Allocator) Scanline {
                     return Scanline{
-                        .intersections = List(SingleScanlineIntersection).init_capacity(cap, alloc),
+                        .intersections = ListModule(SingleScanlineIntersection).init_capacity(cap, alloc),
                         .last_index = 0,
                     };
                 }
@@ -1633,9 +1633,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             };
 
             pub fn orient_contours(self: *Shape, temp_alloc: Allocator) void {
-                var orientations = List(i32).init_capacity(@intCast(self.contours.len), temp_alloc);
+                var orientations = ListModule(i32).init_capacity(@intCast(self.contours.len), temp_alloc);
                 defer orientations.free(temp_alloc);
-                var intersections = List(IntersectionWithCountourIdx).init_capacity(@intCast(self.contours.len), temp_alloc);
+                var intersections = ListModule(IntersectionWithCountourIdx).init_capacity(@intCast(self.contours.len), temp_alloc);
                 defer intersections.free(temp_alloc);
                 for (self.contours.slice(), 0..) |*contour, i| {
                     if (i >= orientations.len and !contour.edges.is_empty()) {
@@ -1698,7 +1698,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn edge_coloring_simple(self: *Shape, shape_alloc: Allocator, corner_list: *List(usize), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
+            pub fn edge_coloring_simple(self: *Shape, shape_alloc: Allocator, corner_list: *ListModule(usize), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
                 const cross_product_threshold = @sin(angle_threshold);
                 var color = EdgeColor.init_color(seed);
                 corner_list.clear();
@@ -1791,7 +1791,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            pub fn edge_coloring_inktrap(self: *Shape, shape_alloc: Allocator, corner_list: *List(EdgeColoringInktrapCorner), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
+            pub fn edge_coloring_inktrap(self: *Shape, shape_alloc: Allocator, corner_list: *ListModule(EdgeColoringInktrapCorner), corner_list_alloc: Allocator, angle_threshold: Float, seed: *u64) void {
                 const cross_product_threshold = @sin(angle_threshold);
                 var color = EdgeColor.init_color(seed);
                 corner_list.clear();
@@ -1987,8 +1987,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 const Self = @This();
 
                 point: Point = .{},
-                windings: List(ShapeWinding),
-                selectors: List(EdgeSelectorType),
+                windings: ListModule(ShapeWinding),
+                selectors: ListModule(EdgeSelectorType),
 
                 pub const EDGE_SELECTOR_TYPE = EdgeSelectorType;
                 pub const EDGE_CACHE_TYPE = EDGE_SELECTOR_TYPE.EdgeCache;
@@ -2004,8 +2004,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 pub fn init_from_shape(shape: *Shape, alloc: Allocator) Self {
                     var self = Self{
-                        .windings = List(ShapeWinding).init_capacity(shape.contours.len, alloc),
-                        .selectors = List(EdgeSelectorType).init_capacity(shape.contours.len, alloc),
+                        .windings = ListModule(ShapeWinding).init_capacity(shape.contours.len, alloc),
+                        .selectors = ListModule(EdgeSelectorType).init_capacity(shape.contours.len, alloc),
                     };
                     self.selectors.len = shape.contours.len;
                     for (shape.contours.slice()) |*contour| {
@@ -2038,7 +2038,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     var shape_edge_selector: EdgeSelectorType = undefined;
                     var inner_edge_selector: EdgeSelectorType = undefined;
                     var outer_edge_selector: EdgeSelectorType = undefined;
-                    var selector_distances = List(EdgeSelectorType.DISTANCE_AND_MEDIAN_TYPE).init_capacity(contour_count, alloc);
+                    var selector_distances = ListModule(EdgeSelectorType.DISTANCE_AND_MEDIAN_TYPE).init_capacity(contour_count, alloc);
                     defer selector_distances.free(alloc);
                     selector_distances.len = contour_count;
                     shape_edge_selector.reset(self.point);
@@ -2606,9 +2606,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             /// Which edge coloring algorithm to use for MSDF and MTSDF fields
             edge_coloring_mode: EdgeColoringMode = .INKTRAP,
             /// re-usable index list for simple edge-coloring pass
-            edge_coloring_corner_list_simple: List(usize) = .{},
+            edge_coloring_corner_list_simple: ListModule(usize) = .{},
             /// re-usable index list for inktrap edge-coloring pass
-            edge_coloring_corner_list_inktrap: List(EdgeColoringInktrapCorner) = .{},
+            edge_coloring_corner_list_inktrap: ListModule(EdgeColoringInktrapCorner) = .{},
             /// whether or not to automatically free the `edge_coloring_corner_list_simple` and/or `edge_coloring_corner_list_inktrap` or retain them for future use
             free_edge_coloring_corner_list_after: bool = false,
             /// The allocator to use for the `edge_coloring_corner_list_simple` or `edge_coloring_corner_list_inktrap` list
@@ -3649,7 +3649,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 shape: *Shape,
                 contour_combiner: CONTOUR_COMBINER = undefined,
-                shape_edge_cache_list: List(CONTOUR_COMBINER.EDGE_CACHE_TYPE) = undefined,
+                shape_edge_cache_list: ListModule(CONTOUR_COMBINER.EDGE_CACHE_TYPE) = undefined,
 
                 pub const DISTANCE_AND_MEDIAN_TYPE = CONTOUR_COMBINER.DISTANCE_AND_MEDIAN_TYPE;
                 pub const DISTANCE_TYPE = DISTANCE_AND_MEDIAN_TYPE.DISTANCE_TYPE;
@@ -3658,7 +3658,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     var self = Self{
                         .shape = shape,
                         .contour_combiner = CONTOUR_COMBINER.init_from_shape(shape, alloc),
-                        .shape_edge_cache_list = List(CONTOUR_COMBINER.EDGE_CACHE_TYPE).init_capacity(@intCast(shape.edge_count()), alloc),
+                        .shape_edge_cache_list = ListModule(CONTOUR_COMBINER.EDGE_CACHE_TYPE).init_capacity(@intCast(shape.edge_count()), alloc),
                     };
                     self.shape_edge_cache_list.len = shape.edge_count();
                     return self;
@@ -3744,7 +3744,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 var is_filled: bool = undefined;
                 var ambiguous: bool = false;
                 const pixel_count = msdf.pixel_count();
-                var match_map: List(i8) = if (mode == .color_only or mode == .alpha_and_color) List(i8).init_capacity(@intCast(pixel_count), temp_allocator) else List(i8).init_empty();
+                var match_map: ListModule(i8) = if (mode == .color_only or mode == .alpha_and_color) ListModule(i8).init_capacity(@intCast(pixel_count), temp_allocator) else ListModule(i8).init_empty();
                 defer match_map.free(temp_allocator);
                 if (mode == .color_only or mode == .alpha_and_color) {
                     match_map.len = pixel_count;
@@ -3979,7 +3979,7 @@ pub const GeneratorError = error{
     bitmap_provider_failed_to_provide_bitmap,
 };
 
-test "BezierMSDFGenerator_Triangle" {
+test "BezierMSDFGenerator -> Triangle" {
     const Test = Root.Testing;
     const Float = f32;
     const Vec = Vec2.define_vec2_type(Float);
@@ -4008,12 +4008,12 @@ test "BezierMSDFGenerator_Triangle" {
     const H_AACC = EdgeSegmentRef{ .edge = &AACC };
     const H_CCBB = EdgeSegmentRef{ .edge = &CCBB };
     const H_BBAA = EdgeSegmentRef{ .edge = &BBAA };
-    var C1 = Contour{ .edges = List(EdgeSegmentRef).init_capacity(3, alloc) };
+    var C1 = Contour{ .edges = ListModule(EdgeSegmentRef).init_capacity(3, alloc) };
     defer C1.free(alloc);
     C1.add_edge(H_AB, alloc);
     C1.add_edge(H_BC, alloc);
     C1.add_edge(H_CA, alloc);
-    var C2 = Contour{ .edges = List(EdgeSegmentRef).init_capacity(3, alloc) };
+    var C2 = Contour{ .edges = ListModule(EdgeSegmentRef).init_capacity(3, alloc) };
     defer C2.free(alloc);
     C2.add_edge(H_AACC, alloc);
     C2.add_edge(H_CCBB, alloc);

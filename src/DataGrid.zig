@@ -34,7 +34,7 @@ const Flags = Root.Flags;
 // const IList = Root.IList.IList;
 // const List = Root.IList_List.List;
 // const Range = Root.IList.Range;
-const ListAllocated = Root.GooListSlice.ListAllocated;
+const ListAllocated = Root.ListSlice.ListAllocated;
 const Color_ = Root.Color;
 const MathX = Root.Math;
 const Vec2 = Root.Vec2;
@@ -74,7 +74,7 @@ pub const Origin = enum(u8) {
 pub const RowColumnOrder = Root.CommonTypes.RowColumnOrder;
 
 pub const GridDefinition = struct {
-    LIST_DEF: Root.GooListSlice.ListDef,
+    LIST_DEF: Root.ListSlice.ListDef,
     ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
     X_ORDER: XOrder = .LEFT_TO_RIGHT,
     Y_ORDER: YOrder = .TOP_TO_BOTTOM,
@@ -91,7 +91,7 @@ pub const GridDefinition = struct {
             .Y_ORDER = self.Y_ORDER,
         };
     }
-    pub fn with_ownership(comptime self: GridDefinition, comptime OWNERSHIP: Root.GooListSlice.Ownership) GridDefinition {
+    pub fn with_ownership(comptime self: GridDefinition, comptime OWNERSHIP: Root.ListSlice.Ownership) GridDefinition {
         return GridDefinition{
             .LIST_DEF = self.LIST_DEF.with_ownership(OWNERSHIP),
             .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,

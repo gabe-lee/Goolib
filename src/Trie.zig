@@ -51,7 +51,7 @@
 // const CompareFn = Utils.Compare.CompareFn;
 // const CompareFnUserdata = Utils.Compare.CompareFnUserdata;
 // const Pool = Root.Pool.Simple.SimplePool;
-// const List = Root.GooListSlice.GooListSlice;
+// const List = Root.ListSlice.ListSlice;
 // const HashFn = CommonTypes.HashFn;
 // const HashFnUserdata = CommonTypes.HashFnUserdata;
 

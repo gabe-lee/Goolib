@@ -234,8 +234,8 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
     comptime var empty_spots: [_NUM_FIELDS * 2]BufferSpan = undefined;
     comptime var current_max_offset: usize = 0;
 
-    const StorageStructFieldList = Root.GooListSlice.SliceMutableAdvanced(_Field, .WHOLE_STRUCTS, .SERIAL_INDEXES);
-    const BufferSpanList = Root.GooListSlice.SliceMutableAdvanced(BufferSpan, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    const StorageStructFieldList = Root.ListSlice.SliceMutableAdvanced(_Field, .WHOLE_STRUCTS, .SERIAL_INDEXES);
+    const BufferSpanList = Root.ListSlice.SliceMutableAdvanced(BufferSpan, .WHOLE_STRUCTS, .SERIAL_INDEXES);
     comptime var _fields_list = StorageStructFieldList.from_slice_keep_data(_fields[0..]);
     comptime var empty_spots_list = BufferSpanList.from_slice_set_empty(empty_spots[0..]);
 

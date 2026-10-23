@@ -804,7 +804,7 @@ pub fn PolynomialSolution(comptime N: comptime_int, comptime T: type) type {
         }
 
         pub fn sort_by_val_small_to_large(self: *Self) void {
-            const SLICE = Root.GooListSlice.SliceMutable(T);
+            const SLICE = Root.ListSlice.SliceMutable(T);
             const slice = SLICE.from_slice_keep_data(self.vals[0..self.count]);
             slice.insertion_sort_implicit();
         }

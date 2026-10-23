@@ -57,7 +57,7 @@ const real_type = Type.real_type;
 const real_cast = Cast.real_cast;
 const kind_info = KindInfo.get_kind_info;
 
-const GLS = Root.GooListSlice;
+const GLS = Root.ListSlice;
 const ListDef = GLS.ListDef;
 const ListFullDefinition = GLS.ListFullDefinition;
 const QuicksortSettings = GLS.QuicksortSettings;
@@ -3214,7 +3214,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return self.local_tree__nth_child_idx_if_exists(idx, max_num_children_per_element, max_num_children_per_element - 1);
         }
         //*****************
-        // SORTING
+        // FIND/BIN SEARCH
         //*****************
 
         fn eq_idx_val_implicit(self: List, idx_a: IDX, val_b: ELEM, _: void, comptime _: void) bool {
@@ -3350,6 +3350,267 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         ) ?IDX {
             return find_advanced(self, val, 0, self.get_len(), .LAST, {}, {}, .COMPTIME_FN_BODY, {}, eq_idx_val_implicit);
         }
+
+        pub fn binary_search_advanced(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime EQUAL_FN_KIND: FuncParamType,
+            equal_idx_val: CompareIdxValFnRT(EQUAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCT(EQUAL_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_FN_KIND: FuncParamType,
+            greater_idx_val: CompareIdxValFnRT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL: CompareIdxValFnCT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) ?IDX {
+            assert_valid_range(self, start, end_excluded, @src());
+            var lo: IDX = start;
+            var hi: IDX = end_excluded;
+            while (lo < hi) {
+                const mid = lo + ((hi - lo) / 2);
+                if (eval_compare_idx_val(self, mid, val, EQUAL_FN_KIND, compare_ctx, COMPARE_CTX, equal_idx_val, EQUAL_IDX_VAL)) {
+                    return mid;
+                }
+                if (eval_compare_idx_val(self, mid, val, GREATER_FN_KIND, compare_ctx, COMPARE_CTX, greater_idx_val, GREATER_IDX_VAL)) {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            return null;
+        }
+
+        pub fn binary_search_range(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            equal_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) ?IDX {
+            return binary_search_advanced(self, val, start, end_excluded, {}, {}, .RUNTIME_FN_PTR, equal_idx_val, {}, .RUNTIME_FN_PTR, greater_idx_val, {});
+        }
+        pub fn binary_search(
+            self: List,
+            val: ELEM,
+            equal_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) ?IDX {
+            return binary_search_advanced(self, val, 0, get_len(self), {}, {}, .RUNTIME_FN_PTR, equal_idx_val, {}, .RUNTIME_FN_PTR, greater_idx_val, {});
+        }
+        pub fn binary_search_range_implicit(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+        ) ?IDX {
+            return binary_search_advanced(self, val, start, end_excluded, {}, {}, .COMPTIME_FN_BODY, {}, eq_idx_val_implicit, .COMPTIME_FN_BODY, {}, gt_idx_val_implicit);
+        }
+        pub fn binary_search_implicit(
+            self: List,
+            val: ELEM,
+        ) ?IDX {
+            return binary_search_advanced(self, val, 0, get_len(self), {}, {}, .COMPTIME_FN_BODY, {}, eq_idx_val_implicit, .COMPTIME_FN_BODY, {}, gt_idx_val_implicit);
+        }
+
+        pub fn binary_insert_location_advanced_right_bias(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime GREATER_FN_KIND: FuncParamType,
+            greater_idx_val: CompareIdxValFnRT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL: CompareIdxValFnCT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) IDX {
+            assert_valid_range(self, start, end_excluded, @src());
+            var lo: IDX = start;
+            var hi: IDX = end_excluded;
+            while (lo < hi) {
+                const mid = lo + ((hi - lo) / 2);
+                if (eval_compare_idx_val(self, mid, val, GREATER_FN_KIND, compare_ctx, COMPARE_CTX, greater_idx_val, GREATER_IDX_VAL)) {
+                    hi = mid;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            return lo;
+        }
+        pub fn binary_insert_location_advanced_left_bias(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESS_THAN_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) IDX {
+            assert_valid_range(self, start, end_excluded, @src());
+            var lo: IDX = start;
+            var hi: IDX = end_excluded;
+            while (lo < hi) {
+                const mid = lo + ((hi - lo) / 2);
+                if (eval_compare_idx_val(self, mid, val, LESS_THAN_FN_KIND, compare_ctx, COMPARE_CTX, less_than_idx_val, LESS_THAN_IDX_VAL)) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            return lo;
+        }
+        pub fn binary_insert_location_in_range(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            return binary_insert_location_advanced_right_bias(self, val, start, end_excluded, {}, {}, .RUNTIME_FN_PTR, greater_idx_val, {});
+        }
+        pub fn binary_insert_location(
+            self: List,
+            val: ELEM,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            return binary_insert_location_advanced_right_bias(self, val, 0, get_len(self), {}, {}, .RUNTIME_FN_PTR, greater_idx_val, {});
+        }
+        pub fn binary_insert_location_in_range_implicit(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+        ) IDX {
+            return binary_insert_location_advanced_right_bias(self, val, start, end_excluded, {}, {}, .COMPTIME_FN_BODY, {}, gt_idx_val_implicit);
+        }
+        pub fn binary_insert_location_implicit(
+            self: List,
+            val: ELEM,
+        ) IDX {
+            return binary_insert_location_advanced_right_bias(self, val, 0, get_len(self), {}, {}, .COMPTIME_FN_BODY, {}, gt_idx_val_implicit);
+        }
+        pub fn binary_insert_advanced_right_bias(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            alloc: Allocator,
+            growth: GrowthMode,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime GREATER_FN_KIND: FuncParamType,
+            greater_idx_val: CompareIdxValFnRT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime GREATER_IDX_VAL: CompareIdxValFnCT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) IDX {
+            const idx = binary_insert_location_advanced_right_bias(self, val, start, end_excluded, compare_ctx, COMPARE_CTX, GREATER_FN_KIND, greater_idx_val, GREATER_IDX_VAL);
+            insert_one_with_growth(self, idx, val, growth, alloc);
+            return idx;
+        }
+        pub fn binary_insert_advanced_left_bias(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            alloc: Allocator,
+            growth: GrowthMode,
+            compare_ctx: anytype,
+            comptime COMPARE_CTX: anytype,
+            comptime LESS_THAN_FN_KIND: FuncParamType,
+            less_than_idx_val: CompareIdxValFnRT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+        ) IDX {
+            const idx = binary_insert_location_advanced_left_bias(self, val, start, end_excluded, compare_ctx, COMPARE_CTX, LESS_THAN_FN_KIND, less_than_idx_val, LESS_THAN_IDX_VAL);
+            insert_one_with_growth(self, idx, val, growth, alloc);
+            return idx;
+        }
+        pub fn binary_insert_in_range(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            alloc: Allocator,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            const idx = binary_insert_location_in_range(self, val, start, end_excluded, greater_idx_val);
+            insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
+            return idx;
+        }
+        pub fn binary_insert(
+            self: List,
+            val: ELEM,
+            alloc: Allocator,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            const idx = binary_insert_location(self, val, greater_idx_val);
+            insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
+            return idx;
+        }
+        pub fn binary_insert_in_range_implicit(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            alloc: Allocator,
+        ) IDX {
+            const idx = binary_insert_location_in_range_implicit(self, val, start, end_excluded);
+            insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
+            return idx;
+        }
+        pub fn binary_insert_implicit(
+            self: List,
+            val: ELEM,
+            alloc: Allocator,
+        ) IDX {
+            const idx = binary_insert_location_implicit(self, val);
+            insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
+            return idx;
+        }
+        pub fn binary_insert_in_range_assume_cap(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            const idx = binary_insert_location_in_range(self, val, start, end_excluded, greater_idx_val);
+            insert_one_assume_cap(self, idx, val);
+            return idx;
+        }
+        pub fn binary_insert_assume_cap(
+            self: List,
+            val: ELEM,
+            greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
+        ) IDX {
+            const idx = binary_insert_location(self, val, greater_idx_val);
+            insert_one_assume_cap(self, idx, val);
+            return idx;
+        }
+        pub fn binary_insert_in_range_implicit_assume_cap(
+            self: List,
+            val: ELEM,
+            start: IDX,
+            end_excluded: IDX,
+        ) IDX {
+            const idx = binary_insert_location_in_range_implicit(self, val, start, end_excluded);
+            insert_one_assume_cap(self, idx, val);
+            return idx;
+        }
+        pub fn binary_insert_implicit_assume_cap(
+            self: List,
+            val: ELEM,
+        ) IDX {
+            const idx = binary_insert_location_implicit(self, val);
+            insert_one_assume_cap(self, idx, val);
+            return idx;
+        }
+
+        //*****************
+        // SORTING
+        //*****************
 
         pub fn median_index_of_3_advanced(
             self: List,

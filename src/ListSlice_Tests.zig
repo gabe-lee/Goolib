@@ -54,14 +54,14 @@ const assert_unreachable_err_always_panic = Assert.assert_unreachable_err_always
 const num_cast = Cast.num_cast;
 const kind_info = KindInfo.get_kind_info;
 
-const GooListSliceModule = Root.GooListSlice;
+const GooListSliceModule = Root.ListSlice;
 const ListNotAllocatedAdvanced = GooListSliceModule.ListNotAllocatedAdvanced;
 const ListAllocatedAdvanced = GooListSliceModule.ListAllocatedAdvanced;
 const SliceMutableAdvanced = GooListSliceModule.SliceMutableAdvanced;
 const SliceImmutableAdvanced = GooListSliceModule.SliceImmutableAdvanced;
 const ListFullDefinition = GooListSliceModule.ListFullDefinition;
 
-test "GooListSlice -> Traverser" {
+test "ListSlice -> Traverser" {
     //    I
     //   / \
     //  G   H
@@ -298,7 +298,7 @@ test "GooListSlice -> Traverser" {
     out.idx = 0;
 }
 
-test "GooListSlice -> median_of_3_indexes" {
+test "ListSlice -> median_of_3_indexes" {
     const STATIC_IDS = [3]u32{ 0, 1, 2 };
     const Case = struct {
         input: [3]u8,
@@ -342,7 +342,7 @@ test "GooListSlice -> median_of_3_indexes" {
     }
 }
 
-test "GooListSlice -> sorting algorithms" {
+test "ListSlice -> sorting algorithms" {
     const SORT_TEST_CASES = struct {
         pub const Case = struct {
             input: []const u8,
