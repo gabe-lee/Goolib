@@ -28,7 +28,6 @@
 const std = @import("std");
 const math = std.math;
 const Root = @import("./_root.zig");
-const SliceAdapter = Root.IList_SliceAdapter;
 const Types = Root.Types;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
