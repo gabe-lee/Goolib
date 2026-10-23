@@ -40,6 +40,10 @@ pub const UnsignedIntegerWithSameSize = Types.UnsignedIntegerWithSameSize;
 pub const SignedIntegerWithSameSize = Types.SignedIntegerWithSameSize;
 const DEBUG = std.debug.print;
 const Math = @This();
+const Cast = Root.Cast;
+const real_cast = Cast.real_cast;
+const real_type = Types.real_type;
+const real_type_of = Types.real_type_of;
 
 pub const Std = std.math;
 
@@ -415,7 +419,7 @@ pub fn Upgraded2Numbers(comptime A: type, comptime B: type) type {
     };
 }
 
-pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)) {
+pub fn upgrade_2_numbers_for_math(a: anytype, b: anytype) Upgraded2Numbers(real_type(@TypeOf(a)), real_type(@TypeOf(b))) {
     const A = @TypeOf(a);
     const B = @TypeOf(b);
     const A_INFO = @typeInfo(A);
@@ -800,7 +804,9 @@ pub fn PolynomialSolution(comptime N: comptime_int, comptime T: type) type {
         }
 
         pub fn sort_by_val_small_to_large(self: *Self) void {
-            Utils.mem_sort_implicit(self.vals[0..self.count].ptr, 0, @intCast(self.count));
+            const SLICE = Root.GooListSlice.SliceMutable(T);
+            const slice = SLICE.from_slice_keep_data(self.vals[0..self.count]);
+            slice.insertion_sort_implicit();
         }
     };
 }
@@ -960,7 +966,7 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
     const third_a = a / 3;
     if (r_squared < q_cubed) {
         var t = r / @sqrt(q_cubed);
-        t = clamp(-1, t, 1);
+        t = clamp(@as(T, -1), t, @as(T, 1));
         t = math.acos(t);
         q = @sqrt(q) * -2;
         result.vals[0] = (q * @cos(t / 3)) - third_a;

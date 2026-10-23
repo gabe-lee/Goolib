@@ -31,13 +31,13 @@ const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
 const Flags = Root.Flags;
-const IList = Root.IList.IList;
-const List = Root.IList_List.List;
-const Range = Root.IList.Range;
+// const IList = Root.IList.IList;
+const List = Root.GooListSlice.ListAllocated;
+// const Range = Root.IList.Range;
 const Color_ = Root.Color;
 const MathX = Root.Math;
 const BitmapModule = Root.Bitmap;
-// const Bitmap = BitmapModule.Bitmap;
+const Bitmap = BitmapModule.Bitmap;
 // const BitmapDef = BitmapModule.BitmapDefinition;
 const File = std.fs.File;
 const Resulution = Root.ImageUtils.Reslution_DPM(u32);
@@ -237,29 +237,31 @@ fn bgra_equal(a: BGRA, b: BGRA) bool {
     return @as(u32, @bitCast(a)) == @as(u32, @bitCast(b));
 }
 
-pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.CELL_TYPE), index_map_alloc: Allocator) anyerror!u32 {
-    const file = try std.fs.cwd().createFile(path_relative_to_cwd, .{ .truncate = true });
-    defer file.close();
+pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.LIST_DEF.ELEM), index_map_alloc: Allocator, io: std.Io) anyerror!u32 {
+    const file = try std.Io.Dir.cwd().createFile(io, path_relative_to_cwd, .{ .truncate = true });
+    defer file.close(io);
     var buf: [1024]u8 = undefined;
-    var writer_holder = file.writerStreaming(buf[0..]);
+    var writer_holder = file.writerStreaming(io, buf[0..]);
     const writer: *std.Io.Writer = &writer_holder.interface;
     const len = try write_bitmap_datagrid_to_writer(writer, GRID_DEF, data_grid, settings, data_conversion, index_map_alloc);
     try writer_holder.end();
     return len;
 }
 
-pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.CELL_TYPE), index_map_alloc: Allocator) anyerror!u32 {
+pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.LIST_DEF.ELEM), index_map_alloc: Allocator) anyerror!u32 {
     assert_with_reason(settings.color_planes == 1, @src(), "color planes other than `1` (non-interleaved color channels) not implemented/supported, got `{d}`", .{settings.color_planes});
     assert_with_reason(settings.compression == .NONE, @src(), "color compression mode `{s}` not implemented/supported", .{@tagName(settings.compression)});
     assert_with_reason(settings.color_space != .CALIBRATED_RGB, @src(), "color space modes `CALIBRATED_RGB` not implemented/supported", .{});
     assert_with_reason(settings.color_space != .PROFILE_LINKED and settings.color_space != .PROFILE_EMBEDDED, @src(), "color space modes `PROFILE_LINKED` and `PROFILE_EMBEDDED` not implemented/supported (ICC color profiles)", .{});
     const IDX_GRID_DEF = GRID_DEF.with_cell_type(u8);
     const IDX_GRID = DataGrid(IDX_GRID_DEF);
+
     var color_palette: [256]BGRA = undefined;
-    var color_palette_list = List(BGRA){
-        .cap = 256,
-        .len = 0,
-        .ptr = color_palette[0..].ptr,
+    var color_palette_list = List(BGRA).from_slice_set_empty(color_palette[0..]);
+    const BGRA_PROTO = struct {
+        fn equals(list: List(BGRA), idx_a: List(BGRA).LIST_DEF.IDX, val_b: BGRA, _: void, _: void) bool {
+            return @as(u32, @bitCast(list.get(idx_a))) == @as(u32, @bitCast(val_b));
+        }
     };
     var index_map: IDX_GRID = .{};
     defer index_map.free(index_map_alloc);
@@ -284,7 +286,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
         const idx_width_naive = data_grid.width / pixels_per_advance;
         const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < data_grid.width) @as(u32, 1) else @as(u32, 0));
         const idx_height = data_grid.height;
-        index_map = IDX_GRID.init(idx_width, idx_height, null, index_map_alloc);
+        index_map = IDX_GRID.allocate_new(idx_width, idx_height, null, index_map_alloc);
         var index_pixel_bit: u8 = 0;
         var curr_index_pixel: u8 = 0;
         var y: u32 = 0;
@@ -297,34 +299,32 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                 const cell = data_grid.get_cell_with_origin(.BOT_LEFT, px, y);
                 const bgra: BGRA = switch (data_conversion) {
                     .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
-                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                         const cell_cast: u8 = @bitCast(cell);
                         break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
                     },
                     .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
-                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                         break :make BGRA{ 255, 255, 255, @bitCast(cell) };
                     },
                     .NO_CONVERSION_NEEDED_BGR => make: {
-                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                         const bgr: BGR = @bitCast(cell);
                         break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
                     },
                     .NO_CONVERSION_NEEDED_BGRA => make: {
-                        assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                        assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                         break :make @bitCast(cell);
                     },
                     .CONVERT_USING_FUNC => |func| func(cell),
                 };
                 // std.debug.print("original_pixel: {any}\n", .{original_pixel}); //DEBUG
                 // const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
-                var color_palette_index = color_palette_list.search(bgra, bgra_equal);
-                if (!color_palette_index.found) {
-                    color_palette_index.idx = color_palette_list.len;
-                    color_palette_list.len += 1;
-                    color_palette_list.ptr[color_palette_index.idx] = bgra;
+                var color_palette_index = color_palette_list.find_first(bgra, BGRA_PROTO.equals);
+                if (color_palette_index == null) {
+                    color_palette_index = color_palette_list.append_one_assume_cap_get_idx(bgra);
                 }
-                const color_index: u8 = @intCast(color_palette_index.idx);
+                const color_index: u8 = @intCast(color_palette_index.?);
                 const shifted_color_index = color_index << @intCast(index_pixel_bit);
                 curr_index_pixel |= shifted_color_index;
                 index_pixel_bit += @intCast(settings.bits_per_pixel.raw());
@@ -337,13 +337,13 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                 }
             }
         }
-        if (color_palette_list.len > settings.bits_per_pixel.max_colors_in_palette()) {
+        if (color_palette_list.get_len() > settings.bits_per_pixel.max_colors_in_palette()) {
             if (settings.print_warnings_to_console) {
-                Assert.warn_with_reason(false, @src(), "output bits-per-pixel `{s}` can only support {d} unique colors, but found {d} unique colors in input data", .{ @tagName(settings.bits_per_pixel), settings.bits_per_pixel.max_colors_in_palette(), color_palette_list.len });
+                Assert.warn_with_reason(false, @src(), "output bits-per-pixel `{s}` can only support {d} unique colors, but found {d} unique colors in input data", .{ @tagName(settings.bits_per_pixel), settings.bits_per_pixel.max_colors_in_palette(), color_palette_list.get_len() });
             }
             return BitmapError.too_many_colors_for_palette;
         }
-        size += color_palette_list.len * 4;
+        size += color_palette_list.get_len() * 4;
         pixel_data_offset = size;
         pixel_row_byte_width = index_map.width;
     } else {
@@ -375,7 +375,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     try writer.writeInt(u32, total_pixel_data_length, .little); //0x22
     try writer.writeInt(u32, settings.horizontal_resolution.raw, .little); //0x26
     try writer.writeInt(u32, settings.vertical_resolution.raw, .little); //0x2A
-    try writer.writeInt(u32, color_palette_list.len, .little); //0x2E
+    try writer.writeInt(u32, color_palette_list.get_len(), .little); //0x2E
     try writer.writeInt(u32, 0, .little); //0x32
     switch (settings.compression) {
         .BIT_FIELDS => |fields| {
@@ -415,7 +415,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     try writer.writeInt(u32, 0, .little); // 0x7E // icc profile size
     try writer.writeInt(u32, 0, .little); // 0x82 // reserved
     // Color Palette (if used)
-    for (color_palette_list.slice()) |bgra| { // 0x86
+    for (color_palette_list.zig_slice_entire()) |bgra| { // 0x86
         const raw: u32 = @bitCast(bgra);
         try writer.writeInt(u32, raw, .little);
     }
@@ -424,7 +424,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     if (settings.bits_per_pixel.raw() <= 8) {
         var y: u32 = 0;
         while (y < index_map.height) : (y += 1) {
-            const row = index_map.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, index_map.width);
+            const row = index_map.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, index_map.width).zig_slice_entire();
             const row_bytes = std.mem.sliceAsBytes(row);
             _ = try writer.write(row_bytes);
             _ = try writer.write(PAD_BYTES[0..gap_after_row]);
@@ -434,28 +434,28 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
         var x: u32 = undefined;
         while (y < data_grid.height) : (y += 1) {
             x = 0;
-            const row: []GRID_DEF.CELL_TYPE = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) data_grid.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, data_grid.width) else undefined;
+            const row: []GRID_DEF.LIST_DEF.ELEM = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) data_grid.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, data_grid.width).zig_slice_entire() else undefined;
             while (x < data_grid.width) : (x += 1) {
                 const cell = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) row[x] else data_grid.get_cell_with_origin(.BOT_LEFT, x, y);
                 switch (settings.bits_per_pixel) {
                     .BPP_32 => {
                         const bgra: BGRA = switch (data_conversion) {
                             .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 break :make BGRA{ 255, 255, 255, @bitCast(cell) };
                             },
                             .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 const cell_cast: u8 = @bitCast(cell);
                                 break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
                             },
                             .NO_CONVERSION_NEEDED_BGR => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 const bgr: BGR = @bitCast(cell);
                                 break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
                             },
                             .NO_CONVERSION_NEEDED_BGRA => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 break :make @bitCast(cell);
                             },
                             .CONVERT_USING_FUNC => |func| func(cell),
@@ -472,16 +472,16 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                                 break :make BGR{ 255, 255, 255 };
                             },
                             .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 const cell_cast: u8 = @bitCast(cell);
                                 break :make BGR{ cell_cast, cell_cast, cell_cast };
                             },
                             .NO_CONVERSION_NEEDED_BGR => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 break :make @bitCast(cell);
                             },
                             .NO_CONVERSION_NEEDED_BGRA => make: {
-                                assert_with_reason(@sizeOf(GRID_DEF.CELL_TYPE) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.CELL_TYPE)});
+                                assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
                                 const bgra: BGRA = @bitCast(cell);
                                 break :make BGR{ bgra[0], bgra[1], bgra[2] };
                             },

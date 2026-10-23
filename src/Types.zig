@@ -1440,6 +1440,24 @@ pub fn child_type(comptime T: type) type {
     }
 }
 
+pub fn child_type_or_type(comptime T: type) type {
+    const I = @typeInfo(T);
+    switch (I) {
+        .pointer => |P| {
+            return P.child;
+        },
+        .array => |A| {
+            return A.child;
+        },
+        .vector => |V| {
+            return V.child;
+        },
+        else => {
+            return T;
+        },
+    }
+}
+
 pub fn type_has_equals(comptime T: type) bool {
     const I = @typeInfo(T);
     switch (I) {

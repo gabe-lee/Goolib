@@ -27,7 +27,6 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
-const IList = Root.IList;
 const Utils = Root.Utils;
 const DummyAlloc = Root.DummyAllocator;
 
@@ -35,13 +34,24 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
-const List = Root.IList_List.List;
+const List = Root.GooListSlice.ListAllocated;
 pub const Simple = @import("./Pool_Simple.zig");
 
-pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, comptime BLOCK_SIZE: comptime_int, comptime THREADING: Root.CommonTypes.ThreadingMode) type {
-    assert_with_reason(Types.type_is_unsigned_int(IDX_TYPE), @src(), "type `IDX_TYPE` must be an unsigned integer type, got type `{s}`", .{@typeName(IDX_TYPE)});
+pub const PoolDef = struct {
+    LIST_DEF: Root.GooListSlice.ListDef,
+    BLOCK_SIZE: comptime_int,
+    THREADING: Root.CommonTypes.ThreadingMode,
+};
+
+pub fn Pool(comptime DEF: PoolDef, comptime T_DEFAULT: DEF.LIST_DEF.ELEM) type {
+    assert_with_reason(Types.type_is_unsigned_int(DEF.LIST_DEF.IDX), @src(), "type `IDX_TYPE` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.LIST_DEF.IDX)});
     return struct {
         const Self = @This();
+
+        const IDX = DEF.LIST_DEF.IDX;
+        const THREADING = DEF.THREADING;
+        const T = DEF.LIST_DEF.ELEM;
+        const BLOCK_SIZE = DEF.BLOCK_SIZE;
 
         const NEEDS_LOCK = THREADING == .MULTI_THREAD_SAFE;
 
@@ -49,13 +59,13 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
         alloc: Allocator,
         block_with_unused: u32 = 0,
         next_unused_idx_in_block: u32 = 0,
-        first_free: IDX_TYPE = 0,
-        free_count: IDX_TYPE = 0,
+        first_free: IDX = 0,
+        free_count: IDX = 0,
         lock: if (NEEDS_LOCK) std.Thread.Mutex else void = if (NEEDS_LOCK) std.Thread.Mutex{} else {},
 
         pub const Slot = union {
             item: T,
-            next_free: IDX_TYPE,
+            next_free: IDX,
         };
 
         pub const BlockPtr = *[BLOCK_SIZE]Slot;
@@ -68,15 +78,15 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
             };
         }
 
-        pub fn init_cap(cap: usize, alloc: Allocator) Self {
+        pub fn allocate_new(cap: IDX, alloc: Allocator) Self {
             var real_cap = cap / BLOCK_SIZE;
             if (real_cap * BLOCK_SIZE < cap) real_cap += 1;
             var self = Self{
-                .blocks = List(BlockPtr).init_capacity(real_cap, alloc),
+                .blocks = List(BlockPtr).allocate_new(real_cap, alloc),
                 .alloc = alloc,
             };
-            self.blocks.len = @intCast(real_cap);
-            for (self.blocks.slice()) |*block| {
+            self.blocks.set_len_unchecked(@intCast(real_cap));
+            for (self.blocks.zig_slice_entire()) |*block| {
                 block.* = alloc.create(Block) catch |err| assert_allocation_failure(@src(), Block, 1, err);
             }
             return self;
@@ -90,7 +100,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 const first_free_idx = self.first_free;
                 const first_free_idx_block = first_free_idx / BLOCK_SIZE;
                 const first_free_idx_sub_idx = first_free_idx % BLOCK_SIZE;
-                var slot_ptr: *Slot = &self.blocks.ptr[first_free_idx_block][first_free_idx_sub_idx];
+                var slot_ptr: *Slot = &self.blocks.get(first_free_idx_block)[first_free_idx_sub_idx];
                 const next_free_idx = slot_ptr.next_free;
                 self.first_free = next_free_idx;
                 self.free_count -= 1;
@@ -100,11 +110,11 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 }
                 return &slot_ptr.item;
             }
-            if (self.block_with_unused >= self.blocks.len) {
+            if (self.block_with_unused >= self.blocks.get_len()) {
                 const new_block = self.alloc.create(Block) catch |err| assert_allocation_failure(@src(), Block, 1, err);
-                _ = self.blocks.append(new_block, self.alloc);
+                _ = self.blocks.append_one(new_block, self.alloc);
             }
-            var slot_ptr: *Slot = &self.blocks.ptr[self.block_with_unused][self.next_unused_idx_in_block];
+            var slot_ptr: *Slot = &self.blocks.get(self.block_with_unused)[self.next_unused_idx_in_block];
             self.next_unused_idx_in_block += 1;
             if (self.next_unused_idx_in_block >= BLOCK_SIZE) {
                 self.block_with_unused += 1;
@@ -122,13 +132,13 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 self.lock.lock();
             }
             const slot_addr = @intFromPtr(ptr);
-            for (self.blocks.slice(), 0..) |block, block_idx| {
+            for (self.blocks.zig_slice_entire(), 0..) |block, block_idx| {
                 const block_addr = @intFromPtr(block);
                 const block_addr_limit = block_addr + @sizeOf(Block);
                 if (slot_addr >= block_addr and slot_addr < block_addr_limit) {
                     const idx_delta = slot_addr - block_addr;
                     const sub_idx = idx_delta / @sizeOf(Slot);
-                    const free_idx = num_cast((block_idx * BLOCK_SIZE) + sub_idx, IDX_TYPE);
+                    const free_idx = num_cast((block_idx * BLOCK_SIZE) + sub_idx, IDX);
                     block[sub_idx] = Slot{ .next_free = self.first_free };
                     self.first_free = free_idx;
                     self.free_count += 1;
@@ -161,7 +171,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 self.lock.lock();
             }
             self.clear_retain_blocks();
-            for (self.blocks.slice()) |block| {
+            for (self.blocks.zig_slice_entire()) |block| {
                 self.alloc.destroy(block);
             }
             self.blocks.clear();
@@ -175,10 +185,10 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 self.lock.lock();
             }
             self.clear_retain_blocks();
-            for (self.blocks.slice(), 0..) |block, block_idx| {
+            for (self.blocks.zig_slice_entire(), 0..) |block, block_idx| {
                 const block_slice: []Slot = if (block_idx < self.block_with_unused) block[0..BLOCK_SIZE] else block[0..self.next_unused_idx_in_block];
                 for (block_slice, 0..) |*item, sub_idx| {
-                    const true_idx = num_cast((block_idx * BLOCK_SIZE) + sub_idx, IDX_TYPE);
+                    const true_idx = num_cast((block_idx * BLOCK_SIZE) + sub_idx, IDX);
                     var f: u32 = 0;
                     var this_free = self.first_free;
                     var was_free = false;
@@ -189,7 +199,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                         }
                         const this_free_block = f / BLOCK_SIZE;
                         const this_free_sub_idx = f % BLOCK_SIZE;
-                        this_free = self.blocks.ptr[this_free_block][this_free_sub_idx].next_free;
+                        this_free = self.blocks.get(this_free_block)[this_free_sub_idx].next_free;
                     }
                     if (!was_free) {
                         const used_item: *T = &item.item;
@@ -209,7 +219,7 @@ pub fn Pool(comptime T: type, comptime T_DEFAULT: T, comptime IDX_TYPE: type, co
                 self.lock.lock();
             }
             self.clear_retain_blocks();
-            for (self.blocks.slice()) |block| {
+            for (self.blocks.zig_slice_entire()) |block| {
                 self.alloc.destroy(block);
             }
             self.blocks.free(self.alloc);
