@@ -3241,7 +3241,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
             pub fn perform_error_correction(self: *Generator, comptime NUM_CHANNELS: comptime_int, msdf_bitmap: FloatBitmap(NUM_CHANNELS), shape: *Shape, transform: Transformation) void {
                 if (self.msdf_error_correction_mode == .DISABLED) return;
-                self.error_stencil_buffer.discard_and_resize(msdf_bitmap.width, msdf_bitmap.height, ErrorFlags.flag(.NONE), self.error_stencil_allocator);
+                self.error_stencil_buffer.discard_and_resize(msdf_bitmap.width, msdf_bitmap.height, null, ErrorFlags.flag(.NONE), self.error_stencil_allocator);
                 var corrector = ErrorCorrector.init(self.error_stencil_buffer, transform);
                 corrector.min_deviation_ratio = self.min_deviation_ratio;
                 switch (self.msdf_error_correction_mode) {

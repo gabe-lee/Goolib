@@ -249,6 +249,35 @@ pub const ManySameOrderExpectation = enum(u8) {
     USE_HOARE_2_WAY_PARTITION,
 };
 
+pub const ListDefNoElem = struct {
+    IDX: type = u32,
+    FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
+    INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
+    OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
+
+    pub inline fn List(comptime self: ListDefNoElem, comptime T: type) type {
+        return ListFullDefinition(T, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP);
+    }
+
+    pub fn with_type(comptime self: ListDefNoElem, comptime new_type: type) ListDef {
+        return ListDef{
+            .ELEM = new_type,
+            .IDX = self.IDX,
+            .FIELD_LAYOUT = self.FIELD_LAYOUT,
+            .INDEX_LAYOUT = self.INDEX_LAYOUT,
+            .OWNERSHIP = self.OWNERSHIP,
+        };
+    }
+    pub fn with_ownership(comptime self: ListDefNoElem, comptime new_ownership: Root.ListSlice.Ownership) ListDefNoElem {
+        return ListDefNoElem{
+            .IDX = self.IDX,
+            .FIELD_LAYOUT = self.FIELD_LAYOUT,
+            .INDEX_LAYOUT = self.INDEX_LAYOUT,
+            .OWNERSHIP = new_ownership,
+        };
+    }
+};
+
 pub const ListDef = struct {
     ELEM: type,
     IDX: type = u32,

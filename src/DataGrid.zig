@@ -76,6 +76,53 @@ pub const Origin = enum(u8) {
 
 pub const RowColumnOrder = Root.CommonTypes.RowColumnOrder;
 
+pub const GridDefinitionNoElem = struct {
+    LIST_DEF: Root.ListSlice.ListDefNoElem,
+    ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
+    X_ORDER: XOrder = .LEFT_TO_RIGHT,
+    Y_ORDER: YOrder = .TOP_TO_BOTTOM,
+
+    pub fn Grid(comptime self: GridDefinitionNoElem, comptime CELL: type) type {
+        return DataGrid(self.with_cell_type(CELL));
+    }
+
+    pub fn with_cell_type(comptime self: GridDefinitionNoElem, comptime CELL: type) GridDefinition {
+        return GridDefinition{
+            .LIST_DEF = self.LIST_DEF.with_type(CELL),
+            .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
+            .X_ORDER = self.X_ORDER,
+            .Y_ORDER = self.Y_ORDER,
+        };
+    }
+    pub fn with_ownership(comptime self: GridDefinitionNoElem, comptime OWNERSHIP: Root.ListSlice.Ownership) GridDefinitionNoElem {
+        return GridDefinitionNoElem{
+            .LIST_DEF = self.LIST_DEF.with_ownership(OWNERSHIP),
+            .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
+            .X_ORDER = self.X_ORDER,
+            .Y_ORDER = self.Y_ORDER,
+        };
+    }
+};
+
+pub const GridDefinitionNoList = struct {
+    ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
+    X_ORDER: XOrder = .LEFT_TO_RIGHT,
+    Y_ORDER: YOrder = .TOP_TO_BOTTOM,
+
+    pub fn Grid(comptime self: GridDefinitionNoList, comptime LIST: Root.ListSlice.ListDef) type {
+        return DataGrid(self.with_list_def(LIST));
+    }
+
+    pub fn with_list_def(comptime self: GridDefinitionNoList, comptime LIST: Root.ListSlice.ListDef) GridDefinition {
+        return GridDefinition{
+            .LIST_DEF = LIST,
+            .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
+            .X_ORDER = self.X_ORDER,
+            .Y_ORDER = self.Y_ORDER,
+        };
+    }
+};
+
 pub const GridDefinition = struct {
     LIST_DEF: Root.ListSlice.ListDef,
     ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
@@ -159,8 +206,30 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         const GridSlice = DEFINITION.with_ownership(.REFERENCED_MUTABLE).Grid();
         const GridSliceConst = DEFINITION.with_ownership(.REFERENCED_IMMUTABLE).Grid();
 
+        fn assert_major_stride_valid(width: IDX, height: IDX, stride: IDX, comptime src: std.builtin.SourceLocation) void {
+            if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
+                assert_with_reason(stride >= width, src, "major stride must be AT LEAST a large as width, but {d} < {d}", .{ stride, width });
+            } else {
+                assert_with_reason(stride >= height, src, "major stride must be AT LEAST a large as height, but {d} < {d}", .{ stride, height });
+            }
+        }
+
         pub fn allocate_new(width: IDX, height: IDX, fill_value: ?Cell, alloc: Allocator) GridListAlloc {
             const total = width * height;
+            var self = GridListAlloc{
+                .cells = CellList.allocate_new_set_len(total, alloc),
+                .width = width,
+                .height = height,
+                .major_stride = if (ROW_COLUMN_ORDER == .ROW_MAJOR) width else height,
+            };
+            if (fill_value) |fill| {
+                self.fill_all(fill);
+            }
+            return self;
+        }
+        pub fn allocate_new_with_major_stride(width: IDX, height: IDX, major_stride: IDX, fill_value: ?Cell, alloc: Allocator) GridListAlloc {
+            const total = width * height;
+            assert_major_stride_valid(width, height, major_stride, @src());
             var self = GridListAlloc{
                 .cells = CellList.allocate_new_set_len(total, alloc),
                 .width = width,
@@ -444,12 +513,17 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             return lerp_fn(subcell_top_lr, subcell_bot_lr, percent_top_to_bottom);
         }
 
-        pub fn discard_and_resize(self: *Self, new_width: IDX, new_height: IDX, fill_value: ?Cell, alloc: Allocator) void {
+        pub fn discard_and_resize(self: *Self, new_width: IDX, new_height: IDX, major_stride: ?IDX, fill_value: ?Cell, alloc: Allocator) void {
             self.cells.clear();
-            if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
-                self.major_stride = new_width;
+            if (major_stride) |m_stride| {
+                assert_major_stride_valid(new_width, new_height, m_stride, @src());
+                self.major_stride = m_stride;
             } else {
-                self.major_stride = new_height;
+                if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
+                    self.major_stride = new_width;
+                } else {
+                    self.major_stride = new_height;
+                }
             }
             if (new_width > 0 and new_height > 0) {
                 const new_end = self.get_idx_unchecked(new_width, new_height);
@@ -463,11 +537,12 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             self.height = new_height;
         }
 
-        pub fn resize(self: *Self, new_width: IDX, new_height: IDX, anchor: ResizeAnchor, fill_value: ?Cell, alloc: Allocator) void {
+        pub fn resize(self: *Self, new_width: IDX, new_height: IDX, major_stride: ?IDX, anchor: ResizeAnchor, fill_value: ?Cell, alloc: Allocator) void {
             if (new_width == 0 or new_height == 0) {
                 self.clear();
-                self.width = new_width;
-                self.height = new_height;
+                self.width = 0;
+                self.height = 0;
+                self.major_stride = 0;
                 return;
             }
             if (self.width == 0 or self.height == 0) {
@@ -530,7 +605,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                     max_y_copy_new = new_height;
                 },
             }
-            const new_grid = Self.allocate_new(new_width, new_height, alloc);
+            const new_grid = if (major_stride) |m_stride| Self.allocate_new_with_major_stride(new_width, new_height, m_stride, alloc) else Self.allocate_new(new_width, new_height, alloc);
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
                     for (min_y_copy_old..max_y_copy_old, min_y_copy_new..max_y_copy_new) |old_y, new_y| {
@@ -755,7 +830,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
 
         pub const DataGridWithParentOffset = struct {
             data_grid: Self = .{},
-            parent_offset: Vec = .ZERO_ZERO,
+            parent_offset: Vec = .ZERO,
 
             pub fn new_no_parent(grid: Self) DataGridWithParentOffset {
                 return DataGridWithParentOffset{

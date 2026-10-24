@@ -21,6 +21,7 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 const std = @import("std");
+const build = @import("builtin");
 const math = std.math;
 
 const Root = @import("./_root.zig");
@@ -38,7 +39,7 @@ const List = Root.ListSlice.ListAllocated;
 const Slice = Root.ListSlice.SliceMutable;
 const SliceConst = Root.ListSlice.SliceImmutable;
 const Vec2 = Root.Vec2;
-const Mat3x3 = Root.Mat3x3;
+const Mat3x3 = Root.Matrix.Mat3x3;
 const AABB2 = Root.AABB2;
 const MathX = Root.Math;
 const Bezier = Root.Bezier;
@@ -58,6 +59,13 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
+
+pub const ASCA_Rasterizer = @import("./Shape_ACSA_Rasterizer.zig");
+comptime {
+    if (build.is_test) {
+        _ = @import("./Shape_Tests.zig");
+    }
+}
 
 pub const Winding = Root.CommonTypes.ShapeWinding;
 
@@ -3804,13 +3812,11 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
 
         pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, unfill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, fill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, lerp_func: *const fn (unfill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, fill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, percent_filled: f32) OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, estimates: Estimates(T), scanline_allocator: Allocator) void {
             for (0..output_grid.height) |y_usize| {
-                // std.debug.print("\nscanline y = {d}", .{y_usize}); //DEBUG
                 const y: u32 = @intCast(y_usize);
                 const yy = num_cast(y, T) + 0.5;
                 shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates);
                 self.scanline.sort_and_sum();
                 const output_row: []OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM = output_grid.get_h_scanline(0, y, output_grid.width).zig_slice_entire();
-                // assert_with_reason(self.scanline.intersections.is_sorted(.entire_list(), ScanlineType.IntersectionType.x_greater_than), @src(), "scanline intersections not sorted", .{}); //DEBUG
                 var x: u32 = 0;
                 var next_x: u32 = undefined;
                 var partial_fill_x: u32 = undefined;
@@ -3904,72 +3910,4 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
             }
         }
     };
-}
-
-fn make_test_triangle(inner_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), outer_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), shapes: *[2]Contour(f32, EdgeColor, .WHITE)) Shape(f32, EdgeColor, .WHITE) {
-    const Vec = Vec2.define_vec2_type(f32);
-    const EdgeType = EdgeWithUserdata(f32, EdgeColor, .WHITE);
-    const ShapeType = Contour(f32, EdgeColor, .WHITE);
-    const CompositeShapeType = Shape(f32, EdgeColor, .WHITE);
-    const A = Vec.new(2, 2);
-    const B = Vec.new(27, 52);
-    const C = Vec.new(52, 2);
-    const AB: EdgeType = .new_line(A, B);
-    const BC: EdgeType = .new_line(B, C);
-    const CA: EdgeType = .new_line(C, A);
-    outer_edges[0] = AB;
-    outer_edges[1] = BC;
-    outer_edges[2] = CA;
-    const AA = Vec.new(10, 6);
-    const BB = Vec.new(27, 42);
-    const CC = Vec.new(44, 6);
-    const AACC: EdgeType = .new_line(AA, CC);
-    const CCBB: EdgeType = .new_line(CC, BB);
-    const BBAA: EdgeType = .new_line(BB, AA);
-    inner_edges[0] = AACC;
-    inner_edges[1] = CCBB;
-    inner_edges[2] = BBAA;
-    shapes[0] = ShapeType{
-        .edges = .from_slice_keep_data(outer_edges[0..3]),
-    };
-    shapes[1] = ShapeType{
-        .edges = .from_slice_keep_data(inner_edges[0..3]),
-    };
-    return CompositeShapeType{
-        .contours = .from_slice_keep_data(shapes[0..2]),
-    };
-}
-
-test "Shape -> rasterize_triangle" {
-    const OUT_DEF = DataGridModule.GridDefinition{
-        .LIST_DEF = .{
-            .ELEM = u8,
-            .OWNERSHIP = .OWNED_ALLOCATED,
-        },
-        .ROW_COLUMN_ORDER = .ROW_MAJOR,
-        .X_ORDER = .LEFT_TO_RIGHT,
-        .Y_ORDER = .TOP_TO_BOTTOM,
-    };
-    const alloc = std.heap.page_allocator;
-    const OUT_GRID = DataGrid(OUT_DEF);
-    const Raster = ScanlineRasterizer(f32, EdgeColor, .WHITE, i8, OUT_DEF);
-    var raster = Raster.init_with_intersection_capacity(8, alloc);
-    defer raster.free(alloc);
-    var output_grid = OUT_GRID.allocate_new(54, 54, 0, alloc);
-    defer output_grid.free(alloc);
-    var inner: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
-    var outer: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
-    var shapes: [2]Contour(f32, EdgeColor, .WHITE) = undefined;
-    const io = std.testing.io;
-    var triangle = make_test_triangle(&inner, &outer, &shapes);
-    // triangle.apply_complex_transform(&.{.skew_from_origin_x_degrees(20)});
-    try std.Io.Dir.cwd().createDirPath(io, "test_out/shape");
-    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .NONE, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_no_antialias.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
-    output_grid.fill_all(0);
-    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_LINEAR_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_linear.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
-    output_grid.fill_all(0);
-    raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_exponential.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
 }
