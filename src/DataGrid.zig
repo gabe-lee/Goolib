@@ -43,6 +43,9 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
+const DEBUG = std.debug.print;
+const DEBUG_VAL = Utils.DebugPrint.debug_val;
+
 pub const YOrder = enum(u8) {
     TOP_TO_BOTTOM,
     BOTTOM_TO_TOP,
@@ -191,6 +194,12 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             self.height = 0;
             self.major_stride = 0;
         }
+        pub fn free_if_non_zero(self: *Self, alloc: Allocator) void {
+            self.cells.free_if_non_zero(alloc);
+            self.width = 0;
+            self.height = 0;
+            self.major_stride = 0;
+        }
         pub fn clear(self: *Self) void {
             self.cells.clear();
             self.width = 0;
@@ -280,7 +289,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 .ROW_MAJOR => MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.major_stride, isize)),
                 .COLUMN_MAJOR => MathX.minor_major_coord_to_idx(y_delta, x_delta, num_cast(self.major_stride, isize)),
             };
-            CellList.move_many_item_pointer(ptr, idx_delta);
+            return CellList.move_many_item_pointer(ptr, idx_delta);
         }
         pub inline fn move_cell_ptr_many_with_origin(self: Self, origin: Origin, x_delta: isize, y_delta: isize, ptr: CellPtrMany) CellPtrMany {
             return self.move_cell_ptr_many(get_x_delta_with_origin(origin, x_delta), get_y_delta_with_origin(origin, y_delta), ptr);
@@ -292,6 +301,16 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             return CellList.cast_many_item_ptr_to_ptr(self.move_cell_ptr_many_with_origin(origin, x_delta, y_delta, CellList.cast_ptr_to_many_item_ptr(ptr)));
         }
 
+        pub fn get_idx_unchecked(self: Self, x: IDX, y: IDX) IDX {
+            switch (ROW_COLUMN_ORDER) {
+                .ROW_MAJOR => {
+                    return MathX.minor_major_coord_to_idx(x, y, self.major_stride);
+                },
+                .COLUMN_MAJOR => {
+                    return MathX.minor_major_coord_to_idx(y, x, self.major_stride);
+                },
+            }
+        }
         pub fn get_idx(self: Self, x: IDX, y: IDX) IDX {
             assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.width, self.height });
             switch (ROW_COLUMN_ORDER) {
@@ -337,7 +356,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         }
         pub fn get_cell_ptr(self: Self, x: IDX, y: IDX) CellPtr {
             const idx = self.get_idx(x, y);
-            return &self.cells.get(idx);
+            return self.cells.get_ptr(idx);
         }
         pub fn get_cell_ptr_with_origin(self: Self, origin: Origin, x: IDX, y: IDX) CellPtr {
             const idx = self.get_idx_with_origin(origin, x, y);
@@ -358,6 +377,33 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         pub fn set_cell_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, val: Cell) void {
             const idx = self.get_idx_with_origin(origin, x, y);
             self.cells.set(idx, val);
+        }
+        fn lerp_implicit(cell_a: Cell, cell_b: Cell, percent: f32) Cell {
+            return cell_a + num_cast(num_cast(cell_b - cell_a, f32) * percent, Cell);
+        }
+        fn lerp_named_lerp_f32(cell_a: Cell, cell_b: Cell, percent: f32) Cell {
+            return cell_a.lerp_f32(cell_b, percent);
+        }
+        fn lerp_named_lerp(cell_a: Cell, cell_b: Cell, percent: f32) Cell {
+            return cell_a.lerp(cell_b, percent);
+        }
+        pub fn lerp_sub_cell_implicit(self: Self, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell(x, y, lerp_implicit);
+        }
+        pub fn lerp_sub_cell_with_origin_implicit(self: Self, origin: Origin, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell_with_origin(origin, x, y, lerp_implicit);
+        }
+        pub fn lerp_sub_cell_fn_on_cell(self: Self, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell(x, y, lerp_named_lerp);
+        }
+        pub fn lerp_sub_cell_with_origin_fn_on_cell(self: Self, origin: Origin, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell_with_origin(origin, x, y, lerp_named_lerp);
+        }
+        pub fn lerp_sub_cell_fn_on_cell_f32(self: Self, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell(x, y, lerp_named_lerp_f32);
+        }
+        pub fn lerp_sub_cell_with_origin_fn_on_cell_f32(self: Self, origin: Origin, x: f32, y: f32) Cell {
+            return self.lerp_sub_cell_with_origin(origin, x, y, lerp_named_lerp_f32);
         }
         pub fn lerp_sub_cell(self: Self, x: f32, y: f32, lerp_fn: *const fn (cell_a: Cell, cell_b: Cell, percent: f32) Cell) Cell {
             var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.width)));
@@ -400,8 +446,13 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
 
         pub fn discard_and_resize(self: *Self, new_width: IDX, new_height: IDX, fill_value: ?Cell, alloc: Allocator) void {
             self.cells.clear();
+            if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
+                self.major_stride = new_width;
+            } else {
+                self.major_stride = new_height;
+            }
             if (new_width > 0 and new_height > 0) {
-                const new_end = self.get_idx(new_width, new_height);
+                const new_end = self.get_idx_unchecked(new_width, new_height);
                 self.cells.grow_capacity_if_needed(new_end, .GROW_BY_25_PERCENT, alloc);
                 self.cells.set_len_unchecked(new_end);
                 if (fill_value) |val| {

@@ -168,13 +168,13 @@ pub fn Flags(comptime FLAGS_ENUM: type, comptime GROUPS_ENUM: type) type {
         pub inline fn set(self: *Self, flag: Flag) void {
             self.raw |= bits(flag);
         }
-        pub inline fn set_one_bit_if_true(self: *Self, flag: Flag, state: bool) void {
+        pub inline fn set_flag_if_true(self: *Self, flag: Flag, state: bool) void {
             const off = ctz(flag);
             const bit_lo: RawInt = @intCast(@intFromBool(state));
             const bit = bit_lo << off;
             self.raw |= bit;
         }
-        pub inline fn clear_one_bit_if_false(self: *Self, flag: Flag, state: bool) void {
+        pub inline fn clear_flag_if_false(self: *Self, flag: Flag, state: bool) void {
             const off = ctz(flag);
             const bit_lo: RawInt = @intCast(@intFromBool(state));
             const bit = bit_lo << off;

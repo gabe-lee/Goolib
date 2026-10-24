@@ -102,7 +102,7 @@ pub fn LinearBezier(comptime T: type) type {
         }
 
         pub fn delta(self: Self) Vector {
-            return self.end.subtract(self.start);
+            return self.end().subtract(self.start());
         }
 
         pub fn tangent_at_interp(self: Self, percent: T) Vector {
@@ -116,7 +116,7 @@ pub fn LinearBezier(comptime T: type) type {
             return Vector.ZERO_ZERO;
         }
 
-        pub fn length(self: Self) Vector {
+        pub fn length(self: Self) T {
             return self.delta().length();
         }
 
@@ -127,7 +127,7 @@ pub fn LinearBezier(comptime T: type) type {
             const point_to_nearest_endpoint_delta = self.p[@intFromBool(percent > 0.5)].subtract(point);
             const point_to_nearest_endpoint_distance = point_to_nearest_endpoint_delta.length();
             if (percent > 0 and percent < 1) {
-                const ortho_dist = line_delta.orthoganal_normal_cw(.perp_zero_is_y_magnitude_1).dot(point_to_start_delta);
+                const ortho_dist = line_delta.orthoganal_normal_cw(.PERP_ZERO_IS_LAST_COMPONENT_1).dot(point_to_start_delta);
                 if (@abs(ortho_dist) < point_to_nearest_endpoint_distance) {
                     return SignedDistanceWithPercent(T).new(ortho_dist, 0, percent);
                 }
@@ -173,8 +173,8 @@ pub fn LinearBezier(comptime T: type) type {
             return result;
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB) void {
-            aabb.combine_with_point(self.p[0]);
-            aabb.combine_with_point(self.p[1]);
+            aabb.* = aabb.combine_with_point(self.p[0]);
+            aabb.* = aabb.combine_with_point(self.p[1]);
         }
         pub fn move_start_point(self: *Self, new_start: Point) void {
             self.p[0] = new_start;
@@ -280,7 +280,7 @@ pub fn QuadraticBezier(comptime T: type) type {
         }
         pub fn length_estimate(self: Self, steps: u32) T {
             const self_float = if (!Types.type_is_float(T)) self.change_base_type(Vector.F) else self;
-            const step: Vector.F = 1.0 / MathX.convert_number(steps, Vector.F);
+            const step: Vector.F = 1.0 / num_cast(steps, Vector.F);
             var i: u32 = 0;
             var s: Vector.F = 0;
             var total: Vector.F = 0;
@@ -298,7 +298,7 @@ pub fn QuadraticBezier(comptime T: type) type {
             }
             delta_ = self.p[2].subtract(last);
             total += delta_.length();
-            return MathX.convert_number(total, T);
+            return num_cast(total, T);
         }
 
         pub fn minimum_signed_distance_from_point(self: Self, point: Point) SignedDistanceWithPercent(T) {
@@ -460,7 +460,7 @@ pub fn QuadraticBezier(comptime T: type) type {
                     }
                 }
             }
-            if (next_slope_sign != if (y_value >= self.p[2].y) 1 else -1) {
+            if (next_slope_sign != if (y_value >= self.p[2].y) @as(SLOPE_TYPE, 1) else @as(SLOPE_TYPE, -1)) {
                 if (result.count > 0) {
                     result.count -= 1;
                 } else {
@@ -489,21 +489,21 @@ pub fn QuadraticBezier(comptime T: type) type {
             return result;
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB) void {
-            aabb.combine_with_point(self.p[0]);
-            aabb.combine_with_point(self.p[2]);
+            aabb.* = aabb.combine_with_point(self.p[0]);
+            aabb.* = aabb.combine_with_point(self.p[2]);
             const seg_1 = self.p[1].subtract(self.p[0]);
             const seg_2 = self.p[2].subtract(self.p[1]);
             const bot = seg_1.subtract(seg_2);
             if (bot.x != 0) {
                 const percent = seg_1.x / bot.x;
                 if (percent > 0 and percent < 1) {
-                    aabb.combine_with_point(self.interp_point(percent));
+                    aabb.* = aabb.combine_with_point(self.interp_point(percent));
                 }
             }
             if (bot.y != 0) {
                 const percent = seg_1.y / bot.y;
                 if (percent > 0 and percent < 1) {
-                    aabb.combine_with_point(self.interp_point(percent));
+                    aabb.* = aabb.combine_with_point(self.interp_point(percent));
                 }
             }
         }
@@ -617,13 +617,13 @@ pub fn CubicBezier(comptime T: type) type {
             return change_123.lerp(change_234, percent);
         }
 
-        pub fn length(self: Self) Vector {
+        pub fn length(self: Self) T {
             _ = self;
             assert_unreachable(@src(), "not implemented", .{});
         }
         pub fn length_estimate(self: Self, steps: u32) T {
             const self_float = if (!Types.type_is_float(T)) self.change_base_type(Vector.F) else self;
-            const step: Vector.F = 1.0 / MathX.convert_number(steps, Vector.F);
+            const step: Vector.F = 1.0 / num_cast(steps, Vector.F);
             var i: u32 = 0;
             var s: Vector.F = 0;
             var total: Vector.F = 0;
@@ -641,7 +641,7 @@ pub fn CubicBezier(comptime T: type) type {
             }
             delta_ = self.p[3].subtract(last);
             total += delta_.length();
-            return MathX.convert_number(total, T);
+            return num_cast(total, T);
         }
 
         pub fn minimum_signed_distance_from_point_estimate(self: Self, point: Point, comptime precision: comptime_int) SignedDistanceWithPercent(T) {
@@ -713,6 +713,7 @@ pub fn CubicBezier(comptime T: type) type {
                     return SignedDistanceWithPercent(T).new(min_distance, @abs(end_tangent.normalize().dot(point_to_end_delta.normalize_using_length(point_to_end_delta_length))), percent);
                 }
             }
+            unreachable;
         }
         pub fn reverse(self: *Self) void {
             const tmp_1 = self.p[3];
@@ -774,7 +775,7 @@ pub fn CubicBezier(comptime T: type) type {
                                 result.intersections[result.count].point.y = y_value;
                             },
                         }
-                        if (next_slope_sign * (segment_1.y + (2 * percent * segment_12_diff.y) + (percent_squared * segment_12d_23d_diff.y)) >= 0) {
+                        if (num_cast(next_slope_sign, T) * (segment_1.y + (2 * percent * segment_12_diff.y) + (percent_squared * segment_12d_23d_diff.y)) >= 0) {
                             switch (SLOPE_MODE) {
                                 .exact => {
                                     result.intersections[result.count].slope = num_cast(self.tangent_at_interp(percent).slope(), SLOPE_TYPE);
@@ -818,7 +819,7 @@ pub fn CubicBezier(comptime T: type) type {
                     }
                 }
             }
-            if (next_slope_sign != if (y_value >= self.p[3].y) 1 else -1) {
+            if (next_slope_sign != if (y_value >= self.p[3].y) @as(SLOPE_TYPE, 1) else @as(SLOPE_TYPE, -1)) {
                 if (result.count > 0) {
                     result.count -= 1;
                 } else {
@@ -847,8 +848,8 @@ pub fn CubicBezier(comptime T: type) type {
             return result;
         }
         pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, comptime linear_estimate: LinearEstimate(T)) void {
-            aabb.combine_with_point(self.p[0]);
-            aabb.combine_with_point(self.p[3]);
+            aabb.* = aabb.combine_with_point(self.p[0]);
+            aabb.* = aabb.combine_with_point(self.p[3]);
             const seg_1 = self.p[1].subtract(self.p[0]);
             const seg_2 = self.p[2].subtract(self.p[1]);
             const seg_12_diff = seg_2.subtract(seg_1);
@@ -859,13 +860,13 @@ pub fn CubicBezier(comptime T: type) type {
             const x_solutions = MathX.solve_quadratic_polynomial_for_zeros_advanced(vec_a.x, vec_b.x, vec_c.x, linear_estimate);
             for (x_solutions.vals[0..x_solutions.count]) |percent| {
                 if (percent > 0 and percent < 1) {
-                    aabb.combine_with_point(self.interp_point(percent));
+                    aabb.* = aabb.combine_with_point(self.interp_point(percent));
                 }
             }
             const y_solutions = MathX.solve_quadratic_polynomial_for_zeros_advanced(vec_a.y, vec_b.y, vec_c.y, linear_estimate);
             for (y_solutions.vals[0..y_solutions.count]) |percent| {
                 if (percent > 0 and percent < 1) {
-                    aabb.combine_with_point(self.interp_point(percent));
+                    aabb.* = aabb.combine_with_point(self.interp_point(percent));
                 }
             }
         }

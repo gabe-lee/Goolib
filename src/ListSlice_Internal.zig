@@ -754,6 +754,10 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             assert_valid_idx(self, idx, @src());
             set_field_true_idx(self, field, true_idx(self, idx), val);
         }
+        pub fn set_nth_from_end(self: List, n: IDX, val: ELEM) void {
+            assert_len_greater_equal_count(self, 1 + n, @src());
+            set_true_idx(self, true_idx(self, get_len(self) - 1 - n), val);
+        }
         pub fn memset_range(self: List, val: ELEM, start: IDX, end_exclusive: IDX) void {
             assert_mutable(@src());
             assert_with_reason(start <= end_exclusive and end_exclusive <= get_cap(self), @src(), "memset exceeds entire memory capacity, memset end = {d}, capacity = {d}", .{ end_exclusive, get_cap(self) });
@@ -796,10 +800,6 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn get(self: List, idx: IDX) ELEM {
             assert_valid_idx(self, idx, @src());
             return get_true_idx(self, true_idx(self, idx));
-        }
-        pub fn get_last(self: List) ELEM {
-            assert_len_greater_equal_count(self, 1, @src());
-            return get_true_idx(self, true_idx(self, get_len(self) - 1));
         }
         fn get_ptr_true_idx(self: List, tidx: TrueIdx) ElemPtr {
             switch (comptime FIELD_LAYOUT) {
@@ -931,6 +931,30 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn get_field_ptr_const(self: List, comptime field: Field, idx: IDX) *const FieldType(field) {
             assert_valid_idx(self, idx, @src());
             return get_field_ptr_const_true_idx(self, field, true_idx(self, idx));
+        }
+        pub fn get_last(self: List) ELEM {
+            assert_len_greater_equal_count(self, 1, @src());
+            return get_true_idx(self, true_idx(self, get_len(self) - 1));
+        }
+        pub fn get_last_ptr(self: List) ElemPtr {
+            assert_len_greater_equal_count(self, 1, @src());
+            return get_ptr_true_idx(self, true_idx(self, get_len(self) - 1));
+        }
+        pub fn get_last_ptr_const(self: List) ElemPtrConst {
+            assert_len_greater_equal_count(self, 1, @src());
+            return get_ptr_const_true_idx(self, true_idx(self, get_len(self) - 1));
+        }
+        pub fn get_nth_from_end(self: List, n: IDX) ELEM {
+            assert_len_greater_equal_count(self, 1 + n, @src());
+            return get_true_idx(self, true_idx(self, get_len(self) - 1 - n));
+        }
+        pub fn get_nth_from_end_ptr(self: List, n: IDX) ElemPtr {
+            assert_len_greater_equal_count(self, 1 + n, @src());
+            return get_ptr_true_idx(self, true_idx(self, get_len(self) - 1 - n));
+        }
+        pub fn get_nth_from_end_ptr_const(self: List, n: IDX) ElemPtrConst {
+            assert_len_greater_equal_count(self, 1 + n, @src());
+            return get_ptr_const_true_idx(self, true_idx(self, get_len(self) - 1 - n));
         }
 
         //****************

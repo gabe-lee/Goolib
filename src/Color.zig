@@ -173,8 +173,13 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         pub const CHANNEL_COUNT = @typeInfo(CHANNEL).@"enum".field_names.len;
         pub const BYTE_SIZE = @sizeOf(T) * CHANNEL_COUNT;
         pub const ZERO = Color{};
+        pub const Channel = CHANNEL;
 
         raw: [CHANNEL_COUNT]T = @splat(0),
+
+        pub fn has_channel(comptime chan: []const u8) bool {
+            return @hasField(CHANNEL, chan);
+        }
 
         pub const TYPE = T;
 
@@ -241,6 +246,15 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
             }
             return out;
         }
+        pub fn to_bgra_u8_raw(self: Color) [4]u8 {
+            const cast_u8 = self.cast_values_normalized_to(u8);
+            return [4]u8{
+                if (comptime has_channel("B")) cast_u8.get(.B) else 255,
+                if (comptime has_channel("G")) cast_u8.get(.G) else 255,
+                if (comptime has_channel("R")) cast_u8.get(.R) else 255,
+                if (comptime has_channel("A")) cast_u8.get(.A) else 255,
+            };
+        }
         pub fn reorder_channels_to(self: Color, comptime NEW_CHANNEL_ENUM: type) define_arbitrary_color_type(T, NEW_CHANNEL_ENUM) {
             var out: define_arbitrary_color_type(T, NEW_CHANNEL_ENUM) = undefined;
             const NEW_TAG_INFO = @typeInfo(NEW_CHANNEL_ENUM).@"enum".fields;
@@ -261,8 +275,8 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
             return out;
         }
 
-        pub fn cast_values_normalized_to(self: Color, comptime NEW_CHANNEL_TYPE: type, comptime NEW_ZERO_VAL: NEW_CHANNEL_TYPE) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNEL, NEW_ZERO_VAL) {
-            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNEL, NEW_ZERO_VAL) = undefined;
+        pub fn cast_values_normalized_to(self: Color, comptime NEW_CHANNEL_TYPE: type) define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNEL) {
+            var out: define_arbitrary_color_type(NEW_CHANNEL_TYPE, CHANNEL) = undefined;
             inline for (0..CHANNEL_COUNT) |c| {
                 if (Types.type_is_float(NEW_CHANNEL_TYPE) and Types.type_is_int(T)) {
                     out.raw[c] = MathX.int_to_normalized_float(self.raw[c], NEW_CHANNEL_TYPE);
@@ -281,7 +295,14 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         pub fn lerp(self: Color, other: Color, percent: anytype) Color {
             var out = Color{};
             inline for (0..CHANNEL_COUNT) |c| {
-                out.raw[c] = MathX.lerp(self.raw[c], other.raw[c], percent);
+                out.raw[c] = MathX.upgrade_lerp_out(self.raw[c], other.raw[c], percent, T);
+            }
+            return out;
+        }
+        pub fn lerp_f32(self: Color, other: Color, percent: f32) Color {
+            var out = Color{};
+            inline for (0..CHANNEL_COUNT) |c| {
+                out.raw[c] = MathX.upgrade_lerp_out(self.raw[c], other.raw[c], percent, T);
             }
             return out;
         }

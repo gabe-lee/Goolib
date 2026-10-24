@@ -13,3 +13,5 @@ refs
 /test_out
 zig-pkg
 /zig-pkg
+
+/dev_vendor

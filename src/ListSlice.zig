@@ -458,6 +458,12 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub inline fn set_field(self: ListSelf, comptime field: Field, idx: IDX, val: FieldType(field)) void {
             return IMPL.set_field(self, field, idx, val);
         }
+        pub inline fn set_last(self: ListSelf, val: ELEM) void {
+            return IMPL.set_last(self, val);
+        }
+        pub inline fn set_nth_from_end(self: ListSelf, n: IDX, val: ELEM) void {
+            return IMPL.set_nth_from_end(self, n, val);
+        }
         pub inline fn memset_range(self: ListSelf, val: ELEM, start: IDX, end_exclusive: IDX) void {
             return IMPL.memset_range(self, val, start, end_exclusive);
         }
@@ -473,9 +479,6 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub inline fn get(self: ListSelf, idx: IDX) ELEM {
             return IMPL.get(self, idx);
         }
-        pub inline fn get_last(self: ListSelf) ELEM {
-            return IMPL.get_last(self);
-        }
         pub inline fn get_ptr(self: ListSelf, idx: IDX) ElemPtr {
             return IMPL.get_ptr(self, idx);
         }
@@ -490,6 +493,24 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         pub inline fn get_field_ptr_const(self: ListSelf, comptime field: Field, idx: IDX) *const FieldType(field) {
             return IMPL.get_field_ptr_const(self, field, idx);
+        }
+        pub inline fn get_last(self: ListSelf) ELEM {
+            return IMPL.get_last(self);
+        }
+        pub inline fn get_last_ptr(self: ListSelf) ElemPtr {
+            return IMPL.get_last_ptr(self);
+        }
+        pub inline fn get_last_ptr_const(self: ListSelf) ElemPtrConst {
+            return IMPL.get_last_ptr_const(self);
+        }
+        pub inline fn get_nth_from_end(self: ListSelf, n: IDX) ELEM {
+            return IMPL.get_nth_from_end(self, n);
+        }
+        pub inline fn get_nth_from_end_ptr(self: ListSelf, n: IDX) ElemPtr {
+            return IMPL.get_nth_from_end_ptr(self, n);
+        }
+        pub inline fn get_nth_from_end_ptr_const(self: ListSelf, n: IDX) ElemPtrConst {
+            return IMPL.get_nth_from_end_ptr_const(self, n);
         }
         //****************
         // SPECIAL PTRS

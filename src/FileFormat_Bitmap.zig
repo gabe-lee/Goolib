@@ -238,6 +238,7 @@ fn bgra_equal(a: BGRA, b: BGRA) bool {
 }
 
 pub fn save_bitmap_to_file(path_relative_to_cwd: [:0]const u8, comptime GRID_DEF: DataGridDef, data_grid: DataGrid(GRID_DEF), settings: BitmapSaveSettings, data_conversion: DataConversion(GRID_DEF.LIST_DEF.ELEM), index_map_alloc: Allocator, io: std.Io) anyerror!u32 {
+    @setEvalBranchQuota(10000);
     const file = try std.Io.Dir.cwd().createFile(io, path_relative_to_cwd, .{ .truncate = true });
     defer file.close(io);
     var buf: [1024]u8 = undefined;
@@ -255,7 +256,8 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     assert_with_reason(settings.color_space != .PROFILE_LINKED and settings.color_space != .PROFILE_EMBEDDED, @src(), "color space modes `PROFILE_LINKED` and `PROFILE_EMBEDDED` not implemented/supported (ICC color profiles)", .{});
     const IDX_GRID_DEF = GRID_DEF.with_cell_type(u8);
     const IDX_GRID = DataGrid(IDX_GRID_DEF);
-
+    const CELL = GRID_DEF.LIST_DEF.ELEM;
+    const CELL_IS_STRUCT = Types.type_is_struct(CELL);
     var color_palette: [256]BGRA = undefined;
     var color_palette_list = List(BGRA).from_slice_set_empty(color_palette[0..]);
     const BGRA_PROTO = struct {
@@ -264,7 +266,7 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
         }
     };
     var index_map: IDX_GRID = .{};
-    defer index_map.free(index_map_alloc);
+    defer index_map.free_if_non_zero(index_map_alloc);
     var size: u32 = BMP_CORE_HEADER_SIZE + BMP_DIB_HEADER_V5_SIZE;
     const bytes_per_advance: u32 = switch (settings.bits_per_pixel) {
         .BPP_1, .BPP_4, .BPP_8 => 1,
@@ -300,26 +302,24 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                 const bgra: BGRA = switch (data_conversion) {
                     .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
                         assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                        const cell_cast: u8 = @bitCast(cell);
+                        const cell_cast: u8 = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                         break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
                     },
                     .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
                         assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                        break :make BGRA{ 255, 255, 255, @bitCast(cell) };
+                        break :make BGRA{ 255, 255, 255, if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell) };
                     },
                     .NO_CONVERSION_NEEDED_BGR => make: {
                         assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                        const bgr: BGR = @bitCast(cell);
+                        const bgr: BGR = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                         break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
                     },
                     .NO_CONVERSION_NEEDED_BGRA => make: {
                         assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                        break :make @bitCast(cell);
+                        break :make if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                     },
                     .CONVERT_USING_FUNC => |func| func(cell),
                 };
-                // std.debug.print("original_pixel: {any}\n", .{original_pixel}); //DEBUG
-                // const transformed_pixel: ColorPalettePixel = original_pixel.reorder_channels_to(BitmapModule.BGRA_Channels).cast_values_normalized_to(u8, 0);
                 var color_palette_index = color_palette_list.find_first(bgra, BGRA_PROTO.equals);
                 if (color_palette_index == null) {
                     color_palette_index = color_palette_list.append_one_assume_cap_get_idx(bgra);
@@ -442,21 +442,21 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                         const bgra: BGRA = switch (data_conversion) {
                             .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                break :make BGRA{ 255, 255, 255, @bitCast(cell) };
+                                break :make BGRA{ 255, 255, 255, if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell) };
                             },
                             .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                const cell_cast: u8 = @bitCast(cell);
+                                const cell_cast: u8 = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                                 break :make BGRA{ cell_cast, cell_cast, cell_cast, 255 };
                             },
                             .NO_CONVERSION_NEEDED_BGR => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                const bgr: BGR = @bitCast(cell);
+                                const bgr: BGR = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                                 break :make BGRA{ bgr[0], bgr[1], bgr[2], 255 };
                             },
                             .NO_CONVERSION_NEEDED_BGRA => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                break :make @bitCast(cell);
+                                break :make if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                             },
                             .CONVERT_USING_FUNC => |func| func(cell),
                         };
@@ -473,16 +473,16 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
                             },
                             .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 1, @src(), "cell data was not 1 byte in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                const cell_cast: u8 = @bitCast(cell);
+                                const cell_cast: u8 = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                                 break :make BGR{ cell_cast, cell_cast, cell_cast };
                             },
                             .NO_CONVERSION_NEEDED_BGR => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 3, @src(), "cell data was not 3 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                break :make @bitCast(cell);
+                                break :make if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                             },
                             .NO_CONVERSION_NEEDED_BGRA => make: {
                                 assert_with_reason(@sizeOf(GRID_DEF.LIST_DEF.ELEM) == 4, @src(), "cell data was not 4 bytes in size , `@sizeOf(cell) == {d}`", .{@sizeOf(GRID_DEF.LIST_DEF.ELEM)});
-                                const bgra: BGRA = @bitCast(cell);
+                                const bgra: BGRA = if (comptime CELL_IS_STRUCT) @bitCast(cell.raw) else @bitCast(cell);
                                 break :make BGR{ bgra[0], bgra[1], bgra[2] };
                             },
                             .CONVERT_USING_FUNC => |func| make: {

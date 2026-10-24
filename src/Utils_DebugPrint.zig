@@ -167,12 +167,12 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
             switch (p_info.size) {
                 .slice => {
                     if (p_info.child == u8) {
-                        std.debug.print("0x{x} -> {s}\"{s}\"\n", .{ @intFromPtr(value.ptr), if (p_info.is_const) "const " else "", value });
+                        std.debug.print("0x{x} -> {s}\"{s}\"\n", .{ @intFromPtr(value.ptr), if (p_info.attrs.@"const") "const " else "", value });
                     } else {
                         if (value.len == 0) {
-                            std.debug.print("0x{x} -> [{s}]{s}{s}{{}}\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                            std.debug.print("0x{x} -> [{s}]{s}{s}{{}}\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                         } else {
-                            std.debug.print("0x{x} -> [{s}]{s}{s}{{\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                            std.debug.print("0x{x} -> [{s}]{s}{s}{{\n", .{ @intFromPtr(value.ptr), if (p_info.sentinel_ptr != null) ":<SENTINEL>" else "", if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                             var off: usize = switch (comptime OMODE) {
                                 .NO_OFFSET => 0,
                                 .LOCAL_OFFSET => 0,
@@ -192,12 +192,17 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                 },
                 .one => {
                     if (p_info.child == anyopaque) {
-                        std.debug.print("0x{x} -> &{s}<ANYOPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.is_const) "const " else "" });
+                        std.debug.print("0x{x} -> &{s}<ANYOPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "" });
                     } else if (p_info.child == anyopaque or @typeInfo(p_info.child) == .@"opaque") {
-                        std.debug.print("0x{x} -> &{s}{s}<OPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                        std.debug.print("0x{x} -> &{s}{s}<OPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                     } else {
-                        std.debug.print("0x{x} -> &{s}", .{ @intFromPtr(value), if (p_info.is_const) "const " else "" });
-                        print_payload(value.*, ind, depth_limit, TMODE);
+                        std.debug.print("0x{x} -> &{s}", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "" });
+                        const off: usize = switch (comptime OMODE) {
+                            .NO_OFFSET => 0,
+                            .LOCAL_OFFSET => 0,
+                            .TOTAL_OFFSET => offset,
+                        };
+                        print_payload(value.*, ind, depth_limit, TMODE, OMODE, off);
                     }
                 },
                 .many, .c => {
@@ -208,9 +213,9 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                             var i: usize = 0;
                             var v: p_info.child = value[i];
                             if (v == sentinel) {
-                                std.debug.print("0x{x} -> [*:]{s}{s}{{}}\n", .{ if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                                std.debug.print("0x{x} -> [*:]{s}{s}{{}}\n", .{ if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                             } else {
-                                std.debug.print("0x{x} -> [*:]{s}{s}{{\n", .{ if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                                std.debug.print("0x{x} -> [*:]{s}{s}{{\n", .{ if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                                 var off: usize = switch (comptime OMODE) {
                                     .NO_OFFSET => 0,
                                     .LOCAL_OFFSET => 0,
@@ -228,7 +233,7 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                                 std.debug.print("}}\n", .{});
                             }
                         } else {
-                            std.debug.print("0x{x} -> [*]{s}{s} <MANY-ITEMS UNKNOWN LENGTH>\n", .{ @intFromPtr(value), if (p_info.is_const) "const " else "", type_name(TMODE, p_info.child) });
+                            std.debug.print("0x{x} -> [*]{s}{s} <MANY-ITEMS UNKNOWN LENGTH>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                         }
                     }
                 },

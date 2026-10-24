@@ -328,7 +328,7 @@ pub fn define_vec2_type(comptime T: type) type {
         pub fn orthoganal_normal_ccw(self: Vec2, comptime zero_behavior: PerpendicularZero) Vec2 {
             if (self.is_zero()) {
                 @branchHint(.unlikely);
-                return .new(0, if (zero_behavior == .perp_zero_is_zero) 0 else 1);
+                return .new(0, if (zero_behavior == .PERP_ZERO_IS_ZERO) 0 else 1);
             }
             const len = self.length();
             return self.normalize_using_length(len).perp_ccw();
@@ -336,7 +336,7 @@ pub fn define_vec2_type(comptime T: type) type {
         pub fn orthoganal_normal_cw(self: Vec2, comptime zero_behavior: PerpendicularZero) Vec2 {
             if (self.is_zero()) {
                 @branchHint(.unlikely);
-                return .new(0, if (zero_behavior == .perp_zero_is_zero) 0 else -1);
+                return .new(0, if (zero_behavior == .PERP_ZERO_IS_ZERO) 0 else -1);
             }
             const len = self.length();
             return self.normalize_using_length(len).perp_cw();
