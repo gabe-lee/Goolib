@@ -4003,21 +4003,20 @@ pub const GeneratorError = error{
 test "BezierMSDFGenerator -> Triangle" {
     const io = std.testing.io;
     const Test = Root.Testing;
-    const Float = f32;
-    const Vec = Vec2.define_vec2_type(Float);
     const Gen = BezierMultiSignedDistanceFieldGenerator(f32, 4);
     const EdgeSegment = Gen.EdgeSegment;
     const EdgeSegmentRef = Gen.EdgeSegmentRef;
     const Contour = Gen.Contour;
+    const TEST_TRI = @import("./Shape_Tests.zig");
     var alloc_concrete = std.heap.DebugAllocator(.{}).init;
     const alloc = alloc_concrete.allocator();
     const Shape = Gen.Shape;
-    const A = Vec.new(0, 0);
-    const AA = Vec.new(1, 1);
-    const B = Vec.new(3, 5);
-    const BB = Vec.new(3, 4);
-    const C = Vec.new(0, 5);
-    const CC = Vec.new(4, 1);
+    const A = TEST_TRI.TEST_TRI_OUTER[0];
+    const AA = TEST_TRI.TEST_TRI_INNER[0];
+    const B = TEST_TRI.TEST_TRI_OUTER[1];
+    const BB = TEST_TRI.TEST_TRI_INNER[1];
+    const C = TEST_TRI.TEST_TRI_OUTER[2];
+    const CC = TEST_TRI.TEST_TRI_INNER[2];
     var AB = EdgeSegment{ .points = .new_linear(A, B) };
     var BC = EdgeSegment{ .points = .new_linear(B, C) };
     var CA = EdgeSegment{ .points = .new_linear(C, A) };
@@ -4051,7 +4050,7 @@ test "BezierMSDFGenerator -> Triangle" {
     const settings_msdf = Gen.Generator.ShapeSettings(.MSDF){
         .shape = S,
         .shape_allocator = alloc,
-        .projection = .manual(Gen.Projection{ .scale = .new_splat(5), .translate = .new(0, 0) }),
+        .projection = .manual(Gen.Projection{ .scale = .new_splat(1), .translate = .new(0, 0) }),
         .range_mode = .NATIVE_UNITS,
         .distance_range_width = 1,
         .bitmap_destination = .allocate_new_bitmap(alloc),
@@ -4059,7 +4058,7 @@ test "BezierMSDFGenerator -> Triangle" {
     const settings_sdf = Gen.Generator.ShapeSettings(.SDF){
         .shape = S,
         .shape_allocator = alloc,
-        .projection = .manual(Gen.Projection{ .scale = .new_splat(5), .translate = .new(0, 0) }),
+        .projection = .manual(Gen.Projection{ .scale = .new_splat(1), .translate = .new(0, 0) }),
         .range_mode = .NATIVE_UNITS,
         .distance_range_width = 1,
         .bitmap_destination = .allocate_new_bitmap(alloc),

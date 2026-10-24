@@ -60,25 +60,34 @@ const Contour = ShapeModule.Contour;
 const Shape = ShapeModule.Shape;
 const ScanlineRasterizer = ShapeModule.ScanlineRasterizer;
 const CellAccumulatorRasterizer = ShapeModule.ASCA_Rasterizer;
-const RasterOpts = CellAccumulatorRasterizer.RasterOptions;
+const Vec = Vec2.define_vec2_type(f32);
+pub const TEST_TRI_OUTER = [3]Vec2.define_vec2_type(f32){
+    Vec.new(2, 2),
+    Vec.new(27, 52),
+    Vec.new(52, 2),
+};
+pub const TEST_TRI_INNER = [3]Vec2.define_vec2_type(f32){
+    Vec.new(10, 6),
+    Vec.new(27, 42),
+    Vec.new(44, 6),
+};
 
 fn make_test_triangle_with_edge_color(inner_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), outer_edges: *[3]EdgeWithUserdata(f32, EdgeColor, .WHITE), shapes: *[2]Contour(f32, EdgeColor, .WHITE)) Shape(f32, EdgeColor, .WHITE) {
-    const Vec = Vec2.define_vec2_type(f32);
     const EdgeType = EdgeWithUserdata(f32, EdgeColor, .WHITE);
     const ShapeType = Contour(f32, EdgeColor, .WHITE);
     const CompositeShapeType = Shape(f32, EdgeColor, .WHITE);
-    const A = Vec.new(2, 2);
-    const B = Vec.new(27, 52);
-    const C = Vec.new(52, 2);
+    const A = TEST_TRI_OUTER[0];
+    const B = TEST_TRI_OUTER[1];
+    const C = TEST_TRI_OUTER[2];
     const AB: EdgeType = .new_line(A, B);
     const BC: EdgeType = .new_line(B, C);
     const CA: EdgeType = .new_line(C, A);
     outer_edges[0] = AB;
     outer_edges[1] = BC;
     outer_edges[2] = CA;
-    const AA = Vec.new(10, 6);
-    const BB = Vec.new(27, 42);
-    const CC = Vec.new(44, 6);
+    const AA = TEST_TRI_INNER[0];
+    const BB = TEST_TRI_INNER[1];
+    const CC = TEST_TRI_INNER[2];
     const AACC: EdgeType = .new_line(AA, CC);
     const CCBB: EdgeType = .new_line(CC, BB);
     const BBAA: EdgeType = .new_line(BB, AA);
@@ -97,7 +106,6 @@ fn make_test_triangle_with_edge_color(inner_edges: *[3]EdgeWithUserdata(f32, Edg
 }
 
 fn make_test_triangle_no_userdata(inner_edges: *[3]EdgeWithUserdata(f32, void, {}), outer_edges: *[3]EdgeWithUserdata(f32, void, {}), shapes: *[2]Contour(f32, void, {})) Shape(f32, void, {}) {
-    const Vec = Vec2.define_vec2_type(f32);
     const EdgeType = EdgeWithUserdata(f32, void, {});
     const ShapeType = Contour(f32, void, {});
     const CompositeShapeType = Shape(f32, void, {});
@@ -155,13 +163,13 @@ test "Shape -> Scanline Rasterized Triangle" {
     // triangle.apply_complex_transform(&.{.skew_from_origin_x_degrees(20)});
     try std.Io.Dir.cwd().createDirPath(io, "test_out/shape");
     raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .NONE, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_no_antialias.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_scanline_no_antialias.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
     output_grid.fill_all(0);
     raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_LINEAR_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_linear.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_scanline_aa_x_linear.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
     output_grid.fill_all(0);
     raster.rasterize_to_existing_data_grid_default_lerp(&triangle, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
-    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_hard_antialias_x_exponential.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
+    _ = try BitmapFormat.save_bitmap_to_file("test_out/shape/triangle_scanline_aa_x_exponential.bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
 }
 
 test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
@@ -190,6 +198,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
         .X_ORDER = .LEFT_TO_RIGHT,
         .Y_ORDER = .BOTTOM_TO_TOP,
     }, f32, u32, i32);
+    const RasterOpts = Rasterizer.RasterOptions;
     var raster = Rasterizer.init_empty(alloc);
     defer raster.free();
 
@@ -197,8 +206,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
 
     const opts = RasterOpts{
         .tolerance = 0.1,
-        .fill_rule = .EVEN_ODD, // inner and outer contours create a hollow shape
-        .coord_origin = .BOT_LEFT,
+        .fill_rule = .EVEN_ODD,
     };
     // Accumulate all contour edges
     raster.rasterize_shape(triangle, opts);
@@ -209,7 +217,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
     const io = std.testing.io;
     try std.Io.Dir.cwd().createDirPath(io, "test_out/shape");
     _ = try Root.FileFormat.Bitmap.save_bitmap_to_file(
-        "test_out/shape/triangle_accumulator_aa.bmp",
+        "test_out/shape/triangle_cell_span_accumulator_aa.bmp",
         OUT_DEF,
         output_grid,
         .{ .bits_per_pixel = .BPP_8 },

@@ -34,6 +34,9 @@ const DataGrid = DataGridModule.DataGrid;
 const ShapeModule = Root.Shape;
 const List = Root.ListSlice.ListFullDefinition;
 const Math = Root.Math;
+const Cast = Root.Cast;
+
+const num_cast = Cast.num_cast;
 
 pub const FillRule = enum(u8) {
     NON_ZERO,
@@ -42,17 +45,6 @@ pub const FillRule = enum(u8) {
 
 pub const OutputError = error{
     could_not_obtain_output_grid_for_given_size,
-};
-
-pub const RasterOptions = struct {
-    /// Maximum deviation of bezier curves from chord in pixels before splitting
-    tolerance: f32 = 0.2,
-    fill_rule: FillRule = .NON_ZERO,
-    coord_origin: DataGridModule.Origin = .TOP_LEFT,
-    scale_x: f32 = 1.0,
-    scale_y: f32 = 1.0,
-    offset_x: f32 = 0.0,
-    offset_y: f32 = 0.0,
 };
 
 pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefinitionNoList, comptime Float: type, comptime Idx: type, comptime IdxSigned: type) type {
@@ -75,6 +67,17 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
         const CoverList = List(Float, Idx, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
         const Contour = ShapeModule.Contour(Float, void, {});
         const Shape = ShapeModule.Shape(Float, void, {});
+
+        pub const RasterOptions = struct {
+            /// Maximum deviation of bezier curves from chord in pixels before splitting
+            tolerance: Float = 0.2,
+            fill_rule: FillRule = .NON_ZERO,
+            coord_origin: ?DataGridModule.Origin = null,
+            scale_x: Float = 1.0,
+            scale_y: Float = 1.0,
+            offset_x: Float = 0.0,
+            offset_y: Float = 0.0,
+        };
 
         cells: CellGrid = .{},
         row_cover: CoverList = .{},
@@ -105,127 +108,87 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             self.row_cover.free_if_non_zero(self.allocator);
         }
 
+        fn add_cell_area(self: *Self, x: IdxSigned, y: IdxSigned, delta_y: Float, area: Float, opts: RasterOptions) void {
+            if (y < 0 or y >= @as(IdxSigned, @intCast(self.cells.height))) return;
+            const y_idx = @as(Idx, @intCast(y));
+            if (x < 0) {
+                self.row_cover.get_ptr(y_idx).* += delta_y;
+                return;
+            }
+            if (x >= @as(IdxSigned, @intCast(self.cells.width))) {
+                return;
+            }
+            const cell_ptr = self.get_cell_ptr(@intCast(x), y_idx, opts);
+            cell_ptr.cover += delta_y;
+            cell_ptr.area += area;
+        }
+
+        /// Rasterizes a segment strictly contained within scanline [y_row, y_row + 1]
         fn rasterize_subsegment_in_row(self: *Self, y_row: IdxSigned, x0: Float, y0: Float, x1: Float, y1: Float, opts: RasterOptions) void {
             if (y_row < 0 or y_row >= @as(IdxSigned, @intCast(self.cells.height))) return;
-            const dy_total = y1 - y0;
-            if (dy_total == 0) return;
+            const delta_y = y1 - y0;
+            if (delta_y == 0) return;
 
-            const width_f = @as(Float, @floatFromInt(self.cells.width));
-            const row_u: Idx = @intCast(y_row);
-
-            // Entirely left of the viewport -> contributes to row base coverage
-            if (x0 <= 0 and x1 <= 0) {
-                self.row_cover.get_ptr(row_u).* += dy_total;
-                return;
-            }
-            // Entirely right of viewport -> no contribution to visible cells
-            if (x0 >= width_f and x1 >= width_f) {
-                return;
-            }
-
-            var sx0 = x0;
-            var sy0 = y0;
-            var sx1 = x1;
-            var sy1 = y1;
-
-            // Clip against left edge (x = 0)
-            if (sx0 < 0 or sx1 < 0) {
-                if (sx0 < 0) {
-                    const t = (0 - sx0) / (sx1 - sx0);
-                    const y_mid = sy0 + t * (sy1 - sy0);
-                    self.row_cover.get_ptr(row_u).* += (y_mid - sy0);
-                    sx0 = 0;
-                    sy0 = y_mid;
-                } else {
-                    const t = (0 - sx0) / (sx1 - sx0);
-                    const y_mid = sy0 + t * (sy1 - sy0);
-                    self.row_cover.get_ptr(row_u).* += (sy1 - y_mid);
-                    sx1 = 0;
-                    sy1 = y_mid;
-                }
-            }
-
-            // Clip against right edge (x = width)
-            if (sx0 > width_f or sx1 > width_f) {
-                if (sx0 > width_f) {
-                    const t = (width_f - sx0) / (sx1 - sx0);
-                    sy0 = sy0 + t * (sy1 - sy0);
-                    sx0 = width_f;
-                } else {
-                    const t = (width_f - sx0) / (sx1 - sx0);
-                    sy1 = sy0 + t * (sy1 - sy0);
-                    sx1 = width_f;
-                }
-            }
-
-            const c0 = @as(IdxSigned, @intFromFloat(@floor(sx0)));
-            const c1 = @as(IdxSigned, @intFromFloat(@floor(sx1)));
-            const max_col = @as(IdxSigned, @intCast(self.cells.width - 1));
-            const col_start = @min(@max(c0, 0), max_col);
-            const col_end = @min(@max(c1, 0), max_col);
+            const col_0 = @as(IdxSigned, @intFromFloat(@floor(x0)));
+            const col_1 = @as(IdxSigned, @intFromFloat(@floor(x1)));
 
             // Single pixel column
-            if (col_start == col_end) {
-                const u_0 = sx0 - @as(Float, @floatFromInt(col_start));
-                const u_1 = sx1 - @as(Float, @floatFromInt(col_start));
-                const dy = sy1 - sy0;
-                const cell_ptr = self.cells.get_cell_ptr_with_origin(opts.coord_origin, @intCast(col_start), row_u);
-                cell_ptr.cover += dy;
-                cell_ptr.area += dy * (1.0 - (0.5 * (u_0 + u_1)));
+            if (col_0 == col_1) {
+                const sub_x_0 = x0 - @as(Float, @floatFromInt(col_0));
+                const sub_x_1 = x1 - @as(Float, @floatFromInt(col_0));
+                const area = delta_y * (1.0 - (0.5 * (sub_x_0 + sub_x_1)));
+                self.add_cell_area(col_0, y_row, delta_y, area, opts);
                 return;
             }
 
-            // Multi-column traverse (left to right)
-            if (sx0 < sx1) {
-                var curr_x = sx0;
-                var curr_y = sy0;
-                var c = col_start;
-                while (c < col_end) : (c += 1) {
+            const delta_x = x1 - x0;
+            const inv_dx = 1.0 / delta_x;
+
+            if (col_0 < col_1) {
+                // Moving right: x0 -> x1
+                var curr_x = x0;
+                var curr_y = y0;
+                var c = col_0;
+                while (c < col_1) : (c += 1) {
                     const next_x = @as(Float, @floatFromInt(c + 1));
-                    const t = (next_x - sx0) / (sx1 - sx0);
-                    const next_y = sy0 + t * (sy1 - sy0);
-                    const u_0 = curr_x - @as(Float, @floatFromInt(c));
-                    const dy = next_y - curr_y;
-                    const cell_ptr = self.cells.get_cell_ptr_with_origin(opts.coord_origin, @intCast(col_start), row_u);
-                    cell_ptr.cover += dy;
-                    cell_ptr.area += dy * (1.0 - (0.5 * (u_0 + 1.0)));
+                    const next_y = y0 + (next_x - x0) * (delta_y * inv_dx);
+                    const sub_dy = next_y - curr_y;
+                    const sub_x_0 = curr_x - @as(Float, @floatFromInt(c));
+                    const area = sub_dy * (1.0 - 0.5 * (sub_x_0 + 1.0));
+                    self.add_cell_area(c, y_row, sub_dy, area, opts);
                     curr_x = next_x;
                     curr_y = next_y;
                 }
-                const u_0 = curr_x - @as(Float, @floatFromInt(col_end));
-                const u_1 = sx1 - @as(Float, @floatFromInt(col_end));
-                const dy = sy1 - curr_y;
-                const cell_ptr = self.cells.get_cell_ptr_with_origin(opts.coord_origin, @intCast(col_end), row_u);
-                cell_ptr.cover += dy;
-                cell_ptr.area += dy * (1.0 - (0.5 * (u_0 + u_1)));
+                const sub_dy = y1 - curr_y;
+                const sub_x_0 = curr_x - @as(Float, @floatFromInt(col_1));
+                const sub_x_1 = x1 - @as(Float, @floatFromInt(col_1));
+                const area = sub_dy * (1.0 - 0.5 * (sub_x_0 + sub_x_1));
+                self.add_cell_area(col_1, y_row, sub_dy, area, opts);
             } else {
-                // Multi-column traverse (right to left)
-                var curr_x = sx0;
-                var curr_y = sy0;
-                var c = col_start;
-                while (c > col_end) : (c -= 1) {
+                // Moving left: x0 -> x1
+                var curr_x = x0;
+                var curr_y = y0;
+                var c = col_0;
+                while (c > col_1) : (c -= 1) {
                     const next_x = @as(Float, @floatFromInt(c));
-                    const t = (next_x - sx0) / (sx1 - sx0);
-                    const next_y = sy0 + t * (sy1 - sy0);
-                    const u_0 = curr_x - @as(Float, @floatFromInt(c));
-                    const dy = next_y - curr_y;
-                    const cell_ptr = self.cells.get_cell_ptr_with_origin(opts.coord_origin, @intCast(col_start), row_u);
-                    cell_ptr.cover += dy;
-                    cell_ptr.area += dy * (1.0 - (0.5 * (u_0 + 0.0)));
+                    const next_y = y0 + (next_x - x0) * (delta_y * inv_dx);
+                    const sub_dy = next_y - curr_y;
+                    const sub_x_0 = curr_x - @as(Float, @floatFromInt(c));
+                    const area = sub_dy * (1.0 - 0.5 * (sub_x_0 + 0.0));
+                    self.add_cell_area(c, y_row, sub_dy, area, opts);
                     curr_x = next_x;
                     curr_y = next_y;
                 }
-                const u_0 = curr_x - @as(Float, @floatFromInt(col_end));
-                const u_1 = sx1 - @as(Float, @floatFromInt(col_end));
-                const dy = sy1 - curr_y;
-                const cell_ptr = self.cells.get_cell_ptr_with_origin(opts.coord_origin, @intCast(col_start), row_u);
-                cell_ptr.cover += dy;
-                cell_ptr.area += dy * (1.0 - 0.5 * (u_0 + u_1));
+                const sub_dy = y1 - curr_y;
+                const sub_x_0 = curr_x - @as(Float, @floatFromInt(col_1));
+                const sub_x_1 = x1 - @as(Float, @floatFromInt(col_1));
+                const area = sub_dy * (1.0 - 0.5 * (sub_x_0 + sub_x_1));
+                self.add_cell_area(col_1, y_row, sub_dy, area, opts);
             }
         }
 
         pub fn add_line(self: *Self, p0: Vector, p1: Vector, opts: RasterOptions) void {
-            if (p0.y == p1.y) return; // Purely horizontal lines have dy = 0
+            if (p0.y == p1.y) return; // Pure horizontal segments contribute 0 cover/area
 
             var x0 = p0.x;
             var y0 = p0.y;
@@ -234,66 +197,71 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
 
             const height_f = @as(Float, @floatFromInt(self.cells.height));
 
-            // Viewport clipping along Y
+            // Clip against vertical screen bounds [0, height]
             if ((y0 <= 0 and y1 <= 0) or (y0 >= height_f and y1 >= height_f)) return;
 
+            const orig_dy = y1 - y0;
+            const orig_dx = x1 - x0;
+            const inv_dy = 1.0 / orig_dy;
+
+            // Clip y0
             if (y0 < 0) {
-                const t = (0 - y0) / (y1 - y0);
-                x0 = x0 + t * (x1 - x0);
+                x0 = x0 + (0 - y0) * orig_dx * inv_dy;
                 y0 = 0;
             } else if (y0 > height_f) {
-                const t = (height_f - y0) / (y1 - y0);
-                x0 = x0 + t * (x1 - x0);
+                x0 = x0 + (height_f - y0) * orig_dx * inv_dy;
                 y0 = height_f;
             }
 
+            // Clip y1
             if (y1 < 0) {
-                const t = (0 - y0) / (y1 - y0);
-                x1 = x0 + t * (x1 - x0);
+                x1 = p0.x + (0 - p0.y) * orig_dx * inv_dy;
                 y1 = 0;
             } else if (y1 > height_f) {
-                const t = (height_f - y0) / (y1 - y0);
-                x1 = x0 + t * (x1 - x0);
+                x1 = p0.x + (height_f - p0.y) * orig_dx * inv_dy;
                 y1 = height_f;
             }
 
+            if (y0 == y1) return;
+
             const r0 = @as(IdxSigned, @intFromFloat(@floor(y0)));
             const r1 = @as(IdxSigned, @intFromFloat(@floor(y1)));
-            const max_row = @as(IdxSigned, @intCast(self.cells.height - 1));
-            const row_start = @min(@max(r0, 0), max_row);
-            const row_end = @min(@max(r1, 0), max_row);
 
-            if (row_start == row_end) {
-                self.rasterize_subsegment_in_row(row_start, x0, y0, x1, y1, opts);
+            if (r0 == r1) {
+                self.rasterize_subsegment_in_row(r0, x0, y0, x1, y1, opts);
                 return;
             }
 
-            if (y0 < y1) {
+            const clamped_dx = x1 - x0;
+            const clamped_dy = y1 - y0;
+            const clamped_inv_dy = 1.0 / clamped_dy;
+
+            if (r0 < r1) {
+                // Moving down/up: y0 -> y1
                 var curr_x = x0;
                 var curr_y = y0;
-                var r = row_start;
-                while (r < row_end) : (r += 1) {
+                var r = r0;
+                while (r < r1) : (r += 1) {
                     const next_y = @as(Float, @floatFromInt(r + 1));
-                    const t = (next_y - y0) / (y1 - y0);
-                    const next_x = x0 + t * (x1 - x0);
+                    const next_x = x0 + (next_y - y0) * clamped_dx * clamped_inv_dy;
                     self.rasterize_subsegment_in_row(r, curr_x, curr_y, next_x, next_y, opts);
                     curr_x = next_x;
                     curr_y = next_y;
                 }
-                self.rasterize_subsegment_in_row(row_end, curr_x, curr_y, x1, y1, opts);
+                self.rasterize_subsegment_in_row(r1, curr_x, curr_y, x1, y1, opts);
             } else {
+                // Moving down/up: y0 -> y1 (reversed)
                 var curr_x = x0;
                 var curr_y = y0;
-                var r = row_start;
-                while (r > row_end) : (r -= 1) {
+                var r = r0;
+                while (r > r1) : (r -= 1) {
                     const next_y = @as(Float, @floatFromInt(r));
-                    const t = (next_y - y0) / (y1 - y0);
-                    const next_x = x0 + t * (x1 - x0);
+                    const next_x = x0 + (next_y - y0) * clamped_dx * clamped_inv_dy;
                     self.rasterize_subsegment_in_row(r, curr_x, curr_y, next_x, next_y, opts);
                     curr_x = next_x;
                     curr_y = next_y;
                 }
-                self.rasterize_subsegment_in_row(row_end, curr_x, curr_y, x1, y1, opts);
+                self.rasterize_subsegment_in_row(r1, curr_x, curr_y, x1, y1, opts);
             }
         }
 
@@ -376,6 +344,21 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             }
         }
 
+        fn get_cell(self: Self, x: Idx, y: Idx, opts: RasterOptions) Cell {
+            if (opts.coord_origin) |origin| {
+                return self.cells.get_cell_with_origin(origin, x, y);
+            } else {
+                return self.cells.get_cell(x, y);
+            }
+        }
+        fn get_cell_ptr(self: *Self, x: Idx, y: Idx, opts: RasterOptions) *Cell {
+            if (opts.coord_origin) |origin| {
+                return self.cells.get_cell_ptr_with_origin(origin, x, y);
+            } else {
+                return self.cells.get_cell_ptr(x, y);
+            }
+        }
+
         pub fn rasterize_shape(self: *Self, shape: Shape, opts: RasterOptions) void {
             for (shape.contours.zig_slice_entire()) |contour| {
                 self.rasterize_contour(contour, opts);
@@ -391,25 +374,26 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             opts: RasterOptions,
         ) OutputError!OUTPUT_GRID_DEF.Grid().DataGridWithParentOffset {
             var output_grid_with_offset = output_grid_region.obtain_grid(self.cells.width, self.cells.height) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
+            if (self.cells.width != num_cast(output_grid_with_offset.data_grid.width, Idx) or self.cells.height != num_cast(output_grid_with_offset.data_grid.height, Idx)) return OutputError.could_not_obtain_output_grid_for_given_size;
             var y: Idx = 0;
             while (y < self.cells.height) : (y += 1) {
                 var accum = self.row_cover.get(y);
                 var x: Idx = 0;
                 while (x < self.cells.width) : (x += 1) {
-                    const c: Cell = self.cells.get_cell_with_origin(opts.coord_origin, x, y);
+                    const c: Cell = self.get_cell(x, y, opts);
                     const raw_val = accum + c.area;
                     accum += c.cover;
-
                     var coverage: Float = 0;
                     switch (opts.fill_rule) {
                         .NON_ZERO => {
-                            coverage = @min(1.0, @abs(@as(Float, @floatCast(raw_val))));
+                            coverage = @min(1.0, @max(0.0, @abs(raw_val)));
                         },
                         .EVEN_ODD => {
-                            const v = @abs(@as(Float, @floatCast(raw_val)));
+                            const v = @abs(raw_val);
                             const f = v - @floor(v);
-                            const int_v = @as(IdxSigned, @intFromFloat(@floor(v)));
+                            const int_v = @as(i32, @intFromFloat(@floor(v)));
                             coverage = if ((int_v & 1) != 0) 1.0 - f else f;
+                            coverage = @min(1.0, @max(0.0, coverage));
                         },
                     }
                     const final_px = Math.upgrade_lerp_out(unfill_val, fill_val, coverage, OUTPUT_GRID_DEF.LIST_DEF.ELEM);
