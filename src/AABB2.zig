@@ -58,14 +58,18 @@ pub fn define_aabb2_type(comptime T: type) type {
         y_min: T = INF,
         y_max: T = NEG_INF,
 
-        pub inline fn INFINITE() T_AABB2 {
-            return T_AABB2{
-                .x_min = NEG_INF,
-                .x_max = INF,
-                .y_min = NEG_INF,
-                .y_max = INF,
-            };
-        }
+        pub const INFINITE = T_AABB2{
+            .x_min = NEG_INF,
+            .x_max = INF,
+            .y_min = NEG_INF,
+            .y_max = INF,
+        };
+        pub const ZERO = T_AABB2{
+            .x_min = 0,
+            .x_max = 0,
+            .y_min = 0,
+            .y_max = 0,
+        };
 
         pub inline fn get(self: T_AABB2, comptime EDGE: Edge, comptime AXIS: Axis) T {
             switch (comptime EDGE) {

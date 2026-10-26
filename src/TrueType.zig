@@ -685,7 +685,7 @@ pub const TrueTypeFont = struct {
 
         if (aabb_size.x == 0 or aabb_size.y == 0) return .empty;
 
-        var data_grid_and_offset = data_grid.obtain_grid(@intCast(aabb_max.x), @intCast(aabb_max.y)) orelse return GlyphBitmapError.could_not_obtain_bitmap_from_source;
+        var data_grid_and_offset = data_grid.obtain_grid_opaque(@intCast(aabb_max.x), @intCast(aabb_max.y)) orelse return GlyphBitmapError.could_not_obtain_bitmap_from_source;
         //FIXME something is really wrong with these hacks to shift/frame the glyph
         rasterize_vertices_to_data_grid_internal(vertices, &data_grid_and_offset.data_grid, flatness.val, scale_x, scale_y, shift_x, shift_y, aabb.x_min, aabb.y_min, true, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
 

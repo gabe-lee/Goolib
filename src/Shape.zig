@@ -89,7 +89,7 @@ pub const EdgeKind = enum(u8) {
 pub fn Point(comptime T: type) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -239,7 +239,7 @@ pub fn Point(comptime T: type) type {
 pub fn Line(comptime T: type) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -428,7 +428,7 @@ pub fn Line(comptime T: type) type {
 pub fn QuadraticBezier(comptime T: type) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -836,7 +836,7 @@ pub fn QuadraticBezier(comptime T: type) type {
 pub fn CubicBezier(comptime T: type) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -1242,7 +1242,7 @@ pub fn EdgeNoUserdata(comptime T: type) type {
 pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USERDATA_DEFAULT_ZERO: USERDATA) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -1393,7 +1393,7 @@ pub fn EdgeWithUserdata(comptime T: type, comptime USERDATA: type, comptime USER
 pub fn Edge(comptime T: type) type {
     return union(EdgeKind) {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -1858,7 +1858,7 @@ pub fn ContourNoUserdata(comptime T: type) type {
 pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -2069,7 +2069,7 @@ pub fn ShapeNoUserdata(comptime T: type) type {
 pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERDATA_DEFAULT_VALUE: EDGE_USERDATA) type {
     return struct {
         const Self = @This();
-        const Matrix = Mat3x3.define_matrix_3x3_type(T);
+        const Matrix = Root.Matrix.Mat3x3(T);
         const Vector = Vec2.define_vec2_type(T);
         const VectorF = Vec2.define_vec2_type(Vector.F);
         const AABB = AABB2.define_aabb2_type(T);
@@ -2152,7 +2152,17 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
                 contour.apply_affine_transform_matrix(matrix);
             }
         }
-
+        pub fn apply_transform_in_place(self: *Self, transform: Transform(T)) void {
+            switch (transform) {
+                .NONE => {},
+                .STEPS_ALTER_ORIGINAL, .STEPS_PRESERVE_ORIGINAL => |steps| {
+                    self.apply_complex_transform(steps);
+                },
+                .MATRIX_ALTER_ORIGINAL, .MATRIX_PRESERVE_ORIGINAL => |matrix| {
+                    self.apply_affine_transform_matrix(matrix);
+                },
+            }
+        }
         pub fn add_bounds_to_aabb(self: *Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             for (self.contours.zig_slice_entire()) |*contour| {
                 contour.add_bounds_to_aabb(aabb, linear_estimate);
@@ -3292,280 +3302,6 @@ pub const ErrorFlags = Flags.Flags(enum(u8) {
 
 pub const ErrorDataGrid = DataGrid(DATA_GRID_DEF.with_cell_type(ErrorFlags));
 
-// pub fn MultiSignedDistanceFieldErrorCorrector(comptime T: type) type {
-//     return struct {
-//         const Self = @This();
-//         const Vector = Vec2.define_vec2_type(T);
-
-//         error_grid: ErrorDataGrid = .{},
-//         transform: Transformation = .{},
-//         /// The minimum ratio between the actual and maximum expected distance delta to be considered an error.
-//         min_deviation_ratio: Float = DEFAULT_MIN_ERROR_DEVIATION_RATIO,
-//         /// The minimum ratio between the pre-correction distance error and the post-correction distance error.
-//         min_improve_ratio: Float = DEFAULT_MIN_ERROR_IMPROVE_RATIO,
-
-//         pub fn init(stencil: Bitmap(ErrorStencilBitmapDef), transform: Transformation) Self {
-//             var self = Self{
-//                 .stencil = stencil,
-//                 .transform = transform,
-//             };
-//             self.stencil.fill_all(ErrorStencilBitmap.Pixel{ .raw = .{ErrorFlags.from_flag(.NONE)} });
-//             return self;
-//         }
-
-//         pub fn protect_all(self: *Self) void {
-//             var y: u32 = 0;
-//             var x: u32 = undefined;
-//             while (y < self.stencil.height) : (y += 1) {
-//                 x = 0;
-//                 const row = self.stencil.get_h_scanline_native(0, y, self.stencil.width);
-//                 while (x < self.stencil.width) : (x += 1) {
-//                     row.get(x).set(.flags, ErrorFlags.from_flag(.PROTECTED));
-//                 }
-//             }
-//         }
-
-//         pub fn protect_corners(self: *Self, shape: *Shape) void {
-//             if (self.stencil.height == 0 or self.stencil.width == 0) return;
-//             for (shape.contours.zig_slice_entire()) |*contour| {
-//                 if (!contour.edges.is_empty()) {
-//                     var prev_edge = contour.edges.get_last().edge;
-//                     var this_edge: *EdgeSegment = undefined;
-//                     for (contour.edges.zig_slice_entire()) |edge_ref| {
-//                         this_edge = edge_ref.edge;
-//                         const common_color = prev_edge.color.bit_and(this_edge.color).as_flags();
-//                         // If the color changes from prevEdge to edge, this is a corner.
-//                         if (common_color.has_one_or_zero_bits_set()) {
-//                             // Find the four pixels that envelop the corner and mark them as protected.
-//                             const p = self.transform.projection.project(this_edge.interp_point(0));
-//                             const min_x: i32 = @intFromFloat(p.x - 0.5);
-//                             const min_y: i32 = @intFromFloat(p.y - 0.5);
-//                             const max_x = min_x + 1;
-//                             const max_y = min_y + 1;
-//                             // Check that the positions are within bounds.
-//                             const min_x_in_bounds = min_x >= 0;
-//                             const min_y_in_bounds = min_y >= 0;
-//                             const max_x_in_bounds = max_x < self.stencil.width;
-//                             const max_y_in_bounds = max_y < self.stencil.height;
-//                             // Protect the corner pixels that are in bounds
-//                             if (min_x_in_bounds) {
-//                                 if (min_y_in_bounds) {
-//                                     self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(min_x), @intCast(min_y), .flags, ErrorFlags.from_flag(.PROTECTED));
-//                                 }
-//                                 if (max_y_in_bounds) {
-//                                     self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(min_x), @intCast(max_y), .flags, ErrorFlags.from_flag(.PROTECTED));
-//                                 }
-//                             }
-//                             if (max_x_in_bounds) {
-//                                 if (min_y_in_bounds) {
-//                                     self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(max_x), @intCast(min_y), .flags, ErrorFlags.from_flag(.PROTECTED));
-//                                 }
-//                                 if (max_y_in_bounds) {
-//                                     self.stencil.set_pixel_channel_with_origin(.bot_left, @intCast(max_x), @intCast(max_y), .flags, ErrorFlags.from_flag(.PROTECTED));
-//                                 }
-//                             }
-//                         }
-//                         prev_edge = this_edge;
-//                     }
-//                 }
-//             }
-//         }
-
-//         pub fn protect_edges(self: *Self, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS)) void {
-//             const BMP = FloatBitmap(NUM_CHANNELS);
-//             const edge_util = EdgeMaskFuncs(NUM_CHANNELS);
-//             var radius: Float = undefined;
-//             // Horizontal pixel pairs
-//             radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
-//             var y: u32 = 0;
-//             var x: u32 = undefined;
-//             while (y < msdf_region.height) : (y += 1) {
-//                 x = 0;
-//                 const row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
-//                 while (x < msdf_region.width - 1) : (x += 1) {
-//                     const left = row_ptr[x];
-//                     const right = row_ptr[x + 1];
-//                     const left_median = left.median_of_3_channels(.red, .green, .blue);
-//                     const right_median = right.median_of_3_channels(.red, .green, .blue);
-//                     if (@abs(left_median - 0.5) + @abs(right_median - 0.5) < radius) {
-//                         const edge_mask = edge_util.edge_mask_between_pixels(left, right);
-//                         var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
-//                         edge_util.protect_extreme_channels(stencil_ptr, left, left_median, edge_mask);
-//                         stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 1, 0, stencil_ptr);
-//                         edge_util.protect_extreme_channels(stencil_ptr, right, right_median, edge_mask);
-//                     }
-//                 }
-//             }
-//             // Vertical pixel pairs
-//             radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             y = 0;
-//             while (y < msdf_region.height - 1) : (y += 1) {
-//                 x = 0;
-//                 const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y + 1);
-//                 const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
-//                 while (x < msdf_region.width) : (x += 1) {
-//                     const top = top_row_ptr[x];
-//                     const bottom = bot_row_ptr[x];
-//                     const top_median = top.median_of_3_channels(.red, .green, .blue);
-//                     const bottom_median = bottom.median_of_3_channels(.red, .green, .blue);
-//                     if (@abs(bottom_median - 0.5) + @abs(top_median - 0.5) < radius) {
-//                         const edge_mask = edge_util.edge_mask_between_pixels(bottom, top);
-//                         var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
-//                         edge_util.protect_extreme_channels(stencil_ptr, bottom, bottom_median, edge_mask);
-//                         stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 0, 1, stencil_ptr);
-//                         edge_util.protect_extreme_channels(stencil_ptr, top, top_median, edge_mask);
-//                     }
-//                 }
-//             }
-//             // Diagonal pixel pairs
-//             radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             y = 0;
-//             while (y < msdf_region.height - 1) : (y += 1) {
-//                 x = 0;
-//                 const top_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y + 1);
-//                 const bot_row_ptr: [*]BMP.Pixel = msdf_region.get_pixel_ptr_many_with_origin(.bot_left, 0, y);
-//                 while (x < msdf_region.width - 1) : (x += 1) {
-//                     const top_left = top_row_ptr[x];
-//                     const bottom_left = bot_row_ptr[x];
-//                     const top_right = top_row_ptr[x + 1];
-//                     const bottom_right = bot_row_ptr[x + 1];
-//                     const top_left_median = top_left.median_of_3_channels(.red, .green, .blue);
-//                     const bottom_left_median = bottom_left.median_of_3_channels(.red, .green, .blue);
-//                     const top_right_median = top_right.median_of_3_channels(.red, .green, .blue);
-//                     const bottom_right_median = bottom_right.median_of_3_channels(.red, .green, .blue);
-//                     if (@abs(top_left_median - 0.5) + @abs(bottom_right_median - 0.5) < radius) {
-//                         const edge_mask = edge_util.edge_mask_between_pixels(bottom_right, top_left);
-//                         var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x + 1, y);
-//                         edge_util.protect_extreme_channels(stencil_ptr, bottom_right, bottom_right_median, edge_mask);
-//                         stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, -1, 1, stencil_ptr);
-//                         edge_util.protect_extreme_channels(stencil_ptr, top_left, top_left_median, edge_mask);
-//                     }
-//                     if (@abs(top_right_median - 0.5) + @abs(bottom_left_median - 0.5) < radius) {
-//                         const edge_mask = edge_util.edge_mask_between_pixels(bottom_left, top_right);
-//                         var stencil_ptr = self.stencil.get_pixel_ptr_with_origin(.bot_left, x, y);
-//                         edge_util.protect_extreme_channels(stencil_ptr, bottom_left, bottom_left_median, edge_mask);
-//                         stencil_ptr = self.stencil.move_pixel_ptr_with_origin(.bot_left, 1, 1, stencil_ptr);
-//                         edge_util.protect_extreme_channels(stencil_ptr, top_right, top_right_median, edge_mask);
-//                     }
-//                 }
-//             }
-//         }
-
-//         pub fn find_errors_msdf_only(self: *Self, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS), alloc: Allocator) void {
-//             // Compute the expected deltas between values of horizontally, vertically, and diagonally adjacent texels.
-//             const horizontal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
-//             const vertical_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             const diagonal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             // Inspect all texels.
-//             var y: u32 = 0;
-//             var x: u32 = undefined;
-//             while (y < msdf_region.height) : (y += 1) {
-//                 x = 0;
-//                 while (x < msdf_region.width) : (x += 1) {
-//                     const pixel = msdf_region.get_pixel_native(x, y);
-//                     const pixel_median = pixel.median_of_3_channels(.red, .green, .blue);
-//                     const stencil_flag_ptr: *ErrorFlags = self.stencil.get_pixel_channel_ptr_native(x, y, .flags);
-//                     const is_protected = stencil_flag_ptr.has_flag(.PROTECTED);
-//                     const horizontal_classifier = BaseArtifactClassifier.new(horizontal_span, is_protected);
-//                     const vertical_classifier = BaseArtifactClassifier.new(vertical_span, is_protected);
-//                     const diagonal_classifier = BaseArtifactClassifier.new(diagonal_span, is_protected);
-//                     const check = ClassifierFuncs(BaseArtifactClassifier, NUM_CHANNELS);
-//                     // Mark current pixel with the error flag if an artifact occurs when it's interpolated with any of its 8 neighbors.
-//                     stencil_flag_ptr.set_one_bit_if_true(.ERROR,
-//                         //
-//                         (x > 0 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), alloc)) or
-//                             (x < msdf_region.width - 1 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), alloc)) or
-//                             (y > 0 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x, y - 1), alloc)) or
-//                             (y < msdf_region.height - 1 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x, y + 1), alloc)) or
-//                             (x > 0 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x - 1, y - 1), alloc)) or
-//                             (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x + 1, y - 1), alloc)) or
-//                             (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x - 1, y + 1), alloc)) or
-//                             (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x + 1, y + 1), alloc))
-//                             //
-//                     );
-//                 }
-//             }
-//         }
-
-//         pub fn find_errors_msdf_and_shape(self: *Self, comptime CONTOUR_COMBINER_TYPE: type, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS), shape: *Shape, temp_alloc: Allocator) void {
-//             // Compute the expected deltas between values of horizontally, vertically, and diagonally adjacent texels.
-//             const horizontal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
-//             const vertical_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             const diagonal_span = self.min_deviation_ratio * self.transform.projection.un_project_vec(.new_same_xy(self.transform.distance_mapping.calc_delta(.new(1)))).length();
-//             var distance_checker = ShapeDistanceChecker(CONTOUR_COMBINER_TYPE, NUM_CHANNELS).init(msdf_region, shape, self.transform.projection, self.transform.distance_mapping, self.min_improve_ratio, temp_alloc);
-//             const check = ClassifierFuncs(ShapeDistanceChecker(CONTOUR_COMBINER_TYPE, NUM_CHANNELS).ArtifactClassifier, NUM_CHANNELS);
-//             var reverse_x: u1 = 0;
-//             var y: u32 = 0;
-//             var x: u32 = undefined;
-//             var abs_x: u32 = undefined;
-//             const last_x = msdf_region.width - 1;
-//             //TODO: enable some sort of optional multi-threading here?
-//             // Inspect all texels.
-//             while (y < msdf_region.height) : ({
-//                 y += 1;
-//                 reverse_x ^= 1;
-//             }) {
-//                 abs_x = 0;
-//                 while (abs_x < msdf_region.width) : (abs_x += 1) {
-//                     switch (reverse_x) {
-//                         0 => {
-//                             x = abs_x;
-//                         },
-//                         1 => {
-//                             x = last_x - abs_x;
-//                         },
-//                     }
-//                     const stencil_flag_ptr: *ErrorFlags = self.stencil.get_pixel_channel_ptr_native(x, y, .flags);
-//                     if (stencil_flag_ptr.has_flag(.ERROR)) continue;
-//                     const point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5);
-//                     distance_checker.shape_point = self.transform.projection.un_project(point);
-//                     distance_checker.msdf_point = point;
-//                     distance_checker.curr_pixel_ptr = msdf_region.get_pixel_ptr_native(@intCast(x), y);
-//                     distance_checker.protected = stencil_flag_ptr.has_flag(.PROTECTED);
-//                     const pixel = distance_checker.curr_pixel_ptr.*;
-//                     const pixel_median = pixel.median_of_3_channels(.red, .green, .blue);
-//                     // Mark current pixel with the error flag if an artifact occurs when it's interpolated with any of its 8 neighbors.
-//                     stencil_flag_ptr.set_one_bit_if_true(.ERROR,
-//                         //
-//                         (x > 0 and check.has_linear_artifact(distance_checker.classifier(.new(-1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), temp_alloc)) or
-//                             (x < msdf_region.width - 1 and check.has_linear_artifact(distance_checker.classifier(.new(1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), temp_alloc)) or
-//                             (y > 0 and check.has_linear_artifact(distance_checker.classifier(.new(0, 1), vertical_span), pixel_median, pixel, msdf_region.get_pixel_native(x, y - 1), temp_alloc)) or
-//                             (y < msdf_region.height - 1 and check.has_linear_artifact(distance_checker.classifier(.new(0, -1), vertical_span), pixel_median, pixel, msdf_region.get_pixel_native(x, y + 1), temp_alloc)) or
-//                             (x > 0 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x - 1, y - 1), temp_alloc)) or
-//                             (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y - 1), msdf_region.get_pixel_native(x + 1, y - 1), temp_alloc)) or
-//                             (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x - 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x - 1, y + 1), temp_alloc)) or
-//                             (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_pixel_native(x + 1, y), msdf_region.get_pixel_native(x, y + 1), msdf_region.get_pixel_native(x + 1, y + 1), temp_alloc))
-//                             //
-//                     );
-//                 }
-//             }
-//         }
-
-//         pub fn apply_error_correction(self: *Self, comptime NUM_CHANNELS: comptime_int, msdf_region: FloatBitmap(NUM_CHANNELS)) void {
-//             var y: u32 = 0;
-//             var x: u32 = undefined;
-//             var pixel_row: []FloatBitmap(NUM_CHANNELS).Pixel = undefined;
-//             var stencil_row: []ErrorStencilBitmap.Pixel = undefined;
-//             while (y < msdf_region.height) : (y += 1) {
-//                 x = 0;
-//                 pixel_row = msdf_region.get_h_scanline_native(0, y, msdf_region.width);
-//                 stencil_row = self.stencil.get_h_scanline_native(0, y, msdf_region.width);
-//                 while (x < msdf_region.width) : (x += 1) {
-//                     const error_check = stencil_row.get(x).get(.flags);
-//                     if (error_check.has_flag(.ERROR)) {
-//                         // Set all color channels to the median.
-//                         const pixel_ptr: *FloatBitmap(NUM_CHANNELS).Pixel = &pixel_row.get(x);
-//                         const median = pixel_ptr.median_of_3_channels(.red, .green, .blue);
-//                         pixel_ptr.set(.red, median);
-//                         pixel_ptr.set(.green, median);
-//                         pixel_ptr.set(.blue, median);
-//                     }
-//                 }
-//             }
-//         }
-//     };
-// }
-
 pub const EstimatesMode = enum(u8) {
     NO_ESTIMATES,
     WITH_ESTIMATES,
@@ -3643,7 +3379,7 @@ pub const TransformModeNoAlter = enum(u8) {
 
 pub fn Transform(comptime T: type) type {
     const VEC = Vec2.define_vec2_type(T);
-    const MAT = Mat3x3.define_matrix_3x3_type(T);
+    const MAT = Root.Matrix.Mat3x3(T);
     return union(TransformMode) {
         const Self = @This();
 
@@ -3681,7 +3417,7 @@ pub fn Transform(comptime T: type) type {
 
 pub fn TransformNoAlter(comptime T: type) type {
     const VEC = Vec2.define_vec2_type(T);
-    const MAT = Mat3x3.define_matrix_3x3_type(T);
+    const MAT = Root.Matrix.Mat3x3(T);
     return union(TransformModeNoAlter) {
         const Self = @This();
 

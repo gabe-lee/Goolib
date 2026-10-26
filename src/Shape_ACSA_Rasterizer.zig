@@ -35,6 +35,7 @@ const ShapeModule = Root.Shape;
 const List = Root.ListSlice.ListFullDefinition;
 const Math = Root.Math;
 const Cast = Root.Cast;
+const AABB = Root.AABB2.define_aabb2_type;
 
 const num_cast = Cast.num_cast;
 
@@ -73,10 +74,7 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             tolerance: Float = 0.2,
             fill_rule: FillRule = .NON_ZERO,
             coord_origin: ?DataGridModule.Origin = null,
-            scale_x: Float = 1.0,
-            scale_y: Float = 1.0,
-            offset_x: Float = 0.0,
-            offset_y: Float = 0.0,
+            final_shape_padding: Vector = .TWO,
         };
 
         cells: CellGrid = .{},
@@ -310,35 +308,19 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             self.add_cubic_bezier(p0123, p123, p23, p3, tol_sq, depth + 1, opts);
         }
 
-        fn transform_point(p: Vector, opts: RasterOptions) Vector {
-            const x = (p.x * opts.scale_x) + opts.offset_x;
-            const y = (p.y * opts.scale_y) + opts.offset_y;
-            return Vector.new(x, y);
-        }
-
         pub fn rasterize_contour(self: *Self, contour: Contour, opts: RasterOptions) void {
             const tolerance_squared = opts.tolerance * opts.tolerance;
             for (contour.edges.zig_slice_entire()) |edge_item| {
-                const edge = edge_item.edge;
-                switch (edge.kind()) {
+                switch (edge_item.edge) {
                     .POINT => {},
-                    .LINE => {
-                        const p0 = transform_point(edge.get_start(), opts);
-                        const p1 = transform_point(edge.get_end(), opts);
-                        self.add_line(p0, p1, opts);
+                    .LINE => |line| {
+                        self.add_line(line.p[0], line.p[1], opts);
                     },
-                    .QUADRATIC_BEZIER => {
-                        const p0 = transform_point(edge.get_start(), opts);
-                        const p1 = transform_point(edge.get_control_1(), opts);
-                        const p2 = transform_point(edge.get_end(), opts);
-                        self.add_quadratic_bezier(p0, p1, p2, tolerance_squared, 0, opts);
+                    .QUADRATIC_BEZIER => |quad| {
+                        self.add_quadratic_bezier(quad.p[0], quad.p[1], quad.p[2], tolerance_squared, 0, opts);
                     },
-                    .CUBIC_BEZIER => {
-                        const p0 = transform_point(edge.get_start(), opts);
-                        const p1 = transform_point(edge.get_control_1(), opts);
-                        const p2 = transform_point(edge.get_control_2(), opts);
-                        const p3 = transform_point(edge.get_end(), opts);
-                        self.add_cubic_bezier(p0, p1, p2, p3, tolerance_squared, 0, opts);
+                    .CUBIC_BEZIER => |cube| {
+                        self.add_cubic_bezier(cube.p[0], cube.p[1], cube.p[2], cube.p[3], tolerance_squared, 0, opts);
                     },
                 }
             }
@@ -359,21 +341,34 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             }
         }
 
-        pub fn rasterize_shape(self: *Self, shape: Shape, opts: RasterOptions) void {
-            for (shape.contours.zig_slice_entire()) |contour| {
-                self.rasterize_contour(contour, opts);
-            }
-        }
-
-        pub fn write_to_grid(
-            self: Self,
+        pub fn rasterize_shape_to_grid(
+            self: *Self,
+            shape: *Shape,
+            opts: RasterOptions,
             comptime OUTPUT_GRID_DEF: GridDefinition,
             output_grid_region: OUTPUT_GRID_DEF.Grid().Source,
             unfill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
             fill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
-            opts: RasterOptions,
         ) OutputError!OUTPUT_GRID_DEF.Grid().DataGridWithParentOffset {
-            var output_grid_with_offset = output_grid_region.obtain_grid(self.cells.width, self.cells.height) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
+            var unalign_delta: Vector = .ZERO;
+            var aabb: AABB(Float) = .{};
+            shape.add_bounds_to_aabb(&aabb, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(ShapeModule.DEFAULT_LINEAR_ESTIMATE_RATIO));
+            if (opts.align_shape_to_zero) {
+                unalign_delta = aabb.get_min_point();
+                const align_delta = unalign_delta.negate();
+                shape.translate(align_delta);
+                aabb.add_translate(align_delta);
+            }
+            aabb.x_max += opts.final_shape_padding.x * 2;
+            aabb.y_max += opts.final_shape_padding.y * 2;
+            aabb.expand_round_to_int();
+            shape.translate(opts.final_shape_padding);
+            unalign_delta.add(opts.final_shape_padding.negate());
+            for (shape.contours.zig_slice_entire()) |contour| {
+                if (opts.align_shape_to_zero) {}
+                self.rasterize_contour(contour, opts);
+            }
+            var output_grid_with_offset = output_grid_region.obtain_grid_opaque(@intFromFloat(aabb.x_max), @intFromFloat(aabb.y_max)) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
             if (self.cells.width != num_cast(output_grid_with_offset.data_grid.width, Idx) or self.cells.height != num_cast(output_grid_with_offset.data_grid.height, Idx)) return OutputError.could_not_obtain_output_grid_for_given_size;
             var y: Idx = 0;
             while (y < self.cells.height) : (y += 1) {
@@ -402,5 +397,14 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             }
             return output_grid_with_offset;
         }
+
+        pub fn write_to_grid(
+            self: Self,
+            comptime OUTPUT_GRID_DEF: GridDefinition,
+            output_grid_region: OUTPUT_GRID_DEF.Grid().Source,
+            unfill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
+            fill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
+            opts: RasterOptions,
+        ) OutputError!OUTPUT_GRID_DEF.Grid().DataGridWithParentOffset {}
     };
 }

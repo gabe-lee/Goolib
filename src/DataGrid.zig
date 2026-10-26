@@ -823,7 +823,8 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             EXISTING,
             ALLOCATE_NEW,
             REUSE_CELL_BUFFER,
-            PROVIDER_FUNC,
+            PROVIDER_FUNC_OPAQUE,
+            PROVIDER_FUNC_FROM_GRID,
         };
 
         const Vec = Vec2.define_vec2_type(IDX);
@@ -859,8 +860,13 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 alloc: Allocator,
                 fill: ?Cell,
             },
-            PROVIDER_FUNC: struct {
+            PROVIDER_FUNC_OPAQUE: struct {
                 func: *const fn (width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset,
+                fill: ?Cell,
+            },
+            PROVIDER_FUNC_FROM_GRID: struct {
+                grid: Self,
+                func: *const fn (grid: Self, width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset,
                 fill: ?Cell,
             },
 
@@ -873,20 +879,78 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             pub fn reuse_cell_buffer(cells: CellList, alloc: Allocator, fill: ?Cell) Source {
                 return Source{ .REUSE_CELL_BUFFER = .{ .cells = cells, .alloc = alloc, .fill = fill } };
             }
-            pub fn data_grid_provider(func: *const fn (width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset, fill: ?Cell) Source {
-                return Source{ .PROVIDER_FUNC = .{ .func = func, .fill = fill } };
+            pub fn data_grid_provider_opaque(func: *const fn (width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset, fill: ?Cell) Source {
+                return Source{ .PROVIDER_FUNC_OPAQUE = .{ .func = func, .fill = fill } };
+            }
+            pub fn data_grid_provider_from_grid(grid: Self, func: *const fn (grid: Self, width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset, fill: ?Cell) Source {
+                return Source{ .PROVIDER_FUNC_FROM_GRID = .{ .grid = grid, .func = func, .fill = fill } };
             }
 
             pub fn obtain_grid(self: Source, width: IDX, height: IDX) ?DataGridWithParentOffset {
                 return switch (self) {
                     .EXISTING => |src| after_fill: {
+                        if (src.grid_with_offset.data_grid.width >= width and src.grid_with_offset.data_grid.height >= height) return null;
                         if (src.fill) |fill| src.grid_with_offset.data_grid.fill_all(fill);
                         break :after_fill src.grid_with_offset;
                     },
                     .ALLOCATE_NEW => |src| DataGridWithParentOffset.new_no_parent(Self.allocate_new(width, height, src.fill, src.alloc)),
                     .REUSE_CELL_BUFFER => |src| DataGridWithParentOffset.new_no_parent(Self.init_from_existing_list(width, height, src.fill, src.cells, src.alloc)),
-                    .PROVIDER_FUNC => |src| src.func(width, height, src.fill),
+                    .PROVIDER_FUNC_OPAQUE => |src| src.func(width, height, src.fill),
+                    .PROVIDER_FUNC_FROM_GRID => |src| src.func(src.grid, width, height, src.fill),
                 };
+            }
+            pub fn obtain_grid_with_padding(self: Source, width: IDX, height: IDX, pad_x: IDX, pad_y: IDX) ?DataGridWithParentOffset {
+                var with_pad = self.obtain_grid(width + (2 * pad_x), height + (2 * pad_y)) orelse return null;
+                const dg_adjusted = with_pad.data_grid.get_region(pad_x, pad_y, width, height);
+                with_pad.data_grid = dg_adjusted;
+                with_pad.parent_offset.add(.new(pad_x, pad_y));
+                return with_pad;
+            }
+            pub fn obtain_grid_block(self: Source, width: IDX, height: IDX, comptime SUB_GRID_X_COUNT: IDX, comptime SUB_GRID_Y_COUNT: IDX) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset {
+                const total_width = width * SUB_GRID_X_COUNT;
+                const total_height = height * SUB_GRID_Y_COUNT;
+                const total = self.obtain_grid(total_width, total_height) orelse return null;
+                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset = undefined;
+                var px: IDX = 0;
+                var py: IDX = 0;
+                for (0..SUB_GRID_Y_COUNT) |gy| {
+                    px = 0;
+                    for (0..SUB_GRID_X_COUNT) |gx| {
+                        const dg_adjusted = total.data_grid.get_region(px, py, width, height);
+                        const off_adjusted = total.parent_offset.add(px, py);
+                        out[gx][gy] = DataGridWithParentOffset{
+                            .data_grid = dg_adjusted,
+                            .parent_offset = off_adjusted,
+                        };
+                        px += width;
+                    }
+                    py += height;
+                }
+                return out;
+            }
+            pub fn obtain_grid_block_with_padding(self: Source, width: IDX, height: IDX, pad_x: IDX, pad_y: IDX, comptime SUB_GRID_X_COUNT: IDX, comptime SUB_GRID_Y_COUNT: IDX) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset {
+                const width_and_pad = width + (2 * pad_x);
+                const height_and_pad = height + (2 * pad_y);
+                const total_width = width_and_pad * SUB_GRID_X_COUNT;
+                const total_height = height_and_pad * SUB_GRID_Y_COUNT;
+                const total = self.obtain_grid(total_width, total_height) orelse return null;
+                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset = undefined;
+                var px: IDX = 0;
+                var py: IDX = 0;
+                for (0..SUB_GRID_Y_COUNT) |gy| {
+                    px = 0;
+                    for (0..SUB_GRID_X_COUNT) |gx| {
+                        const dg_adjusted = total.data_grid.get_region(px + pad_x, py + pad_y, width, height);
+                        const off_adjusted = total.parent_offset.add(px + pad_x, py + pad_y);
+                        out[gx][gy] = DataGridWithParentOffset{
+                            .data_grid = dg_adjusted,
+                            .parent_offset = off_adjusted,
+                        };
+                        px += width_and_pad;
+                    }
+                    py += height_and_pad;
+                }
+                return out;
             }
         };
     };

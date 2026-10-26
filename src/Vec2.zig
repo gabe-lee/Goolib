@@ -92,6 +92,7 @@ pub fn define_vec2_type(comptime T: type) type {
         pub const LEN = 2;
         pub const ZERO = Vec2{ .x = 0, .y = 0 };
         pub const ONE = Vec2{ .x = 1, .y = 1 };
+        pub const TWO = Vec2{ .x = 2, .y = 2 };
         pub const MIN = Vec2{ .x = MIN_T, .y = MIN_T };
         pub const MAX = Vec2{ .x = MAX_T, .y = MAX_T };
         pub const FILLED_WITH_2 = Vec2{ .x = 2, .y = 2 };
