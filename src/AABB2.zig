@@ -130,6 +130,19 @@ pub fn define_aabb2_type(comptime T: type) type {
             return self.get(.MIN, AXIS) + half_size_on_axis;
         }
 
+        pub fn top_left(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_min, self.y_min);
+        }
+        pub fn top_right(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_max, self.y_min);
+        }
+        pub fn bot_left(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_min, self.y_max);
+        }
+        pub fn bot_right(self: T_AABB2) T_Vec2 {
+            return T_Vec2.new(self.x_max, self.y_max);
+        }
+
         pub fn scale(self: T_AABB2, factor: anytype) T_AABB2 {
             return T_AABB2{
                 .x_min = MathX.upgrade_multiply_out(self.x_min, factor, T),

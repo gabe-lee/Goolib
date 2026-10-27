@@ -2012,7 +2012,6 @@ test "TrueTypeFont -> load and render chars" {
     inline for (CHARS[0..]) |char| {
         const glyph_index = font.get_codepoint_glyph_index(char);
         try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
-        // Shape.zig rasterizer
         try convert_vertex_list_to_shape(&vertex_list, f32, &shape, alloc);
         shape.scale(.new_splat(scale_54_px));
         var shape_aabb = shape.get_bounds_default_estimate();

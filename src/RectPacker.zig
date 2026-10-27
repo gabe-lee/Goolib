@@ -27,14 +27,13 @@ const math = std.math;
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const MathX = Root.Math;
-const List = Root.IList.List;
+const ListFull = Root.ListSlice.ListFullDefinition;
 const AABB2 = Root.AABB2;
 const Rect2 = Root.Rect2;
 const Vec2 = Root.Vec2;
 const Allocator = std.mem.Allocator;
 const DummyAlloc = Root.DummyAllocator;
 
-const assert_is_float = Assert.assert_is_float;
 const assert_with_reason = Assert.assert_with_reason;
 const num_cast = Root.Cast.num_cast;
 
@@ -42,19 +41,24 @@ pub const FINAL_PASS_CREATE_NEW_ROW_THRESHOLD_MULTIPLIER = 2;
 
 /// This packer works best with groups of rects that have relatively similar heights
 /// (or similar widths to heights and/or widths to widths with the `rotation` settings)
-pub fn RowPacker(comptime T: type) type {
+///
+/// Not optimized for indiviual rect eviction and re-allocation. Only fits rects
+/// into completely unused spaces, but rects can be fully re-packed after reseting.
+pub fn RowPacker(comptime T: type, comptime IDX: type) type {
     return struct {
         const Self = @This();
         const AABB = AABB2.define_aabb2_type(T);
         const Rect = Rect2.define_rect2_type(T);
         const Vec = Vec2.define_vec2_type(T);
+        const RowList = ListFull(ConstrainedRow, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
 
         alloc: Allocator = DummyAlloc.allocator_panic,
-        constrained_rows: List(ConstrainedRow) = .{},
+        constrained_rows: RowList = .{},
         unconstrained_row: UnconstrainedRow = .{},
         full_region: Rect = .{},
         default_height_fit_threshold: T = 0,
         total_wasted_area: T = 0,
+        claim_count: IDX = 0,
 
         pub fn init(cap: usize, region: Rect, default_height_fit_threshold: T, alloc: Allocator) Self {
             return Self{
@@ -62,11 +66,11 @@ pub fn RowPacker(comptime T: type) type {
                 .constrained_rows = .init_capacity(cap, alloc),
                 .unconstrained_row = UnconstrainedRow{
                     .max_height = 0,
-                    .min_height = region.h,
-                    .true_max_height = region.h,
-                    .pos = Vec.new(region.x, region.y),
+                    .min_height = region.size.y,
+                    .true_max_height = region.size.y,
+                    .pos = region.pos,
                     .used_width = 0,
-                    .width = region.w,
+                    .width = region.size.x,
                 },
                 .full_region = region,
                 .default_height_fit_threshold = default_height_fit_threshold,
@@ -78,17 +82,17 @@ pub fn RowPacker(comptime T: type) type {
             self.constrained_rows.clear();
             self.unconstrained_row = UnconstrainedRow{
                 .max_height = 0,
-                .min_height = self.full_region.h,
-                .true_max_height = self.full_region.h,
-                .pos = Vec.new(self.full_region.x, self.full_region.y),
+                .min_height = self.full_region.size.y,
+                .true_max_height = self.full_region.size.y,
+                .pos = Vec.new(self.full_region.pos.x, self.full_region.pos.y),
                 .used_width = 0,
-                .width = self.full_region.w,
+                .width = self.full_region.size.x,
             };
             self.total_wasted_area = 0;
         }
 
         pub fn free(self: *Self) void {
-            self.constrained_rows.free(self.alloc);
+            self.constrained_rows.free_if_non_zero(self.alloc);
             self.* = .{};
         }
 
@@ -113,20 +117,16 @@ pub fn RowPacker(comptime T: type) type {
         /// A null value indicates there were no available spaces for the given size
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
-        /// should be treated as rotated 90 degrees (`rect.w == size.y` AND `rect.h == size.x`)
-        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode) ?RectWithRotation {
-            if (self.claim_position(size, threshold, waste)) |pos_with_rot| {
+        /// should be treated as rotated 90 degrees (`rect.size.x == size.y` AND `rect.size.y == size.x`)
+        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation_mode: RotationMode) ?RectWithRotation {
+            if (self.claim_position(size, threshold, waste, rotation_mode)) |pos_with_rot| {
                 return RectWithRotation{
                     .rect = if (pos_with_rot.is_rotated) Rect{
-                        .x = pos_with_rot.x,
-                        .y = pos_with_rot.y,
-                        .w = size.y,
-                        .h = size.x,
+                        .pos = pos_with_rot.pos,
+                        .size = size.flip_components(),
                     } else Rect{
-                        .x = pos_with_rot.x,
-                        .y = pos_with_rot.y,
-                        .w = size.x,
-                        .h = size.y,
+                        .pos = pos_with_rot.pos,
+                        .size = size,
                     },
                     .is_rotated = pos_with_rot.is_rotated,
                 };
@@ -144,15 +144,15 @@ pub fn RowPacker(comptime T: type) type {
             if (self.claim_position(size, threshold, waste, rotation)) |pos_with_rot| {
                 return AABB_WithRotation{
                     .aabb = if (pos_with_rot.is_rotated) AABB{
-                        .x_min = pos_with_rot.x,
-                        .y_min = pos_with_rot.y,
-                        .x_max = pos_with_rot.x + size.y,
-                        .y_max = pos_with_rot.y + size.x,
+                        .x_min = pos_with_rot.pos.x,
+                        .y_min = pos_with_rot.pos.y,
+                        .x_max = pos_with_rot.pos.x + size.y,
+                        .y_max = pos_with_rot.pos.y + size.x,
                     } else AABB{
-                        .x_min = pos_with_rot.x,
-                        .y_min = pos_with_rot.y,
-                        .x_max = pos_with_rot.x + size.x,
-                        .y_max = pos_with_rot.y + size.y,
+                        .x_min = pos_with_rot.pos.x,
+                        .y_min = pos_with_rot.pos.y,
+                        .x_max = pos_with_rot.pos.x + size.x,
+                        .y_max = pos_with_rot.pos.y + size.y,
                     },
                     .is_rotated = pos_with_rot.is_rotated,
                 };
@@ -168,17 +168,28 @@ pub fn RowPacker(comptime T: type) type {
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (space width == `size.y` AND space height == `size.x`)
         pub fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?PosWithRotation {
-            if (size.x > self.full_region.w or size.y > self.full_region.h) return null;
+            switch (rotation) {
+                .DO_NOT_ALLOW_ROTATION => {
+                    if (size.x > self.full_region.size.x or size.y > self.full_region.size.y) return null;
+                },
+                .ALLOW_90_DEGREE_ROTATION => {
+                    if ((size.x > self.full_region.size.x or size.y > self.full_region.size.y) and (size.y > self.full_region.size.x or size.x > self.full_region.size.y)) return null;
+                },
+                .ALWAYS_FORCE_90_DEGREE_ROTATION => {
+                    if (size.y > self.full_region.size.x or size.x > self.full_region.size.y) return null;
+                },
+            }
             const rot_size = Vec.new(size.y, size.x);
-            var row_idx: u32 = 0;
-            var best_row_idx: u32 = 0;
+            var row_idx: IDX = 0;
+            var best_row_idx: IDX = 0;
             var best_row_waste: T = MathX.max_value(T);
             var found_row: FoundRowResult = .DID_NOT_FIND_ROW;
             var best_is_rotated: bool = false;
             recheck: switch (threshold) {
                 else => |thresh| {
-                    while (row_idx < self.constrained_rows.len) : (row_idx += 1) {
-                        const row = self.constrained_rows.ptr[row_idx];
+                    const row_slice = self.constrained_rows.zig_slice_entire();
+                    while (row_idx < self.constrained_rows.get_len()) : (row_idx += 1) {
+                        const row = row_slice[row_idx];
                         if (rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION) {
                             const can_fit = switch (thresh) {
                                 .CUSTOM_THRESHOLD => |t| row.can_fit_size(size) and row.new_height_is_within_threshold(t, size.y),
@@ -188,20 +199,21 @@ pub fn RowPacker(comptime T: type) type {
                             if (can_fit) {
                                 switch (waste) {
                                     .IGNORE_WASTE => {
-                                        return PosWithRotation.new(self.constrained_rows.ptr[row_idx].claim_pos(size, &self.total_wasted_area), false);
+                                        return PosWithRotation.new(row_slice[row_idx].claim_pos(size, &self.total_wasted_area), false);
                                     },
                                     .LEAST_WASTE => {
                                         const this_waste = row.wasted_area_if_claimed(size);
-                                        best_is_rotated = false;
+
                                         switch (found_row) {
                                             .DID_NOT_FIND_ROW => {
-                                                @branchHint(.unlikely);
+                                                best_is_rotated = false;
                                                 best_row_idx = row_idx;
                                                 best_row_waste = this_waste;
                                                 found_row = .FOUND_CONSTRAINED_ROW;
                                             },
                                             else => {
                                                 if (this_waste < best_row_waste) {
+                                                    best_is_rotated = false;
                                                     best_row_idx = row_idx;
                                                     best_row_waste = this_waste;
                                                 }
@@ -211,7 +223,7 @@ pub fn RowPacker(comptime T: type) type {
                                 }
                             }
                         }
-                        if (rotation != .DO_NOT_ALLOW_ROTATION) {
+                        if (rotation != .DO_NOT_ALLOW_ROTATION and size.x != size.y) {
                             const can_fit = switch (thresh) {
                                 .CUSTOM_THRESHOLD => |t| row.can_fit_size(rot_size) and row.new_height_is_within_threshold(t, rot_size.y),
                                 .DEFAULT_THRESHOLD => row.can_fit_size(rot_size) and row.new_height_is_within_threshold(self.default_height_fit_threshold, rot_size.y),
@@ -220,20 +232,20 @@ pub fn RowPacker(comptime T: type) type {
                             if (can_fit) {
                                 switch (waste) {
                                     .IGNORE_WASTE => {
-                                        return PosWithRotation.new(self.constrained_rows.ptr[row_idx].claim_pos(rot_size, &self.total_wasted_area), true);
+                                        return PosWithRotation.new(row_slice[row_idx].claim_pos(rot_size, &self.total_wasted_area), true);
                                     },
                                     .LEAST_WASTE => {
                                         const this_waste = row.wasted_area_if_claimed(rot_size);
-                                        best_is_rotated = true;
                                         switch (found_row) {
                                             .DID_NOT_FIND_ROW => {
-                                                @branchHint(.unlikely);
+                                                best_is_rotated = true;
                                                 best_row_idx = row_idx;
                                                 best_row_waste = this_waste;
                                                 found_row = .FOUND_CONSTRAINED_ROW;
                                             },
                                             else => {
                                                 if (this_waste < best_row_waste) {
+                                                    best_is_rotated = true;
                                                     best_row_idx = row_idx;
                                                     best_row_waste = this_waste;
                                                 }
@@ -253,19 +265,19 @@ pub fn RowPacker(comptime T: type) type {
                         if (can_fit) {
                             switch (waste) {
                                 .IGNORE_WASTE => {
-                                    return self.unconstrained_row.claim_pos(size, &self.total_wasted_area);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos(size, &self.total_wasted_area), false);
                                 },
                                 .LEAST_WASTE => {
                                     const this_waste = self.unconstrained_row.wasted_area_if_claimed(size);
-                                    best_is_rotated = false;
                                     switch (found_row) {
                                         .DID_NOT_FIND_ROW => {
-                                            @branchHint(.unlikely);
+                                            best_is_rotated = false;
                                             best_row_waste = this_waste;
                                             found_row = .FOUND_UNCONSTRAINED_ROW;
                                         },
                                         else => {
                                             if (this_waste < best_row_waste) {
+                                                best_is_rotated = false;
                                                 best_row_waste = this_waste;
                                                 found_row = .FOUND_UNCONSTRAINED_ROW;
                                             }
@@ -275,7 +287,7 @@ pub fn RowPacker(comptime T: type) type {
                             }
                         }
                     }
-                    if (rotation != .DO_NOT_ALLOW_ROTATION) {
+                    if (rotation != .DO_NOT_ALLOW_ROTATION and size.x != size.y) {
                         const can_fit = switch (thresh) {
                             .CUSTOM_THRESHOLD => |t| self.unconstrained_row.can_fit_size(rot_size) and self.unconstrained_row.new_height_is_within_threshold(t, rot_size.y),
                             .DEFAULT_THRESHOLD => self.unconstrained_row.can_fit_size(rot_size) and self.unconstrained_row.new_height_is_within_threshold(self.default_height_fit_threshold, rot_size.y),
@@ -284,19 +296,19 @@ pub fn RowPacker(comptime T: type) type {
                         if (can_fit) {
                             switch (waste) {
                                 .IGNORE_WASTE => {
-                                    return self.unconstrained_row.claim_pos(rot_size, &self.total_wasted_area);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos(rot_size, &self.total_wasted_area), true);
                                 },
                                 .LEAST_WASTE => {
                                     const this_waste = self.unconstrained_row.wasted_area_if_claimed(rot_size);
-                                    best_is_rotated = true;
                                     switch (found_row) {
                                         .DID_NOT_FIND_ROW => {
-                                            @branchHint(.unlikely);
+                                            best_is_rotated = true;
                                             best_row_waste = this_waste;
                                             found_row = .FOUND_UNCONSTRAINED_ROW;
                                         },
                                         else => {
                                             if (this_waste < best_row_waste) {
+                                                best_is_rotated = true;
                                                 best_row_waste = this_waste;
                                                 found_row = .FOUND_UNCONSTRAINED_ROW;
                                             }
@@ -310,23 +322,23 @@ pub fn RowPacker(comptime T: type) type {
                         .DEFAULT_THRESHOLD, .CUSTOM_THRESHOLD => switch (found_row) {
                             .DID_NOT_FIND_ROW => {
                                 if (rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(size)) {
-                                    const new_row = self.unconstrained_row.extract_constrained_row(self.full_region);
-                                    const new_row_idx = self.constrained_rows.append(new_row, self.alloc);
-                                    return PosWithRotation.new(self.constrained_rows.ptr[new_row_idx].claim_pos_known_waste(size, 0, &self.total_wasted_area), false);
+                                    const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                    self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(size, 0, &self.total_wasted_area), false);
                                 }
                                 if (rotation != .DO_NOT_ALLOW_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(rot_size)) {
-                                    const new_row = self.unconstrained_row.extract_constrained_row(self.full_region);
-                                    const new_row_idx = self.constrained_rows.append(new_row, self.alloc);
-                                    return PosWithRotation.new(self.constrained_rows.ptr[new_row_idx].claim_pos_known_waste(rot_size, 0, &self.total_wasted_area), true);
+                                    const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                    self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(rot_size, 0, &self.total_wasted_area), true);
                                 }
                                 row_idx = 0;
                                 continue :recheck Threshold.ignore_threshold();
                             },
                             .FOUND_CONSTRAINED_ROW => {
                                 if (best_is_rotated) {
-                                    return PosWithRotation.new(self.constrained_rows.ptr[best_row_idx].claim_pos_known_waste(rot_size, best_row_waste, &self.total_wasted_area), true);
+                                    return PosWithRotation.new(row_slice[best_row_idx].claim_pos_known_waste(rot_size, best_row_waste, &self.total_wasted_area), true);
                                 } else {
-                                    return PosWithRotation.new(self.constrained_rows.ptr[best_row_idx].claim_pos_known_waste(size, best_row_waste, &self.total_wasted_area), false);
+                                    return PosWithRotation.new(row_slice[best_row_idx].claim_pos_known_waste(size, best_row_waste, &self.total_wasted_area), false);
                                 }
                             },
                             .FOUND_UNCONSTRAINED_ROW => {
@@ -339,13 +351,23 @@ pub fn RowPacker(comptime T: type) type {
                         },
                         .IGNORE_THRESHOLD => switch (found_row) {
                             .DID_NOT_FIND_ROW => {
+                                if (rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(size)) {
+                                    const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                    self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(size, 0, &self.total_wasted_area), false);
+                                }
+                                if (rotation != .DO_NOT_ALLOW_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(rot_size)) {
+                                    const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                    self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                    return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(rot_size, 0, &self.total_wasted_area), true);
+                                }
                                 return null;
                             },
                             .FOUND_CONSTRAINED_ROW => {
                                 if (best_is_rotated) {
-                                    return PosWithRotation.new(self.constrained_rows.ptr[best_row_idx].claim_pos_known_waste(rot_size, best_row_waste, &self.total_wasted_area), true);
+                                    return PosWithRotation.new(row_slice[best_row_idx].claim_pos_known_waste(rot_size, best_row_waste, &self.total_wasted_area), true);
                                 } else {
-                                    return PosWithRotation.new(self.constrained_rows.ptr[best_row_idx].claim_pos_known_waste(size, best_row_waste, &self.total_wasted_area), false);
+                                    return PosWithRotation.new(row_slice[best_row_idx].claim_pos_known_waste(size, best_row_waste, &self.total_wasted_area), false);
                                 }
                             },
                             .FOUND_UNCONSTRAINED_ROW => {
@@ -357,14 +379,14 @@ pub fn RowPacker(comptime T: type) type {
                                 if (waste == .LEAST_WASTE) {
                                     const extended_threshold = self.default_height_fit_threshold * FINAL_PASS_CREATE_NEW_ROW_THRESHOLD_MULTIPLIER;
                                     if (rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(size) and !self.unconstrained_row.new_height_is_within_threshold(extended_threshold, size.y)) {
-                                        const new_row = self.unconstrained_row.extract_constrained_row(self.full_region);
-                                        const new_row_idx = self.constrained_rows.append(new_row, self.alloc);
-                                        return PosWithRotation.new(self.constrained_rows.ptr[new_row_idx].claim_pos_known_waste(size, 0, &self.total_wasted_area), false);
+                                        const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                        self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                        return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(size, 0, &self.total_wasted_area), false);
                                     }
                                     if (rotation != .DO_NOT_ALLOW_ROTATION and self.unconstrained_row.can_fit_size_on_new_row(rot_size) and !self.unconstrained_row.new_height_is_within_threshold(extended_threshold, rot_size.y)) {
-                                        const new_row = self.unconstrained_row.extract_constrained_row(self.full_region);
-                                        const new_row_idx = self.constrained_rows.append(new_row, self.alloc);
-                                        return PosWithRotation.new(self.constrained_rows.ptr[new_row_idx].claim_pos_known_waste(rot_size, 0, &self.total_wasted_area), true);
+                                        const new_constrained_row = self.unconstrained_row.extract_constrained_row(self.full_region);
+                                        self.constrained_rows.append_one(new_constrained_row, self.alloc);
+                                        return PosWithRotation.new(self.unconstrained_row.claim_pos_known_waste(rot_size, 0, &self.total_wasted_area), true);
                                     }
                                 }
                                 if (best_is_rotated) {
@@ -400,6 +422,31 @@ pub fn RowPacker(comptime T: type) type {
                     .is_rotated = is_rotated,
                 };
             }
+
+            pub fn top_left(self: RectWithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.rect.top_right();
+                }
+                return self.rect.top_left();
+            }
+            pub fn top_right(self: RectWithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.rect.bot_right();
+                }
+                return self.rect.top_right();
+            }
+            pub fn bot_left(self: RectWithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.rect.top_left();
+                }
+                return self.rect.bot_left();
+            }
+            pub fn bot_right(self: RectWithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.rect.bot_left();
+                }
+                return self.rect.bot_right();
+            }
         };
         pub const AABB_WithRotation = struct {
             aabb: AABB = .{},
@@ -410,6 +457,31 @@ pub fn RowPacker(comptime T: type) type {
                     .aabb = aabb,
                     .is_rotated = is_rotated,
                 };
+            }
+
+            pub fn top_left(self: AABB_WithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.aabb.top_right();
+                }
+                return self.aabb.top_left();
+            }
+            pub fn top_right(self: AABB_WithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.aabb.bot_right();
+                }
+                return self.aabb.top_right();
+            }
+            pub fn bot_left(self: AABB_WithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.aabb.top_left();
+                }
+                return self.aabb.bot_left();
+            }
+            pub fn bot_right(self: AABB_WithRotation) Vec {
+                if (self.is_rotated) {
+                    return self.aabb.bot_left();
+                }
+                return self.aabb.bot_right();
             }
         };
 
@@ -461,8 +533,9 @@ pub fn RowPacker(comptime T: type) type {
             pub inline fn can_fit_size(self: UnconstrainedRow, size: Vec) bool {
                 return self.width >= size.x and self.true_max_height >= size.y;
             }
-            // assumes that a broad check asserting `size.x <= full_region.w` has already been done
+            // assumes that a broad check asserting `size.x <= full_region.size.x` has already been done
             pub inline fn can_fit_size_on_new_row(self: UnconstrainedRow, size: Vec) bool {
+                // if (size.x > total_width) return false;
                 const new_true_max_height = self.true_max_height - self.max_height;
                 return new_true_max_height >= size.y;
             }
@@ -504,20 +577,15 @@ pub fn RowPacker(comptime T: type) type {
                     .max_height = self.max_height,
                     .width = self.width,
                 };
-                self.pos.x = full_region.x;
-                self.pos.y = self.max_height;
+                self.pos.x = full_region.pos.x;
+                self.pos.y += self.max_height;
                 self.true_max_height -= self.max_height;
                 self.max_height = 0;
                 self.min_height = self.true_max_height;
-                self.width = full_region.w;
+                self.width = full_region.size.x;
                 self.used_width = 0;
                 return row;
             }
-
-            // pub fn range_growth_for_new_height(self: UnconstrainedRow, new_height: T) T {
-            //     const curr_range = self.max_height - self.min_height;
-            //     const new_range
-            // }
         };
     };
 }
@@ -540,12 +608,12 @@ pub const ThresholdMode = enum(u8) {
     CUSTOM_THRESHOLD,
 };
 
-const ThresholdWasteMode = enum(u8) {
-    IGNORE_T_IGNORE_W,
-    IGNORE_T_LEAST_W,
-    USE_T_IGNORE_W,
-    USE_T_LEAST_W,
-};
+// const ThresholdWasteMode = enum(u8) {
+//     IGNORE_T_IGNORE_W,
+//     IGNORE_T_LEAST_W,
+//     USE_T_IGNORE_W,
+//     USE_T_LEAST_W,
+// };
 
 const FoundRowResult = enum(u8) {
     DID_NOT_FIND_ROW,
@@ -564,7 +632,7 @@ pub const RotationMode = enum(u8) {
     pub inline fn allow_90_degree_rotation() RotationMode {
         return RotationMode.ALLOW_90_DEGREE_ROTATION;
     }
-    pub inline fn always_force_90_degree_roation() RotationMode {
+    pub inline fn always_force_90_degree_rotation() RotationMode {
         return RotationMode.ALWAYS_FORCE_90_DEGREE_ROTATION;
     }
 };

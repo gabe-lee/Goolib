@@ -166,6 +166,13 @@ pub fn define_vec2_type(comptime T: type) type {
             return .from_vec(ONE.to_vec() / self.to_vec());
         }
 
+        pub fn flip_components(self: Vec2) Vec2 {
+            return Vec2{
+                .x = self.y,
+                .y = self.x,
+            };
+        }
+
         pub fn ceil(self: Vec2) Vec2 {
             if (IS_INT) return self;
             return .from_vec(@ceil(self.to_vec()));
