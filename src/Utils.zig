@@ -52,6 +52,7 @@ pub const Search = @import("./Utils_Search.zig");
 pub const RecipeInference = @import("./Utils_RecipeInference.zig");
 pub const Traverser = @import("./Utils_Traverser.zig");
 pub const DebugPrint = @import("./Utils_DebugPrint.zig");
+pub const UTF8 = @import("./Utils_UTF8.zig");
 
 comptime {
     if (build.is_test) {
@@ -65,6 +66,7 @@ comptime {
         _ = @import("./Utils_RecipeInference.zig");
         _ = @import("./Utils_Traverser.zig");
         _ = @import("./Utils_DebugPrint.zig");
+        _ = @import("./Utils_UTF8.zig");
     }
 }
 

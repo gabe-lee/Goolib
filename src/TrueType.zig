@@ -107,16 +107,13 @@ const std = @import("std");
 const build = @import("builtin");
 const math = std.math;
 const Root = @import("./_root.zig");
-const SliceAdapter = Root.IList_SliceAdapter;
 const Types = Root.Types;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.DummyAllocator;
-// const Flags = Root.Flags;
 const List = Root.ListSlice.ListAllocated;
-const Range = Root.IList.Range;
 const Vec2 = Root.Vec2;
 const AABB2 = Root.AABB2;
 const MathX = Root.Math;
@@ -136,17 +133,9 @@ const Vec_i32 = Vec2.define_vec2_type(i32);
 const Vec_u32 = Vec2.define_vec2_type(u32);
 const Vec_f32 = Vec2.define_vec2_type(f32);
 
-pub fn ActiveEdgePool(comptime THREADING: Root.CommonTypes.ThreadingMode) type {
-    return PoolModule.Pool(.{
-        .LIST_DEF = .{
-            .ELEM = ActiveEdge,
-            .IDX = u32,
-            .OWNERSHIP = .OWNED_ALLOCATED,
-        },
-        .BLOCK_SIZE = 64,
-        .THREADING = THREADING,
-    }, .{});
-}
+const DEBUG = std.debug.print;
+const DEBUG_VAL = Utils.DebugPrint.debug_val;
+
 pub fn VertexListPool(comptime THREADING: Root.CommonTypes.ThreadingMode) type {
     return PoolModule.Pool(.{
         .LIST_DEF = .{
@@ -166,8 +155,13 @@ const DATA_GRID_U8_DEF = DataGridModule.GridDefinition{
 };
 const DataGrid_u8 = DataGridModule.DataGrid(DATA_GRID_U8_DEF);
 
-const native_endian = build.cpu.arch.endian();
-const SCANLINE_BUFFER_SIZE = 350;
+pub const ShapedGlyph = struct {
+    codepoint: u32,
+    x_advance: f32,
+    glyph_idx: GlyphIndex,
+};
+
+pub const ShapedGlyphList = List(ShapedGlyph);
 
 // pub const VertexList = List(Vertex);
 
@@ -184,20 +178,37 @@ pub const GlyphIndex = enum(u16) {
     _,
 };
 
-pub const TableId = enum {
-    cmap,
-    loca,
-    head,
-    glyf,
-    hhea,
-    hmtx,
-    kern,
-    GPOS,
-    maxp,
+pub const TableId = enum(u32) {
+    cmap = 0, // 'cmap'
+    loca = 1, // 'loca'
+    head = 2, // 'head'
+    glyf = 3, // 'glyf'
+    hhea = 4, // 'hhea'
+    hmtx = 5, // 'hmtx'
+    kern = 6, // 'kern'
+    GPOS = 7, // 'GPOS'
+    maxp = 8, // 'maxp'
+    CFF_ = 9, // 'CFF '
 
-    fn raw(id: TableId) u32 {
-        const array4: [4]u8 = @tagName(id).*;
-        return @bitCast(array4);
+    const TAG = [_]u32{
+        0x636D6170, // 'cmap'
+        0x6C6F6361, // 'loca'
+        0x68656164, // 'head'
+        0x676C7966, // 'glyf'
+        0x68686561, // 'hhea'
+        0x686D7478, // 'hmtx'
+        0x6B65726E, // 'kern'
+        0x47504F53, // 'GPOS'
+        0x6D617870, // 'maxp'
+        0x43464620, // 'CFF '
+    };
+    const NUM_TABLES = 9;
+
+    inline fn tag(id: TableId) u32 {
+        return TAG[@backingInt(id)];
+    }
+    inline fn idx(id: TableId) u32 {
+        return @backingInt(id);
     }
 };
 
@@ -213,36 +224,6 @@ const MicrosoftEncodingId = enum(u16) {
     UNICODE_BMP = 1,
     SHIFTJIS = 2,
     UNICODE_FULL = 10,
-};
-
-pub const GlyphBitmapOutput = struct {
-    data_grid: DataGrid_u8,
-    size: Vec_i32,
-    local_offset: Vec_i32,
-    parent_offset: Vec_u32,
-
-    pub const empty: GlyphBitmapOutput = .{
-        .data_grid = .{},
-        .size = .ZERO_ZERO,
-        .local_offset = .ZERO_ZERO,
-        .parent_offset = .ZERO_ZERO,
-    };
-
-    pub fn total_offset(self: GlyphBitmapOutput) Vec_u32 {
-        return self.parent_offset.add(self.local_offset);
-    }
-};
-
-pub const PixelFlatness = struct {
-    val: f32,
-
-    pub const DEFAULT = PixelFlatness{ .val = 0.35 };
-    pub fn default_pixel_flatness() PixelFlatness {
-        return DEFAULT;
-    }
-    pub fn with_pixel_flatness(val: f32) PixelFlatness {
-        return PixelFlatness{ .val = val };
-    }
 };
 
 pub const VerticalMetrics = struct {
@@ -292,39 +273,13 @@ pub const GlyphBitmapError = error{
     no_end_char,
 };
 
-// pub const Vertex = struct {
-//     x: i16,
-//     y: i16,
-//     cx: i16,
-//     cy: i16,
-//     cx1: i16,
-//     cy1: i16,
-//     type: Type,
-
-//     pub const Type = enum(u8) {
-//         MOVE_TO = 1,
-//         LINE = 2,
-//         QUADRATIC = 3,
-//         CUBIC = 4,
-//         _,
-//     };
-
-//     fn set(v: *Vertex, ty: Type, x: i32, y: i32, cx: i32, cy: i32) void {
-//         v.type = ty;
-//         v.x = @intCast(x);
-//         v.y = @intCast(y);
-//         v.cx = @intCast(cx);
-//         v.cy = @intCast(cy);
-//     }
-// };
-
 pub const Vertex = struct {
-    x: i32,
-    y: i32,
-    cx: i32,
-    cy: i32,
-    cx1: i32,
-    cy1: i32,
+    x: i16,
+    y: i16,
+    cx: i16,
+    cy: i16,
+    cx1: i16,
+    cy1: i16,
     type: Type,
 
     pub const Type = enum(u8) {
@@ -346,37 +301,6 @@ pub const Vertex = struct {
 
 pub const Point_f32 = Vec2.define_vec2_type(f32);
 
-pub const FlattenedCurvesBuffer = struct {
-    points: List(Point_f32) = .{},
-    contour_lengths: List(u32) = .{},
-    alloc: Allocator,
-
-    pub fn init_empty(alloc: Allocator) FlattenedCurvesBuffer {
-        return FlattenedCurvesBuffer{
-            .alloc = alloc,
-        };
-    }
-
-    pub fn allocate_new(cap: u32, alloc: Allocator) FlattenedCurvesBuffer {
-        return FlattenedCurvesBuffer{
-            .points = List(Point_f32).allocate_new(cap, alloc),
-            .contour_lengths = List(u32).allocate_new(cap, alloc),
-            .alloc = alloc,
-        };
-    }
-
-    pub fn clear(self: *FlattenedCurvesBuffer) void {
-        self.points.clear();
-        self.contour_lengths.clear();
-    }
-
-    pub fn free(self: *FlattenedCurvesBuffer) void {
-        self.points.free(self.alloc);
-        self.contour_lengths.free(self.alloc);
-        self.* = undefined;
-    }
-};
-
 const Edge = struct {
     x0: f32,
     y0: f32,
@@ -386,58 +310,6 @@ const Edge = struct {
 
     pub fn y0_less_than(a: Edge, b: Edge) bool {
         return a.y0 < b.y0;
-    }
-};
-
-pub const EdgesBuffer = struct {
-    edges: List(Edge) = .{},
-    alloc: Allocator,
-
-    pub fn init_empty(alloc: Allocator) EdgesBuffer {
-        return EdgesBuffer{
-            .alloc = alloc,
-        };
-    }
-
-    pub fn allocate_new(cap: u32, alloc: Allocator) EdgesBuffer {
-        return EdgesBuffer{
-            .edges = List(Edge).allocate_new(cap, alloc),
-            .alloc = alloc,
-        };
-    }
-
-    pub fn clear(self: *EdgesBuffer) void {
-        self.edges.clear();
-    }
-
-    pub fn free(self: *EdgesBuffer) void {
-        self.edges.free(self.alloc);
-        self.* = undefined;
-    }
-};
-
-const ActiveEdge = struct {
-    next: ?*ActiveEdge = null,
-    fx: f32 = 0,
-    fdx: f32 = 0,
-    fdy: f32 = 0,
-    direction: f32 = 0,
-    sy: f32 = 0,
-    ey: f32 = 0,
-
-    fn new_from_pool(comptime POOL_THREADING: Root.CommonTypes.ThreadingMode, pool: *ActiveEdgePool(POOL_THREADING), edge: Edge, off_x: i32, start_point: f32) *ActiveEdge {
-        const active_edge = pool.claim();
-        const dxdy: f32 = (edge.x1 - edge.x0) / (edge.y1 - edge.y0);
-        active_edge.* = .{
-            .fdx = dxdy,
-            .fdy = if (dxdy != 0.0) (1.0 / dxdy) else 0.0,
-            .fx = (edge.x0 + dxdy * (start_point - edge.y0)) - @as(f32, @floatFromInt(off_x)),
-            .direction = if (edge.invert) 1.0 else -1.0,
-            .sy = edge.y0,
-            .ey = edge.y1,
-            .next = null,
-        };
-        return active_edge;
     }
 };
 
@@ -453,7 +325,7 @@ const CharstringFlags = packed struct(u8) {
 };
 
 pub const TrueTypeFont = struct {
-    table_offsets: [@typeInfo(TableId).@"enum".field_names.len]u32,
+    table_offsets: [TableId.NUM_TABLES]u32,
     ttf_bytes: []const u8,
     index_map: u32,
     index_to_loc_format: u16,
@@ -462,48 +334,49 @@ pub const TrueTypeFont = struct {
 
     pub fn load(bytes: []const u8) !TrueTypeFont {
         // Find tables.
-        var table_offsets: [@typeInfo(TableId).@"enum".field_names.len]u32 = @splat(0);
+        var table_offsets: [TableId.NUM_TABLES]u32 = @splat(0);
         const tables_len = read_int(u16, bytes[4..][0..2], .big);
         var cff: u32 = 0;
         for (0..tables_len) |i| {
             const loc = 12 + 16 * i;
-            const id: TableId = switch (read_int(u32, bytes[loc..][0..4], native_endian)) {
-                TableId.cmap.raw() => .cmap,
-                TableId.loca.raw() => .loca,
-                TableId.head.raw() => .head,
-                TableId.glyf.raw() => .glyf,
-                TableId.hhea.raw() => .hhea,
-                TableId.hmtx.raw() => .hmtx,
-                TableId.kern.raw() => .kern,
-                TableId.GPOS.raw() => .GPOS,
-                TableId.maxp.raw() => .maxp,
-                read_int(u32, "CFF ", native_endian) => {
+            const tag = read_int(u32, bytes[loc..][0..4], .big);
+            const table_index: u32 = switch (tag) {
+                TableId.cmap.tag() => TableId.cmap.idx(),
+                TableId.loca.tag() => TableId.loca.idx(),
+                TableId.head.tag() => TableId.head.idx(),
+                TableId.glyf.tag() => TableId.glyf.idx(),
+                TableId.hhea.tag() => TableId.hhea.idx(),
+                TableId.hmtx.tag() => TableId.hmtx.idx(),
+                TableId.kern.tag() => TableId.kern.idx(),
+                TableId.GPOS.tag() => TableId.GPOS.idx(),
+                TableId.maxp.tag() => TableId.maxp.idx(),
+                TableId.CFF_.tag() => {
                     cff = read_int(u32, bytes[loc + 8 ..][0..4], .big);
                     continue;
                 },
                 else => continue,
             };
-            table_offsets[@backingInt(id)] = read_int(u32, bytes[loc + 8 ..][0..4], .big);
+            table_offsets[table_index] = read_int(u32, bytes[loc + 8 ..][0..4], .big);
         }
 
-        if (table_offsets[@backingInt(TableId.cmap)] == 0) return error.missing_required_table;
-        if (table_offsets[@backingInt(TableId.head)] == 0) return error.missing_required_table;
-        if (table_offsets[@backingInt(TableId.hhea)] == 0) return error.missing_required_table;
-        if (table_offsets[@backingInt(TableId.hmtx)] == 0) return error.missing_required_table;
+        if (table_offsets[TableId.cmap.idx()] == 0) return error.missing_required_table;
+        if (table_offsets[TableId.head.idx()] == 0) return error.missing_required_table;
+        if (table_offsets[TableId.hhea.idx()] == 0) return error.missing_required_table;
+        if (table_offsets[TableId.hmtx.idx()] == 0) return error.missing_required_table;
 
         var cff_data: CffData = .empty;
 
-        if (table_offsets[@backingInt(TableId.glyf)] != 0) {
-            if (table_offsets[@backingInt(TableId.loca)] == 0) return error.missing_required_table;
+        if (table_offsets[TableId.glyf.idx()] != 0) {
+            if (table_offsets[TableId.loca.idx()] == 0) return error.missing_required_table;
         } else {
             if (cff == 0) return error.missing_required_table;
             cff_data = try .init(cff, bytes.ptr);
         }
 
-        const maxp = table_offsets[@backingInt(TableId.maxp)];
+        const maxp = table_offsets[TableId.maxp.idx()];
         const glyphs_len = if (maxp == 0) 0xffff else read_int(u16, bytes[maxp + 4 ..][0..2], .big);
 
-        const cmap = table_offsets[@backingInt(TableId.cmap)];
+        const cmap = table_offsets[TableId.cmap.idx()];
         const cmap_tables_len = read_int(u16, bytes[cmap + 2 ..][0..2], .big);
         const index_map = find_index_map: {
             var i = cmap_tables_len;
@@ -529,7 +402,7 @@ pub const TrueTypeFont = struct {
             }
         };
 
-        const head = table_offsets[@backingInt(TableId.head)];
+        const head = table_offsets[TableId.head.idx()];
         const index_to_loc_format = read_int(u16, bytes[head + 50 ..][0..2], .big);
 
         return .{
@@ -638,65 +511,6 @@ pub const TrueTypeFont = struct {
         }
     }
 
-    pub fn rasterize_vertices_to_data_grid(
-        self: *const TrueTypeFont,
-        glyph: GlyphIndex,
-        vertices: *const List(Vertex),
-        known_aabb: ?AABB_i32,
-        data_grid: DataGrid_u8.RegionSource,
-        flatness: PixelFlatness,
-        scale_x: f32,
-        scale_y: f32,
-        comptime THREADING: Root.CommonTypes.ThreadingMode,
-        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
-        temp_edges_buffer: *EdgesBuffer,
-        temp_active_edge_pool: *ActiveEdgePool(THREADING),
-    ) GlyphBitmapError!GlyphBitmapOutput {
-        return self.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph, vertices, known_aabb, data_grid, flatness, scale_x, scale_y, 0, 0, THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
-    }
-
-    pub fn rasterize_vertices_to_data_grid_with_subpixel_offset(
-        self: *const TrueTypeFont,
-        glyph: GlyphIndex,
-        vertices: *const List(Vertex),
-        known_aabb: ?AABB_i32,
-        data_grid: DataGrid_u8.RegionSource,
-        flatness: PixelFlatness,
-        scale_x: f32,
-        scale_y: f32,
-        shift_x: f32,
-        shift_y: f32,
-        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
-        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
-        temp_edges_buffer: *EdgesBuffer,
-        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
-    ) !GlyphBitmapOutput {
-        assert_with_reason(scale_x != 0, @src(), "`scale_x` cannot be zero", .{});
-        assert_with_reason(scale_y != 0, @src(), "`scale_y` cannot be zero", .{});
-
-        const aabb = if (known_aabb) |kn_aabb| kn_aabb else try get_glyph_bitmap_bounds_with_subpixel_offset(self, glyph, scale_x, scale_y, shift_x, shift_y);
-        const aabb_size = aabb.get_size();
-        //FIXME something is really wrong with these hacks to shift/frame the glyph
-        // const shift_to_origin = aabb.get_min_point().negate().to_new_type(f32);
-        // const aabb_shifted = aabb.with_mins_shifted_to_zero();
-        const aabb_max = aabb.get_max_point().add(.ONE_ONE);
-        // std.debug.print("\naabb: {any}\nsize: {any}\nlocal_offset: {any}\naabb_shifted: {any}\n", .{ aabb, aabb_size, aabb.get_min_point(), aabb_shifted }); //DEBUG
-        // const aabb_max = aabb.get_max_point().add(.ONE_ONE);
-
-        if (aabb_size.x == 0 or aabb_size.y == 0) return .empty;
-
-        var data_grid_and_offset = data_grid.obtain_grid_opaque(@intCast(aabb_max.x), @intCast(aabb_max.y)) orelse return GlyphBitmapError.could_not_obtain_bitmap_from_source;
-        //FIXME something is really wrong with these hacks to shift/frame the glyph
-        rasterize_vertices_to_data_grid_internal(vertices, &data_grid_and_offset.data_grid, flatness.val, scale_x, scale_y, shift_x, shift_y, aabb.x_min, aabb.y_min, true, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
-
-        return GlyphBitmapOutput{
-            .data_grid = data_grid_and_offset.data_grid,
-            .size = aabb_size,
-            .local_offset = aabb.get_min_point(),
-            .parent_offset = data_grid_and_offset.parent_offset,
-        };
-    }
-
     pub fn get_scale_for_pixel_height(self: *const TrueTypeFont, height: f32) f32 {
         const vm = self.get_font_vertical_metrics();
         const fheight: f32 = @floatFromInt(vm.ascent - vm.descent);
@@ -708,7 +522,7 @@ pub const TrueTypeFont = struct {
     /// which are typically then multiplied by the scale factor for a given font size.
     pub fn get_font_vertical_metrics(self: *const TrueTypeFont) VerticalMetrics {
         const bytes = self.ttf_bytes;
-        const hhea = self.table_offsets[@backingInt(TableId.hhea)];
+        const hhea = self.table_offsets[TableId.hhea.idx()];
         return .{
             .ascent = read_int(i16, bytes[hhea + 4 ..][0..2], .big),
             .descent = read_int(i16, bytes[hhea + 6 ..][0..2], .big),
@@ -719,8 +533,8 @@ pub const TrueTypeFont = struct {
     pub fn get_glyph_horizontal_metrics(self: *const TrueTypeFont, glyph: GlyphIndex) HorizontalMetrics {
         const glyph_index: u32 = @backingInt(glyph);
         const bytes = self.ttf_bytes;
-        const hhea = self.table_offsets[@backingInt(TableId.hhea)];
-        const hmtx = self.table_offsets[@backingInt(TableId.hmtx)];
+        const hhea = self.table_offsets[TableId.hhea.idx()];
+        const hmtx = self.table_offsets[TableId.hmtx.idx()];
         const n_long_h_metrics = read_int(u16, bytes[hhea + 34 ..][0..2], .big);
         if (glyph_index < n_long_h_metrics) return .{
             .advance_width = read_int(i16, bytes[hmtx + 4 * glyph_index ..][0..2], .big),
@@ -735,16 +549,16 @@ pub const TrueTypeFont = struct {
     /// An additional amount to advance the horizontal coordinate between the two
     /// provided glyphs.
     pub fn get_kerning_between_two_glyphs(self: *const TrueTypeFont, left_glyph: GlyphIndex, right_glyph: GlyphIndex) i16 {
-        const gpos = self.table_offsets[@backingInt(TableId.GPOS)];
+        const gpos = self.table_offsets[TableId.GPOS.idx()];
         if (gpos > 0) return get_glyph_kern_using_gpos(self, left_glyph, right_glyph);
-        const kern = self.table_offsets[@backingInt(TableId.kern)];
+        const kern = self.table_offsets[TableId.kern.idx()];
         if (kern > 0) return get_glyph_kern_using_kern(self, left_glyph, right_glyph);
         return 0;
     }
 
     fn get_glyph_kern_using_gpos(self: *const TrueTypeFont, left: GlyphIndex, right: GlyphIndex) i16 {
         const bytes = self.ttf_bytes;
-        const gpos = self.table_offsets[@backingInt(TableId.GPOS)];
+        const gpos = self.table_offsets[TableId.GPOS.idx()];
         assert_with_reason(gpos > 0, @src(), "`GPOS` table not provided by font", .{});
 
         if (read_int(u16, bytes[gpos + 0 ..][0..2], .big) != 1) return 0; // Major version 1
@@ -815,8 +629,8 @@ pub const TrueTypeFont = struct {
                         if (value_format_1 == 4 and value_format_2 == 0) {
                             const class_def10_offset = read_int(u16, bytes[table + 8 ..][0..2], .big);
                             const class_def20_offset = read_int(u16, bytes[table + 10 ..][0..2], .big);
-                            const glyph1class = glyphClass(bytes, table + class_def10_offset, left);
-                            const glyph2class = glyphClass(bytes, table + class_def20_offset, right);
+                            const glyph1class = glyph_class(bytes, table + class_def10_offset, left);
+                            const glyph2class = glyph_class(bytes, table + class_def20_offset, right);
 
                             const class1_count = read_int(u16, bytes[table + 12 ..][0..2], .big);
                             const class2_count = read_int(u16, bytes[table + 14 ..][0..2], .big);
@@ -845,7 +659,7 @@ pub const TrueTypeFont = struct {
 
     fn get_glyph_kern_using_kern(self: *const TrueTypeFont, a: GlyphIndex, b: GlyphIndex) i16 {
         const bytes = self.ttf_bytes;
-        const kern = self.table_offsets[@backingInt(TableId.kern)];
+        const kern = self.table_offsets[TableId.kern.idx()];
         assert_with_reason(kern > 0, @src(), "`kern` table not provided by font", .{});
         // we only look at the first table. it must be 'horizontal' and format 0.
         if (read_int(u16, bytes[kern + 2 ..][0..2], .big) < 1) // number of tables, need at least 1
@@ -1069,7 +883,7 @@ pub const TrueTypeFont = struct {
                 const n: f32 = @sqrt(mtx[2] * mtx[2] + mtx[3] * mtx[3]);
 
                 // Get indexed glyph.
-                var comp_verts = temp_compound_vertex_list_pool.claim();
+                var comp_verts: *List(Vertex) = temp_compound_vertex_list_pool.claim();
                 defer temp_compound_vertex_list_pool.release(comp_verts);
                 comp_verts.clear();
                 try get_glyph_vertex_list(self, gidx, comp_verts, temp_compound_vertex_list_allocator, POOL_THREADING, temp_compound_vertex_list_pool, temp_compound_vertex_list_allocator);
@@ -1079,8 +893,8 @@ pub const TrueTypeFont = struct {
                         {
                             const x: f32 = @floatFromInt(v.x);
                             const y: f32 = @floatFromInt(v.y);
-                            v.x = @intFromFloat(m * (mtx[0] * x + mtx[2] * y + mtx[4]));
-                            v.y = @intFromFloat(n * (mtx[1] * x + mtx[3] * y + mtx[5]));
+                            v.x = @intCast(@as(i32, @intFromFloat(m * (mtx[0] * x + mtx[2] * y + mtx[4]))));
+                            v.y = @intCast(@as(i32, @intFromFloat(n * (mtx[1] * x + mtx[3] * y + mtx[5]))));
                         }
                         {
                             const x: f32 = @floatFromInt(v.cx);
@@ -1104,8 +918,8 @@ pub const TrueTypeFont = struct {
         assert_with_reason(glyph_index < self.glyphs_len, @src(), "glyph index {d} is out of bounds for font `glyphs_len` ({d})", .{ glyph_index, self.glyphs_len });
         assert_with_reason(self.index_to_loc_format < 2, @src(), "only `index_to_loc_format` 0 or 1 is supported, got {d}", .{self.index_to_loc_format});
 
-        const glyf = self.table_offsets[@backingInt(TableId.glyf)];
-        const loca = self.table_offsets[@backingInt(TableId.loca)];
+        const glyf = self.table_offsets[TableId.glyf.idx()];
+        const loca = self.table_offsets[TableId.loca.idx()];
         const g1, const g2 = if (self.index_to_loc_format == 0) .{
             glyf + @as(u32, read_int(u16, bytes[loca + glyph_index * 2 ..][0..2], .big)) * 2,
             glyf + @as(u32, read_int(u16, bytes[loca + glyph_index * 2 + 2 ..][0..2], .big)) * 2,
@@ -1119,15 +933,6 @@ pub const TrueTypeFont = struct {
 
     pub fn get_glyph_bitmap_bounds_with_subpixel_offset(self: *const TrueTypeFont, glyph: GlyphIndex, scale_x: f32, scale_y: f32, shift_x: f32, shift_y: f32) !AABB_i32 {
         const box = try get_glyph_bounds(self, glyph);
-        // THis would be what I expect to be the right way...
-        // return .{
-        //     // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
-        //     .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x_min)) * scale_x + shift_x)),
-        //     .y_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.y_min)) * scale_y + shift_y)),
-        //     .x_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x_max)) * scale_x + shift_x)),
-        //     .y_max = @intFromFloat(@ceil(@as(f32, @floatFromInt(box.x_max)) * scale_y + shift_y)),
-        // };
-        // This is the original bounds calc... this seems wrong...
         return .{
             // move to integral bboxes (treating pixels as little squares, what pixels get touched)?
             .x_min = @intFromFloat(@floor(@as(f32, @floatFromInt(box.x_min)) * scale_x + shift_x)),
@@ -1159,335 +964,50 @@ pub const TrueTypeFont = struct {
         };
     }
 
-    fn rasterize_vertices_to_data_grid_internal(
-        vertices: *const List(Vertex),
-        output: *DataGrid_u8,
-        flatness_in_pixels: f32,
-        scale_x: f32,
-        scale_y: f32,
-        shift_x: f32,
-        shift_y: f32,
-        off_x: i32,
-        off_y: i32,
-        invert: bool,
-        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
-        temp_flat_curves_buffer: *FlattenedCurvesBuffer,
-        temp_edges_buffer: *EdgesBuffer,
-        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
-    ) void {
-        const scale = @min(scale_x, scale_y);
-        flatten_curves(temp_flat_curves_buffer, vertices, flatness_in_pixels / scale);
-        rasterize_internal(output, scale_x, scale_y, shift_x, shift_y, off_x, off_y, invert, POOL_THREADING, temp_flat_curves_buffer, temp_edges_buffer, temp_active_edge_pool);
-    }
+    /// Shapes a UTF-8 string into a slice of glyphs with individual x-advances.
+    ///
+    /// The provided `*ShapedGlyphList` is cleared, reallocated if necessary, and reused.
+    pub fn shape_text(
+        font: *const TrueTypeFont,
+        text_utf8: []const u8,
+        scale: f32,
+        list: *ShapedGlyphList,
+        allocator: Allocator,
+    ) !void {
+        const valid, const count = Utils.UTF8.utf8_validate_slice_and_count_codepoints(text_utf8, .cannot_encode_surrogate_half);
+        if (!valid) return error.invalid_utf8_string;
+        var utf8_view = std.unicode.Utf8View.initUnchecked(text_utf8);
 
-    fn rasterize_internal(
-        output: *DataGrid_u8,
-        scale_x: f32,
-        scale_y: f32,
-        shift_x: f32,
-        shift_y: f32,
-        off_x: i32,
-        off_y: i32,
-        invert: bool,
-        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
-        temp_flat_curves_buf: *FlattenedCurvesBuffer,
-        temp_edges_buf: *EdgesBuffer,
-        temp_active_edge_pool: *ActiveEdgePool(POOL_THREADING),
-    ) void {
-        const y_scale_inv: f32 = if (invert) -scale_y else scale_y;
-        const edge_counts = temp_flat_curves_buf.contour_lengths.zig_slice_entire();
-        var points = temp_flat_curves_buf.points.zig_slice_entire();
+        list.clear();
+        list.grow_capacity_if_needed(@intCast(count), .GROW_BY_25_PERCENT, allocator);
 
-        // now we have to blow out the windings into explicit edge lists
-        const edge_alloc_n = n: {
-            var n: u32 = 1; // Add an extra one as a sentinel.
-            for (edge_counts) |count| n += count;
-            break :n n;
-        };
-        temp_edges_buf.clear();
-        temp_edges_buf.edges.ensure_free_slots(edge_alloc_n, temp_edges_buf.alloc);
-        temp_edges_buf.edges.set_len(edge_alloc_n);
-        var edges = temp_edges_buf.edges.zig_slice_entire();
-
-        var n: u32 = 0;
-        var m: u32 = 0;
-        for (edge_counts) |count| {
-            const p: []Point_f32 = points[m..];
-            m += count;
-            var j: u32 = count - 1;
-            var k: u32 = 0;
-            while (k < count) : ({
-                j = k;
-                k += 1;
-            }) {
-                var a = k;
-                var b = j;
-                // skip the edge if horizontal
-                if (p[j].y == p[k].y)
-                    continue;
-                // add edge from j to k to the list
-                edges[n].invert = false;
-                if (if (invert) p[j].y > p[k].y else p[j].y < p[k].y) {
-                    edges[n].invert = true;
-                    a = j;
-                    b = k;
-                }
-                edges[n].x0 = p[a].x * scale_x + shift_x;
-                edges[n].y0 = (p[a].y * y_scale_inv + shift_y);
-                edges[n].x1 = p[b].x * scale_x + shift_x;
-                edges[n].y1 = (p[b].y * y_scale_inv + shift_y);
-                n += 1;
-            }
+        var iter = utf8_view.iterator();
+        var prev_glyph_idx: GlyphIndex = .NOT_DEFINED;
+        if (iter.nextCodepoint()) |codepoint| {
+            const glyph_idx = font.get_codepoint_glyph_index(codepoint);
+            const h_metrics = font.get_glyph_horizontal_metrics(glyph_idx);
+            list.append_one_assume_cap(ShapedGlyph{
+                .codepoint = @intCast(codepoint),
+                .glyph_idx = glyph_idx,
+                .x_advance = @as(f32, @floatFromInt(h_metrics.advance_width)) * scale,
+            });
+            prev_glyph_idx = glyph_idx;
         }
-        temp_edges_buf.edges.insertion_sort(.first_n_items(@intCast(n)), Edge.y0_less_than);
-
-        // now, traverse the scanlines and find the intersections on each scanline, use xor winding rule
-        rasterize_sorted_edges(output, edges[0 .. n + 1], off_x, off_y, POOL_THREADING, temp_active_edge_pool);
-    }
-
-    fn flatten_curves(temp_flat_curve_buf: *FlattenedCurvesBuffer, vertices: *const List(Vertex), objspace_flatness: f32) void {
-        temp_flat_curve_buf.clear();
-
-        const objspace_flatness_squared = objspace_flatness * objspace_flatness;
-
-        var start: u32 = 0;
-        var x: f32 = 0;
-        var y: f32 = 0;
-        for (vertices.zig_slice_entire()) |v| {
-            sw: switch (v.type) {
-                .MOVE_TO => {
-                    if (temp_flat_curve_buf.points.get_len() > 0) {
-                        _ = temp_flat_curve_buf.contour_lengths.append(@intCast(temp_flat_curve_buf.points.get_len() - start), temp_flat_curve_buf.alloc);
-                        start = @intCast(temp_flat_curve_buf.points.get_len());
-                    }
-
-                    continue :sw .LINE;
-                },
-                .LINE => {
-                    x = @floatFromInt(v.x);
-                    y = @floatFromInt(v.y);
-                    _ = temp_flat_curve_buf.points.append(.{ .x = x, .y = y }, temp_flat_curve_buf.alloc);
-                },
-                .QUADRATIC => {
-                    tesselate_quadratic(
-                        &temp_flat_curve_buf.points,
-                        temp_flat_curve_buf.alloc,
-                        x,
-                        y,
-                        @floatFromInt(v.cx),
-                        @floatFromInt(v.cy),
-                        @floatFromInt(v.x),
-                        @floatFromInt(v.y),
-                        objspace_flatness_squared,
-                        0,
-                    );
-                    x = @floatFromInt(v.x);
-                    y = @floatFromInt(v.y);
-                },
-                .CUBIC => {
-                    tesselate_cubic(
-                        &temp_flat_curve_buf.points,
-                        temp_flat_curve_buf.alloc,
-                        x,
-                        y,
-                        @floatFromInt(v.cx),
-                        @floatFromInt(v.cy),
-                        @floatFromInt(v.cx1),
-                        @floatFromInt(v.cy1),
-                        @floatFromInt(v.x),
-                        @floatFromInt(v.y),
-                        objspace_flatness_squared,
-                        0,
-                    );
-                    x = @floatFromInt(v.x);
-                    y = @floatFromInt(v.y);
-                },
-                _ => continue,
+        while (iter.nextCodepoint()) |codepoint| {
+            const glyph_idx = font.get_codepoint_glyph_index(codepoint);
+            const h_metrics = font.get_glyph_horizontal_metrics(glyph_idx);
+            const advance = @as(f32, @floatFromInt(h_metrics.advance_width)) * scale;
+            const kern = font.get_kerning_between_two_glyphs(prev_glyph_idx, glyph_idx);
+            if (kern != 0) {
+                const scaled_kern_for_prev = @as(f32, @floatFromInt(kern)) * scale;
+                list.get_last_ptr().x_advance += scaled_kern_for_prev;
             }
-        }
-        _ = temp_flat_curve_buf.contour_lengths.append(@intCast(temp_flat_curve_buf.points.get_len() - start), temp_flat_curve_buf.alloc);
-
-        return;
-    }
-
-    /// tessellate until threshold p is happy... //TODO warped to compensate for non-linear stretching
-    fn tesselate_quadratic(
-        points: *List(Point_f32),
-        points_alloc: Allocator,
-        x0: f32,
-        y0: f32,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        objspace_flatness_squared: f32,
-        n: u32,
-    ) void {
-        // midpoint
-        const mx: f32 = (x0 + 2 * x1 + x2) / 4;
-        const my: f32 = (y0 + 2 * y1 + y2) / 4;
-        // versus directly drawn line
-        const dx: f32 = (x0 + x2) / 2 - mx;
-        const dy: f32 = (y0 + y2) / 2 - my;
-        if (n > 16) // 65536 segments on one curve better be enough!
-            return;
-        if (dx * dx + dy * dy > objspace_flatness_squared) { // half-pixel error allowed... need to be smaller if AA
-            tesselate_quadratic(points, points_alloc, x0, y0, (x0 + x1) / 2.0, (y0 + y1) / 2.0, mx, my, objspace_flatness_squared, n + 1);
-            tesselate_quadratic(points, points_alloc, mx, my, (x1 + x2) / 2.0, (y1 + y2) / 2.0, x2, y2, objspace_flatness_squared, n + 1);
-        } else {
-            _ = points.append(.{ .x = x2, .y = y2 }, points_alloc);
-        }
-    }
-
-    fn tesselate_cubic(
-        points: *List(Point_f32),
-        points_alloc: Allocator,
-        x0: f32,
-        y0: f32,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-        objspace_flatness_squared: f32,
-        n: u32,
-    ) void {
-        // According to Dougall Johnson, this "flatness" calculation is just
-        // made-up nonsense that seems to work well enough.
-        const dx0 = x1 - x0;
-        const dy0 = y1 - y0;
-        const dx1 = x2 - x1;
-        const dy1 = y2 - y1;
-        const dx2 = x3 - x2;
-        const dy2 = y3 - y2;
-        const dx = x3 - x0;
-        const dy = y3 - y0;
-        const longlen = @sqrt(dx0 * dx0 + dy0 * dy0) + @sqrt(dx1 * dx1 + dy1 * dy1) + @sqrt(dx2 * dx2 + dy2 * dy2);
-        const shortlen = @sqrt(dx * dx + dy * dy);
-        const flatness_squared = longlen * longlen - shortlen * shortlen;
-
-        if (n > 16) // 65536 segments on one curve better be enough!
-            return;
-
-        if (flatness_squared > objspace_flatness_squared) {
-            const x01 = (x0 + x1) / 2;
-            const y01 = (y0 + y1) / 2;
-            const x12 = (x1 + x2) / 2;
-            const y12 = (y1 + y2) / 2;
-            const x23 = (x2 + x3) / 2;
-            const y23 = (y2 + y3) / 2;
-
-            const xa = (x01 + x12) / 2;
-            const ya = (y01 + y12) / 2;
-            const xb = (x12 + x23) / 2;
-            const yb = (y12 + y23) / 2;
-
-            const mx = (xa + xb) / 2;
-            const my = (ya + yb) / 2;
-
-            tesselate_cubic(points, points_alloc, x0, y0, x01, y01, xa, ya, mx, my, objspace_flatness_squared, n + 1);
-            tesselate_cubic(points, points_alloc, mx, my, xb, yb, x23, y23, x3, y3, objspace_flatness_squared, n + 1);
-        } else {
-            _ = points.append(.{ .x = x3, .y = y3 }, points_alloc);
-        }
-    }
-
-    fn sized_trapezoid_area(height: f32, top_width: f32, bottom_width: f32) f32 {
-        assert_with_reason(top_width >= 0, @src(), "`top_width` cannot be negative, got {d}", .{top_width});
-        assert_with_reason(bottom_width >= 0, @src(), "`bottom_width` cannot be negative, got {d}", .{bottom_width});
-        return (top_width + bottom_width) / 2.0 * height;
-    }
-
-    fn position_trapezoid_area(height: f32, tx0: f32, tx1: f32, bx0: f32, bx1: f32) f32 {
-        return sized_trapezoid_area(height, tx1 - tx0, bx1 - bx0);
-    }
-
-    fn sized_triangle_area(height: f32, width: f32) f32 {
-        return height * width / 2;
-    }
-
-    /// Directly anti-alias rasterize edges without supersampling.
-    fn rasterize_sorted_edges(
-        output: *DataGrid_u8,
-        edges: []Edge,
-        off_x: i32,
-        off_y: i32,
-        comptime POOL_THREADING: Root.CommonTypes.ThreadingMode,
-        active_edge_pool: *ActiveEdgePool(POOL_THREADING),
-    ) void {
-        var active: ?*ActiveEdge = null;
-        var scanline_buffer: [SCANLINE_BUFFER_SIZE]f32 = undefined;
-
-        const needed_scanline_len = output.width * 2 + 1;
-        assert_with_reason(SCANLINE_BUFFER_SIZE >= needed_scanline_len, @src(), "`SCANLINE_BUFFER_SIZE < needed_scanline_len` ({d} < {d}), increase `SCANLINE_BUFFER_SIZE` constant in order to support an output size of {d} x {d}", .{ SCANLINE_BUFFER_SIZE, needed_scanline_len, output.width, output.height });
-
-        const scanline = scanline_buffer[0..output.width];
-        const scanline2 = scanline_buffer[output.width..][0 .. output.width + 1];
-
-        var y: i32 = off_y;
-        edges[edges.get_len() - 1].y0 = @floatFromInt((off_y + @as(i32, @intCast(output.height))) + 1);
-
-        var j: u32 = 0;
-        var e: u32 = 0;
-        while (j < output.height) {
-            // find center of pixel for this scanline
-            const scan_y_top: f32 = @floatFromInt(y);
-            const scan_y_bottom: f32 = @floatFromInt(y + 1);
-            var step: *?*ActiveEdge = &active;
-
-            @memset(scanline, 0);
-            @memset(scanline2, 0);
-
-            // update all active edges;
-            // remove all active edges that terminate before the top of this scanline
-            while (step.*) |this_active_edge| {
-                if (this_active_edge.ey <= scan_y_top) {
-                    step.* = this_active_edge.next; // delete from list
-                    assert_with_reason(this_active_edge.direction != 0, @src(), "`this_active_edge.direction` cannot be 0", .{});
-                    this_active_edge.direction = 0;
-                    active_edge_pool.release(this_active_edge);
-                } else {
-                    step = &this_active_edge.next; // advance through list
-                }
-            }
-
-            // insert all edges that start before the bottom of this scanline
-            while (edges[e].y0 <= scan_y_bottom) {
-                if (edges[e].y0 != edges[e].y1) {
-                    const this_active_edge: *ActiveEdge = ActiveEdge.new_from_pool(POOL_THREADING, active_edge_pool, edges[e], off_x, scan_y_top);
-                    if (j == 0 and off_y != 0) {
-                        this_active_edge.ey = @max(this_active_edge.ey, scan_y_top);
-                    }
-                    // If we get really unlucky a tiny bit of an edge can be
-                    // out of bounds.
-                    assert_with_reason(this_active_edge.ey >= scan_y_top, @src(), "a portion of the active edge was out of bounds: `this_active_edge.ey < scan_y_top` ({d} < {d})", .{ this_active_edge.ey, scan_y_top });
-
-                    // Insert at front.
-                    this_active_edge.next = active;
-                    active = this_active_edge;
-                }
-                e += 1;
-            }
-
-            if (active) |a| fill_active_edges(scanline, scanline2, output.width, a, scan_y_top);
-
-            {
-                var sum: f32 = 0;
-                for (scanline, scanline2[0..output.width], 0..output.width) |s, s2, x| {
-                    sum += s2;
-                    output.set_cell_with_origin(.TOP_LEFT, @intCast(x), j, @intFromFloat(@min(@abs(s + sum) * 255 + 0.5, 255)));
-                }
-            }
-            // advance all the edges
-            step = &active;
-            while (step.*) |this_active_edge| {
-                this_active_edge.fx += this_active_edge.fdx; // advance to position for current scanline
-                step = &this_active_edge.next; // advance through list
-            }
-
-            y += 1;
-            j += 1;
+            list.append_one_assume_cap(ShapedGlyph{
+                .codepoint = @intCast(codepoint),
+                .glyph_idx = glyph_idx,
+                .x_advance = advance,
+            });
+            prev_glyph_idx = glyph_idx;
         }
     }
 
@@ -1528,276 +1048,6 @@ pub const TrueTypeFont = struct {
         const result = read_int(I, bytes[start..][0..@sizeOf(I)], .big);
         cursor.* = start + @sizeOf(I);
         return result;
-    }
-
-    fn fill_active_edges(scanline: []f32, scanline_fill: []f32, len: u32, start_edge: *ActiveEdge, y_top: f32) void {
-        const y_bottom: f32 = y_top + 1;
-        var next_edge: ?*ActiveEdge = start_edge;
-        while (next_edge) |edge| : (next_edge = edge.next) {
-            // brute force every pixel
-
-            // compute intersection points with top & bottom
-            assert_with_reason(edge.ey >= y_top, @src(), "a portion pf the edge was out of bounds: `edge.ey < y_top` ({d} < {d})", .{ edge.ey, y_top });
-
-            if (edge.fdx == 0) {
-                const x0 = edge.fx;
-                if (x0 < @as(f32, @floatFromInt(len))) {
-                    if (x0 >= 0) {
-                        handle_clipped_edge(scanline, @intFromFloat(x0), edge, x0, y_top, x0, y_bottom);
-                        handle_clipped_edge(scanline_fill, @intFromFloat(x0 + 1), edge, x0, y_top, x0, y_bottom);
-                    } else {
-                        handle_clipped_edge(scanline_fill, 0, edge, x0, y_top, x0, y_bottom);
-                    }
-                }
-            } else {
-                var x0: f32 = edge.fx;
-                var dx: f32 = edge.fdx;
-                var xb: f32 = x0 + dx;
-                var dy: f32 = edge.fdy;
-                assert_with_reason(edge.sy <= y_bottom, @src(), "a portion pf the edge was out of bounds: `edge.sy > y_bottom` ({d} > {d})", .{ edge.sy, y_bottom });
-                assert_with_reason(edge.ey >= y_top, @src(), "a portion pf the edge was out of bounds: `edge.ey < y_top` ({d} < {d})", .{ edge.ey, y_top });
-
-                // Compute endpoints of line segment clipped to this scanline (if the
-                // line segment starts on this scanline. x0 is the intersection of the
-                // line with y_top, but that may be off the line segment.
-                var x_top: f32, var sy0: f32 = if (edge.sy > y_top) .{
-                    x0 + dx * (edge.sy - y_top),
-                    edge.sy,
-                } else .{
-                    x0,
-                    y_top,
-                };
-
-                var x_bottom: f32, var sy1: f32 = if (edge.ey < y_bottom) .{
-                    x0 + dx * (edge.ey - y_top),
-                    edge.ey,
-                } else .{
-                    xb,
-                    y_bottom,
-                };
-
-                if (x_top >= 0 and x_bottom >= 0 and
-                    x_top < @as(f32, @floatFromInt(len)) and x_bottom < @as(f32, @floatFromInt(len)))
-                {
-                    // from here on, we don't have to range check x values
-
-                    if (@trunc(x_top) == @trunc(x_bottom)) {
-                        // simple case, only spans one pixel
-                        const x: u32 = @intFromFloat(x_top);
-                        const height: f32 = (sy1 - sy0) * edge.direction;
-                        assert_with_reason(x < len, @src(), "x value out of range for scanline len ({d} >= {d})", .{ x, len });
-                        scanline[x] += position_trapezoid_area(height, x_top, @floatFromInt(x + 1), x_bottom, @floatFromInt(x + 1));
-                        scanline_fill[x + 1] += height; // everything right of this pixel is filled
-                    } else {
-                        // covers 2+ pixels
-                        if (x_top > x_bottom) {
-                            // flip scanline vertically; signed area is the same
-                            sy0 = y_bottom - (sy0 - y_top);
-                            sy1 = y_bottom - (sy1 - y_top);
-                            std.mem.swap(f32, &sy0, &sy1);
-                            std.mem.swap(f32, &x_bottom, &x_top);
-                            dx = -dx;
-                            dy = -dy;
-                            std.mem.swap(f32, &x0, &xb);
-                        }
-                        assert_with_reason(dy >= 0, @src(), "dy cannot be negative, got {d}", .{dy});
-                        assert_with_reason(dx >= 0, @src(), "dx cannot be negative, got {d}", .{dx});
-
-                        const x1: u32 = @intFromFloat(x_top);
-                        const x2: u32 = @intFromFloat(x_bottom);
-                        const x1p1f: f32 = @floatFromInt(x1 + 1);
-                        const x2f: f32 = @floatFromInt(x2);
-                        // compute intersection with y axis at x1+1
-                        var y_crossing: f32 = y_top + dy * (x1p1f - x0);
-
-                        // compute intersection with y axis at x2
-                        var y_final: f32 = y_top + dy * (x2f - x0);
-
-                        //           x1    x_top                            x2    x_bottom
-                        //     y_top  +------|-----+------------+------------+--------|---+------------+
-                        //            |            |            |            |            |            |
-                        //            |            |            |            |            |            |
-                        //       sy0  |      Txxxxx|............|............|............|............|
-                        // y_crossing |            *xxxxx.......|............|............|............|
-                        //            |            |     xxxxx..|............|............|............|
-                        //            |            |     /-   xx*xxxx........|............|............|
-                        //            |            | dy <       |    xxxxxx..|............|............|
-                        //   y_final  |            |     \-     |          xx*xxx.........|............|
-                        //       sy1  |            |            |            |   xxxxxB...|............|
-                        //            |            |            |            |            |            |
-                        //            |            |            |            |            |            |
-                        //  y_bottom  +------------+------------+------------+------------+------------+
-                        //
-                        // goal is to measure the area covered by '.' in each pixel
-
-                        // if x2 is right at the right edge of x1, y_crossing can blow up, github #1057
-                        // @TODO: maybe test against sy1 rather than y_bottom?
-                        if (y_crossing > y_bottom)
-                            y_crossing = y_bottom;
-
-                        const sign: f32 = edge.direction;
-
-                        // area of the rectangle covered from sy0..y_crossing
-                        var area: f32 = sign * (y_crossing - sy0);
-
-                        // area of the triangle (x_top,sy0), (x1+1,sy0), (x1+1,y_crossing)
-                        scanline[x1] += sized_triangle_area(area, x1p1f - x_top);
-
-                        // check if final y_crossing is blown up; no test case for this
-                        if (y_final > y_bottom) {
-                            y_final = y_bottom;
-                            dy = (y_final - y_crossing) / (x2f - x1p1f); // if denom=0, y_final = y_crossing, so y_final <= y_bottom
-                        }
-
-                        // in second pixel, area covered by line segment found in first pixel
-                        // is always a rectangle 1 wide * the height of that line segment; this
-                        // is exactly what the variable 'area' stores. it also gets a contribution
-                        // from the line segment within it. the THIRD pixel will get the first
-                        // pixel's rectangle contribution, the second pixel's rectangle contribution,
-                        // and its own contribution. the 'own contribution' is the same in every pixel except
-                        // the leftmost and rightmost, a trapezoid that slides down in each pixel.
-                        // the second pixel's contribution to the third pixel will be the
-                        // rectangle 1 wide times the height change in the second pixel, which is dy.
-
-                        const step: f32 = sign * dy * 1; // dy is dy/dx, change in y for every 1 change in x,
-                        // which multiplied by 1-pixel-width is how much pixel area changes for each step in x
-                        // so the area advances by 'step' every time
-
-                        for (scanline[x1 + 1 .. x2]) |*s| {
-                            s.* += area + step / 2; // area of trapezoid is 1*step/2
-                            area += step;
-                        }
-                        assert_with_reason(@abs(area) <= 1.01, @src(), "`@abs(area) > 1.01` (area = {d}), accumulated error too high", .{area}); // accumulated error from area += step unless we round step down
-                        assert_with_reason(sy1 > y_final - 0.01, @src(), "`sy1 <= y_final - 0.01` ({d} <= {d}), accumulated error too high", .{ sy1, y_final - 0.01 });
-
-                        // area covered in the last pixel is the rectangle from all the pixels to the left,
-                        // plus the trapezoid filled by the line segment in this pixel all the way to the right edge
-                        scanline[x2] += area + sign * position_trapezoid_area(sy1 - y_final, x2f, x2f + 1.0, x_bottom, x2f + 1.0);
-
-                        // the rest of the line is filled based on the total height of the line segment in this pixel
-                        scanline_fill[x2 + 1] += sign * (sy1 - sy0);
-                    }
-                } else {
-                    // if edge goes outside of box we're drawing, we require
-                    // clipping logic. since this does not match the intended use
-                    // of this library, we use a different, very slow brute
-                    // force implementation
-                    // note though that this does happen some of the time because
-                    // x_top and x_bottom can be extrapolated at the top & bottom of
-                    // the shape and actually lie outside the bounding box
-                    for (0..len) |x_usize| {
-                        const x: u32 = @intCast(x_usize);
-                        // cases:
-                        //
-                        // there can be up to two intersections with the pixel. any intersection
-                        // with left or right edges can be handled by splitting into two (or three)
-                        // regions. intersections with top & bottom do not necessitate case-wise logic.
-                        //
-                        // the old way of doing this found the intersections with the left & right edges,
-                        // then used some simple logic to produce up to three segments in sorted order
-                        // from top-to-bottom. however, this had a problem: if an x edge was epsilon
-                        // across the x border, then the corresponding y position might not be distinct
-                        // from the other y segment, and it might ignored as an empty segment. to avoid
-                        // that, we need to explicitly produce segments based on x positions.
-
-                        // rename variables to clearly-defined pairs
-                        const y0: f32 = y_top;
-                        const x1: f32 = @floatFromInt(x);
-                        const x2: f32 = @floatFromInt(x + 1);
-                        const x3: f32 = xb;
-                        const y3: f32 = y_bottom;
-
-                        // x = e.x + e.dx * (y-y_top)
-                        // (y-y_top) = (x - e.x) / e.dx
-                        // y = (x - e.x) / e.dx + y_top
-                        const y1: f32 = (x1 - x0) / dx + y_top;
-                        const y2: f32 = (x1 + 1 - x0) / dx + y_top;
-
-                        if (x0 < x1 and x3 > x2) { // three segments descending down-right
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
-                            handle_clipped_edge(scanline, x, edge, x1, y1, x2, y2);
-                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
-                        } else if (x3 < x1 and x0 > x2) { // three segments descending down-left
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
-                            handle_clipped_edge(scanline, x, edge, x2, y2, x1, y1);
-                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
-                        } else if (x0 < x1 and x3 > x1) { // two segments across x, down-right
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
-                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
-                        } else if (x3 < x1 and x0 > x1) { // two segments across x, down-left
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x1, y1);
-                            handle_clipped_edge(scanline, x, edge, x1, y1, x3, y3);
-                        } else if (x0 < x2 and x3 > x2) { // two segments across x+1, down-right
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
-                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
-                        } else if (x3 < x2 and x0 > x2) { // two segments across x+1, down-left
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x2, y2);
-                            handle_clipped_edge(scanline, x, edge, x2, y2, x3, y3);
-                        } else { // one segment
-                            handle_clipped_edge(scanline, x, edge, x0, y0, x3, y3);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// The edge passed in here does not cross the vertical line at x or the
-    /// vertical line at x+1 (i.e. it has already been clipped to those).
-    fn handle_clipped_edge(
-        scanline: []f32,
-        x: u32,
-        active_edge: *ActiveEdge,
-        x0_start: f32,
-        y0_start: f32,
-        x1_start: f32,
-        y1_start: f32,
-    ) void {
-        var x0 = x0_start;
-        var y0 = y0_start;
-        var x1 = x1_start;
-        var y1 = y1_start;
-        if (y0 == y1) return;
-        assert_with_reason(y0 < y1, @src(), "`y0 >= y1` ({d} >= {d}), invalid edge", .{ y0, y1 });
-        assert_with_reason(active_edge.sy <= active_edge.ey, @src(), "`active_edge.sy > active_edge.ey` ({d} > {d}), invalid edge", .{ active_edge.sy, active_edge.ey });
-        if (y0 > active_edge.ey) return;
-        if (y1 < active_edge.sy) return;
-        if (y0 < active_edge.sy) {
-            x0 += (x1 - x0) * (active_edge.sy - y0) / (y1 - y0);
-            y0 = active_edge.sy;
-        }
-        if (y1 > active_edge.ey) {
-            x1 += (x1 - x0) * (active_edge.ey - y1) / (y1 - y0);
-            y1 = active_edge.ey;
-        }
-
-        const xf: f32 = @floatFromInt(x);
-
-        if (x0 == xf)
-            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{})
-        else if (x0 == xf + 1)
-            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{})
-        else if (x0 <= xf)
-            assert_with_reason(x1 <= xf, @src(), "`x1 > xf`", .{})
-        else if (x0 >= xf + 1)
-            assert_with_reason(x1 >= xf + 1, @src(), "`x1 < xf + 1`", .{})
-        else {
-            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{});
-            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{});
-        }
-
-        if (x0 <= xf and x1 <= xf) {
-            scanline[x] += active_edge.direction * (y1 - y0);
-        } else if (x0 >= xf + 1 and x1 >= xf + 1) {
-            // Do nothing.
-        } else {
-            assert_with_reason(x0 >= xf, @src(), "`x0 < xf`", .{});
-            assert_with_reason(x0 <= xf + 1, @src(), "`x0 > xf + 1`", .{});
-            assert_with_reason(x1 >= xf, @src(), "`x1 < xf`", .{});
-            assert_with_reason(x1 <= xf + 1, @src(), "`x1 > xf + 1`", .{});
-            // coverage = 1 - average x position
-            scanline[x] += active_edge.direction * (y1 - y0) * (1 - ((x0 - xf) + (x1 - xf)) / 2);
-        }
     }
 
     fn coverage_index(bytes: []const u8, coverage_table: u32, glyph: GlyphIndex) ?u32 {
@@ -1854,7 +1104,7 @@ pub const TrueTypeFont = struct {
         return null;
     }
 
-    fn glyphClass(bytes: []const u8, class_def_table: u32, glyph: GlyphIndex) u32 {
+    fn glyph_class(bytes: []const u8, class_def_table: u32, glyph: GlyphIndex) u32 {
         const glyph_int = @backingInt(glyph);
         const class_def_format = read_int(u16, bytes[class_def_table..][0..2], .big);
         switch (class_def_format) {
@@ -2245,19 +1495,18 @@ pub const TrueTypeFont = struct {
     }
 
     fn get_glyph_vertex_list_cff(self: *const TrueTypeFont, glyph: GlyphIndex, vertices: *List(Vertex), vertices_alloc: Allocator) GlyphBitmapError!void {
-        _ = vertices_alloc;
-        // mode=bounds to get bounds and num_vertices
+        // Pass 1: mode=bounds to count number of vertices
         var count_ctx = CharstringCtx.init(.{ .mode = .bounds }, undefined);
         try run_charstring(&self.cff_data, glyph, &count_ctx);
+
+        // Pass 2: allocate the required capacity and extract vertices
         vertices.clear();
-        // mode=verts to assign vertices
+        vertices.grow_capacity_if_needed_for_n_more_elems(count_ctx.num_vertices, .GROW_EXACT_NEEDED, vertices_alloc);
+        vertices.set_len(count_ctx.num_vertices);
+
         var out_ctx = CharstringCtx.init(.{ .mode = .verts }, vertices.get_many_item_ptr(0));
         try run_charstring(&self.cff_data, glyph, &out_ctx);
         assert_with_reason(out_ctx.num_vertices == count_ctx.num_vertices, @src(), "`out_ctx.num_vertices != count_ctx.num_vertices`", .{});
-        // std.log.debug(
-        //     "glyphShapeT2() first {d:.1},{d:.1} xy {d:.1},{d:.1} min {d:.1},{d:.1} max {d:.1},{d:.1} num_vertices {}",
-        //     .{ count_ctx.first_x, count_ctx.first_y, count_ctx.x, count_ctx.y, count_ctx.min_x, count_ctx.min_y, count_ctx.max_x, count_ctx.max_y, count_ctx.num_vertices },
-        // );
     }
 
     const Instruction = enum(u8) {
@@ -2555,7 +1804,6 @@ pub const TrueTypeFont = struct {
                         b.cursor -= 1;
                         break :blk @floatFromInt(@as(i16, @truncate(@as(i32, @bitCast(b.cff_int())))));
                     };
-                    // std.log.debug("f {d:.2}", .{f});
                     if (sp >= 48) return error.push_stack_overflow;
                     s[sp] = f;
                     sp += 1;
@@ -2570,7 +1818,6 @@ pub const TrueTypeFont = struct {
     fn get_glyph_subroutines(cff_data: *const CffData, glyph: GlyphIndex) DataBuf {
         var fdselector: u32 = std.math.maxInt(u32);
         var fdselect = cff_data.fdselect;
-        // std.log.debug("getGlyphSubrs fdselect {}", .{fdselect});
         fdselect.seek(0);
 
         const fmt = fdselect.get8();
@@ -2592,37 +1839,11 @@ pub const TrueTypeFont = struct {
                 start = end;
             }
         }
-        // what was this line? it does nothing. why was it in the original c code?
+        //VERIFY what was this line? it does nothing. why was it in the original c code?
         // if (fdselector == -1) new_buf(NULL, 0);
         return cff_data.cff.get_subroutines(cff_data.fontdicts.cff_index_get(@fromBackingInt(@intCast(fdselector))));
     }
 };
-
-pub fn translate_vertices(vertices: *List(Vertex), translate: Vec_i32) void {
-    for (vertices.zig_slice_entire()) |*vert| {
-        switch (vert.type) {
-            .MOVE_TO, .LINE => {
-                vert.x += num_cast(translate.x, i16);
-                vert.y += num_cast(translate.y, i16);
-            },
-            .QUADRATIC => {
-                vert.x += num_cast(translate.x, i16);
-                vert.y += num_cast(translate.y, i16);
-                vert.cx += num_cast(translate.x, i16);
-                vert.cy += num_cast(translate.y, i16);
-            },
-            .CUBIC => {
-                vert.x += num_cast(translate.x, i16);
-                vert.y += num_cast(translate.y, i16);
-                vert.cx += num_cast(translate.x, i16);
-                vert.cy += num_cast(translate.y, i16);
-                vert.cx1 += num_cast(translate.x, i16);
-                vert.cy1 += num_cast(translate.y, i16);
-            },
-            else => {},
-        }
-    }
-}
 
 pub const ShapeConvertError = error{
     invalid_vertex_type,
@@ -2736,7 +1957,7 @@ pub fn debug_rasterize_vertex_list_control_points_to_data_grid(vertices: *List(V
 
 test "TrueTypeFont -> load and render chars" {
     @setEvalBranchQuota(5000);
-    const alloc = std.heap.page_allocator;
+    const alloc = std.heap.smp_allocator;
     const OUT_DEF = DataGridModule.GridDefinition{
         .LIST_DEF = .{
             .ELEM = u8,
@@ -2748,9 +1969,6 @@ test "TrueTypeFont -> load and render chars" {
     };
     const io = std.testing.io;
     const OUT_GRID = DataGridModule.DataGrid(OUT_DEF);
-    const RASTER = ShapeModule.ScanlineRasterizer(f32, void, {}, i32, OUT_DEF);
-    var raster = RASTER.init_with_intersection_capacity(16, alloc);
-    defer raster.free(alloc);
     const output_cells = OUT_GRID.CellList.allocate_new(4096, alloc);
     var vertex_list = List(Vertex).allocate_new(128, alloc);
     defer vertex_list.free(alloc);
@@ -2765,18 +1983,8 @@ test "TrueTypeFont -> load and render chars" {
         }
     };
     defer vertex_list_pool.free_items_then_free_pool(Allocator, PROTO.free_vert_list, alloc);
-    const ActiveEdgePoolST = ActiveEdgePool(.SINGLE_THREADED);
-    var active_edge_pool = ActiveEdgePoolST.allocate_new(32, alloc);
-    defer active_edge_pool.free_pool();
-    // const ContourPoolST = ContourPool(f32, void, {}, .SINGLE_THREADED);
-    // var contour_pool = ContourPoolST.init_cap(8, alloc);
-    // defer contour_pool.free_pool();
     var shape = Shape(f32, void, {}).allocate_new(4, alloc);
     defer shape.free(alloc);
-    var temp_flat_curve_buf = FlattenedCurvesBuffer.allocate_new(128, alloc);
-    defer temp_flat_curve_buf.free();
-    var temp_edge_buf = EdgesBuffer.allocate_new(64, alloc);
-    defer temp_edge_buf.free();
     const CHARS = [_]u32{ 'A', 'B', 'c', 'd', 'E', 'f', 'G', 'g', '&', 'ć' };
     const font_file = try std.Io.Dir.cwd().openFile(io, "vendor/fonts/Lato/Lato-Regular.ttf", .{});
     defer font_file.close(io);
@@ -2789,6 +1997,18 @@ test "TrueTypeFont -> load and render chars" {
     var font: TrueTypeFont = try TrueTypeFont.load(font_file_buf.zig_slice_entire());
     try std.Io.Dir.cwd().createDirPath(io, "test_out/true_type");
     const scale_54_px = font.get_scale_for_pixel_height(54.0);
+    const Rasterizer = Root.Shape.ASCA_Rasterizer.CellAccumulatorRasterizer(.{
+        .ROW_COLUMN_ORDER = .ROW_MAJOR,
+        .X_ORDER = .LEFT_TO_RIGHT,
+        .Y_ORDER = .BOTTOM_TO_TOP,
+    }, f32, u32, i32);
+    const RasterOpts = Rasterizer.RasterOptions;
+    const opts = RasterOpts{
+        .tolerance = 0.1,
+        .fill_rule = .EVEN_ODD,
+    };
+    var raster = Rasterizer.init_empty(alloc);
+    defer raster.free();
     inline for (CHARS[0..]) |char| {
         const glyph_index = font.get_codepoint_glyph_index(char);
         try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
@@ -2801,12 +2021,15 @@ test "TrueTypeFont -> load and render chars" {
         shape.translate(shape_shift_to_frame);
         shape_aabb = shape_aabb.with_mins_shifted_to_zero();
         const shape_aabb_max = shape_aabb.get_max_point();
-        const output_grid = OUT_GRID.init_repurpose_existing_cell_list(.new(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2)), 0, output_cells, alloc);
-        raster.rasterize_to_existing_data_grid_default_lerp(&shape, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
+        const raster_size = Vec_u32.new(@intFromFloat(shape_aabb_max.x), @intFromFloat(shape_aabb_max.y));
+        const grid_size = raster_size.add(.new_splat(3));
+        const output_grid = OUT_GRID.init_repurpose_existing_cell_list(grid_size, 0, output_cells, alloc);
+        const output_region = output_grid.get_entire_region();
+        raster.clear_and_realloc(raster_size.x, raster_size.y);
+        _ = try raster.rasterize_shape_to_grid(shape, opts, OUT_DEF, .existing_region(output_region, 0), 0, 255);
         _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
-        // STB Rasterizer
-        //FIXME
-        // _ = try font.rasterize_vertices_to_data_grid_with_subpixel_offset(glyph_index, &vertex_list, null, .existing_data_grid(.new_no_parent(output_grid), 0), .default_pixel_flatness(), scale_54_px, scale_54_px, 0, 0, .SINGLE_THREADED, &temp_flat_curve_buf, &temp_edge_buf, &active_edge_pool);
-        // _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/stb_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc);
     }
+    var text_shape_list = ShapedGlyphList.allocate_new(10, alloc);
+    defer text_shape_list.free_if_non_zero(alloc);
+    try font.shape_text("ABcdEfGg&ć", 2.0, &text_shape_list, alloc);
 }

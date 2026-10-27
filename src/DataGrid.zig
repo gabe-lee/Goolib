@@ -846,8 +846,8 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 fill: ?Cell,
             },
 
-            pub fn existing_region(grid_with_offset: GridRegion, fill: ?Cell) RegionSource {
-                return RegionSource{ .EXISTING = .{ .region = grid_with_offset, .fill = fill } };
+            pub fn existing_region(region: GridRegion, fill: ?Cell) RegionSource {
+                return RegionSource{ .EXISTING = .{ .region = region, .fill = fill } };
             }
             pub fn data_grid_provider_opaque(func: *const fn (width: Idx, height: Idx, fill: ?Cell) ?GridRegion, fill: ?Cell) RegionSource {
                 return RegionSource{ .PROVIDER_FUNC_OPAQUE = .{ .func = func, .fill = fill } };
@@ -856,10 +856,12 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 return RegionSource{ .PROVIDER_FUNC_FROM_GRID = .{ .grid = grid, .func = func, .fill = fill } };
             }
 
-            pub fn obtain_grid(self: RegionSource, width: Idx, height: Idx) ?GridRegion {
+            pub fn obtain_region(self: RegionSource, width: Idx, height: Idx) ?GridRegion {
                 return switch (self) {
                     .EXISTING => |src| after_fill: {
-                        if (src.region.get_width() < width or src.region.get_height() < height) return null;
+                        if (src.region.get_width() < width or src.region.get_height() < height) {
+                            return null;
+                        }
                         const adjusted = src.region.get_region(0, 0, width, height);
                         if (src.fill) |fill| adjusted.fill_all(fill);
                         break :after_fill adjusted;
@@ -873,7 +875,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 const without_pad = with_pad.get_region(pad_x, pad_y, width, height);
                 return without_pad;
             }
-            pub fn obtain_grid_block(self: RegionSource, width: Idx, height: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
+            pub fn obtain_region_block(self: RegionSource, width: Idx, height: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
                 const total_width = width * SUB_GRID_X_COUNT;
                 const total_height = height * SUB_GRID_Y_COUNT;
                 const total = self.obtain_grid(total_width, total_height) orelse return null;
@@ -891,7 +893,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 }
                 return out;
             }
-            pub fn obtain_grid_block_with_padding(self: RegionSource, width: Idx, height: Idx, pad_x: Idx, pad_y: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
+            pub fn obtain_region_block_with_padding(self: RegionSource, width: Idx, height: Idx, pad_x: Idx, pad_y: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
                 const width_and_pad = width + (2 * pad_x);
                 const height_and_pad = height + (2 * pad_y);
                 const total_width = width_and_pad * SUB_GRID_X_COUNT;

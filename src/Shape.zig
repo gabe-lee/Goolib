@@ -3621,7 +3621,7 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
 
                     switch (anti_alias) {
                         .NONE => {
-                            if (partial_percent >= 0.5) {
+                            if (partial_percent > 0) {
                                 output_row[partial_fill_x] = fill_val;
                             } else {
                                 output_row[partial_fill_x] = unfill_val;

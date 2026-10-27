@@ -188,7 +188,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
         .Y_ORDER = .TOP_TO_BOTTOM,
     };
     const OUT_GRID = DataGrid(OUT_DEF);
-    var output_grid = OUT_GRID.allocate_new(.new(56, 56), 0, alloc);
+    var output_grid = OUT_GRID.allocate_new(.new(54, 54), 0, alloc);
     defer output_grid.free(alloc);
 
     var inner: [3]EdgeWithUserdata(f32, void, {}) = undefined;
@@ -205,7 +205,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
     var raster = Rasterizer.init_empty(alloc);
     defer raster.free();
 
-    raster.clear_and_realloc(output_grid.get_width() - 4, output_grid.get_height() - 4);
+    raster.clear_and_realloc(output_grid.get_width() - 2, output_grid.get_height() - 2);
     const opts = RasterOpts{
         .tolerance = 0.1,
         .fill_rule = .EVEN_ODD,

@@ -311,7 +311,7 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             self.add_cubic_bezier(p0123, p123, p23, p3, tol_sq, depth + 1, opts);
         }
 
-        pub fn rasterize_contour(self: *Self, contour: Contour, opts: RasterOptions) void {
+        fn rasterize_contour(self: *Self, contour: Contour, opts: RasterOptions) void {
             const tolerance_squared = opts.tolerance * opts.tolerance;
             for (contour.edges.zig_slice_entire()) |edge_item| {
                 switch (edge_item.edge) {
@@ -359,13 +359,14 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             for (shape.contours.zig_slice_entire()) |contour| {
                 self.rasterize_contour(contour, opts);
             }
-            var output_region = output_grid_region.obtain_region_with_padding(@intFromFloat(aabb_f.x_max), @intFromFloat(aabb_f.y_max), opts.final_shape_padding.x, opts.final_shape_padding.y) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
-            if (self.grid.get_width() > num_cast(output_region.get_width(), Idx) or self.grid.get_height() > num_cast(output_region.get_height(), Idx)) return OutputError.could_not_obtain_output_grid_for_given_size;
+            var output_region = output_grid_region.obtain_region(@intFromFloat(aabb_f.x_max), @intFromFloat(aabb_f.y_max)) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
+            const min_height = @min(self.grid.get_height(), output_region.get_height());
+            const min_width = @min(self.grid.get_width(), output_region.get_width());
             var y: Idx = 0;
-            while (y < self.grid.get_height()) : (y += 1) {
+            while (y < min_height) : (y += 1) {
                 var accum = self.row_cover.get(y);
                 var x: Idx = 0;
-                while (x < self.grid.get_width()) : (x += 1) {
+                while (x < min_width) : (x += 1) {
                     const c: Cell = self.get_cell(x, y, opts);
                     const raw_val = accum + c.area;
                     accum += c.cover;
