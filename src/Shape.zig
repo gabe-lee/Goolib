@@ -1894,7 +1894,7 @@ pub fn Contour(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USE
             _ = self.edges.append_one(edge, alloc);
         }
 
-        pub fn add_bounds_to_aabb(self: *Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
+        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
             for (self.edges.zig_slice_entire()) |edge| {
                 edge.add_bounds_to_aabb(aabb, linear_estimate);
             }
@@ -2163,8 +2163,8 @@ pub fn Shape(comptime T: type, comptime EDGE_USERDATA: type, comptime EDGE_USERD
                 },
             }
         }
-        pub fn add_bounds_to_aabb(self: *Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
-            for (self.contours.zig_slice_entire()) |*contour| {
+        pub fn add_bounds_to_aabb(self: Self, aabb: *AABB, linear_estimate: LinearEstimate(T)) void {
+            for (self.contours.zig_slice_entire_const()) |contour| {
                 contour.add_bounds_to_aabb(aabb, linear_estimate);
             }
         }
@@ -3499,12 +3499,12 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
 
         pub fn debug_rasterize_intersections_only(self: *Self, shape: *CompositeShapeType, output_grid: OutputGrid, no_intersection_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, intersection_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, estimates: Estimates(T), scanline_allocator: Allocator) void {
             output_grid.fill_all(no_intersection_val);
-            for (0..output_grid.height) |y_usize| {
+            for (0..output_grid.get_height()) |y_usize| {
                 const y: u32 = @intCast(y_usize);
                 const yy = num_cast(y, T) + 0.5;
                 shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates);
                 self.scanline.sort_and_sum();
-                const output_row: []OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM = output_grid.get_h_scanline(0, y, output_grid.width);
+                const output_row: []OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM = output_grid.get_h_scanline(0, y, output_grid.get_width());
                 for (self.scanline.intersections.zig_slice_entire()) |isect| {
                     const isect_x = isect.inter.point;
                     const isect_x_floor: u32 = @intFromFloat(@floor(isect_x));
@@ -3527,7 +3527,7 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                         const point = edge.lerp(curr_percent);
                         const point_floor = point.floor();
                         const point_floor_int = point_floor.to_new_type(u32);
-                        if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.width and point_floor_int.y >= 0 and point_floor_int.y < output_grid.height)) {
+                        if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.get_width() and point_floor_int.y >= 0 and point_floor_int.y < output_grid.get_height())) {
                             output_grid.set_cell(point_floor_int.x, point_floor_int.y, edge_val);
                         }
                         curr_percent += step;
@@ -3535,7 +3535,7 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                     const point = edge.lerp(1.0);
                     const point_floor = point.floor();
                     const point_floor_int = point_floor.to_new_type(u32);
-                    if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.width and point_floor_int.y >= 0 and point_floor_int.y < output_grid.height)) {
+                    if (guaranteed_within_bitmap or (point_floor_int.x >= 0 and point_floor_int.x < output_grid.get_width() and point_floor_int.y >= 0 and point_floor_int.y < output_grid.get_height())) {
                         output_grid.set_cell(point_floor_int.x, point_floor_int.y, edge_val);
                     }
                 }
@@ -3547,12 +3547,12 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
         }
 
         pub fn rasterize_to_existing_data_grid(self: *Self, shape: *CompositeShapeType, anti_alias: ScanlineAntiAliasMode, output_grid: OutputGrid, unfill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, fill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, lerp_func: *const fn (unfill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, fill_val: OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, percent_filled: f32) OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM, estimates: Estimates(T), scanline_allocator: Allocator) void {
-            for (0..output_grid.height) |y_usize| {
+            for (0..output_grid.get_height()) |y_usize| {
                 const y: u32 = @intCast(y_usize);
                 const yy = num_cast(y, T) + 0.5;
                 shape.remake_horizontal_scanline_intersections(yy, .sign, SLOPE_TYPE, &self.scanline, scanline_allocator, estimates);
                 self.scanline.sort_and_sum();
-                const output_row: []OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM = output_grid.get_h_scanline(0, y, output_grid.width).zig_slice_entire();
+                const output_row: []OUTPUT_DATA_GRID_DEF.LIST_DEF.ELEM = output_grid.get_h_scanline(0, y, output_grid.get_width()).zig_slice_entire();
                 var x: u32 = 0;
                 var next_x: u32 = undefined;
                 var partial_fill_x: u32 = undefined;
@@ -3591,9 +3591,9 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                     intersection_x_floor = @floor(intersection_x);
                     partial_fill_x = @intFromFloat(intersection_x_floor);
                     whole_fill_val = fills[previous_fill];
-                    const max_fill_x = @min(output_grid.width, partial_fill_x);
+                    const max_fill_x = @min(output_grid.get_width(), partial_fill_x);
                     @memset(output_row[x..max_fill_x], whole_fill_val);
-                    if (max_fill_x >= output_grid.width) break;
+                    if (max_fill_x >= output_grid.get_width()) break;
                     partial_percent = start_percents[previous_fill];
                     partial_remainder = (intersection_x - intersection_x_floor);
                     partial_delta = delta_percents[next_fill] * partial_remainder;
@@ -3640,7 +3640,7 @@ pub fn ScanlineRasterizer(comptime T: type, comptime EDGE_USERDATA: type, compti
                     x = next_x;
                     previous_fill = next_fill;
                 }
-                if (x < output_grid.width) {
+                if (x < output_grid.get_width()) {
                     @memset(output_row[x..], fills[previous_fill]);
                 }
             }

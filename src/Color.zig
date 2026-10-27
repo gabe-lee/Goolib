@@ -180,6 +180,12 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         pub fn has_channel(comptime chan: []const u8) bool {
             return @hasField(CHANNEL, chan);
         }
+        pub fn has_all_channels(comptime chans: []const []const u8) bool {
+            inline for (chans) |chan| {
+                if (@hasField(CHANNEL, chan)) return false;
+            }
+            return true;
+        }
 
         pub const TYPE = T;
 
@@ -340,7 +346,7 @@ pub fn define_arbitrary_color_type(comptime T: type, comptime CHANNEL: type) typ
         pub fn subtract(self: Color, other: Color) Color {
             var out = Color{};
             inline for (0..CHANNEL_COUNT) |c| {
-                out.raw[c] = self.raw[c] + other.raw[c];
+                out.raw[c] = self.raw[c] - other.raw[c];
             }
             return out;
         }

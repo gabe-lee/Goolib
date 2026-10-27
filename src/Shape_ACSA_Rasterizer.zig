@@ -38,6 +38,8 @@ const Cast = Root.Cast;
 const AABB = Root.AABB2.define_aabb2_type;
 
 const num_cast = Cast.num_cast;
+const DEBUG = std.debug.print;
+const DEBUG_VAL = Root.Utils.DebugPrint.debug_val;
 
 pub const FillRule = enum(u8) {
     NON_ZERO,
@@ -57,6 +59,7 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             .OWNERSHIP = .OWNED_ALLOCATED,
         });
         const Vector = Vec2.define_vec2_type(Float);
+        const VectorI = Vec2.define_vec2_type(Idx);
 
         pub const Cell = struct {
             cover: Float = 0,
@@ -74,10 +77,10 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             tolerance: Float = 0.2,
             fill_rule: FillRule = .NON_ZERO,
             coord_origin: ?DataGridModule.Origin = null,
-            final_shape_padding: Vector = .TWO,
+            final_shape_padding: VectorI = .TWO,
         };
 
-        cells: CellGrid = .{},
+        grid: CellGrid = .{},
         row_cover: CoverList = .{},
         allocator: Allocator,
 
@@ -88,32 +91,32 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
         }
         pub fn init_with_existing(cells: CellGrid, row_cover: CoverList, alloc: Allocator) Self {
             return Self{
-                .cells = cells,
+                .grid = cells,
                 .row_cover = row_cover,
                 .allocator = alloc,
             };
         }
 
-        pub fn clear_and_resize(self: *Self, width: Idx, height: Idx, major_stride: ?Idx) void {
-            self.cells.discard_and_resize(width, height, major_stride, Cell{}, self.allocator);
+        pub fn clear_and_realloc(self: *Self, width: Idx, height: Idx) void {
+            self.grid.discard_and_realloc(width, height, Cell{}, self.allocator);
             self.row_cover.clear();
             self.row_cover.grow_capacity_if_needed(height, .GROW_BY_25_PERCENT, self.allocator);
             self.row_cover.set_len(height);
         }
 
         pub fn free(self: *Self) void {
-            self.cells.free_if_non_zero(self.allocator);
+            self.grid.free_if_non_zero(self.allocator);
             self.row_cover.free_if_non_zero(self.allocator);
         }
 
         fn add_cell_area(self: *Self, x: IdxSigned, y: IdxSigned, delta_y: Float, area: Float, opts: RasterOptions) void {
-            if (y < 0 or y >= @as(IdxSigned, @intCast(self.cells.height))) return;
+            if (y < 0 or y >= @as(IdxSigned, @intCast(self.grid.get_height()))) return;
             const y_idx = @as(Idx, @intCast(y));
             if (x < 0) {
                 self.row_cover.get_ptr(y_idx).* += delta_y;
                 return;
             }
-            if (x >= @as(IdxSigned, @intCast(self.cells.width))) {
+            if (x >= @as(IdxSigned, @intCast(self.grid.get_width()))) {
                 return;
             }
             const cell_ptr = self.get_cell_ptr(@intCast(x), y_idx, opts);
@@ -123,7 +126,7 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
 
         /// Rasterizes a segment strictly contained within scanline [y_row, y_row + 1]
         fn rasterize_subsegment_in_row(self: *Self, y_row: IdxSigned, x0: Float, y0: Float, x1: Float, y1: Float, opts: RasterOptions) void {
-            if (y_row < 0 or y_row >= @as(IdxSigned, @intCast(self.cells.height))) return;
+            if (y_row < 0 or y_row >= @as(IdxSigned, @intCast(self.grid.get_height()))) return;
             const delta_y = y1 - y0;
             if (delta_y == 0) return;
 
@@ -193,7 +196,7 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             var x1 = p1.x;
             var y1 = p1.y;
 
-            const height_f = @as(Float, @floatFromInt(self.cells.height));
+            const height_f = @as(Float, @floatFromInt(self.grid.get_height()));
 
             // Clip against vertical screen bounds [0, height]
             if ((y0 <= 0 and y1 <= 0) or (y0 >= height_f and y1 >= height_f)) return;
@@ -328,53 +331,41 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
 
         fn get_cell(self: Self, x: Idx, y: Idx, opts: RasterOptions) Cell {
             if (opts.coord_origin) |origin| {
-                return self.cells.get_cell_with_origin(origin, x, y);
+                return self.grid.get_cell_with_origin(origin, x, y);
             } else {
-                return self.cells.get_cell(x, y);
+                return self.grid.get_cell(x, y);
             }
         }
         fn get_cell_ptr(self: *Self, x: Idx, y: Idx, opts: RasterOptions) *Cell {
             if (opts.coord_origin) |origin| {
-                return self.cells.get_cell_ptr_with_origin(origin, x, y);
+                return self.grid.get_cell_ptr_with_origin(origin, x, y);
             } else {
-                return self.cells.get_cell_ptr(x, y);
+                return self.grid.get_cell_ptr(x, y);
             }
         }
 
         pub fn rasterize_shape_to_grid(
             self: *Self,
-            shape: *Shape,
+            shape: Shape,
             opts: RasterOptions,
             comptime OUTPUT_GRID_DEF: GridDefinition,
-            output_grid_region: OUTPUT_GRID_DEF.Grid().Source,
+            output_grid_region: OUTPUT_GRID_DEF.with_ownership(.REGION).Grid().RegionSource,
             unfill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
             fill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
-        ) OutputError!OUTPUT_GRID_DEF.Grid().DataGridWithParentOffset {
-            var unalign_delta: Vector = .ZERO;
-            var aabb: AABB(Float) = .{};
-            shape.add_bounds_to_aabb(&aabb, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(ShapeModule.DEFAULT_LINEAR_ESTIMATE_RATIO));
-            if (opts.align_shape_to_zero) {
-                unalign_delta = aabb.get_min_point();
-                const align_delta = unalign_delta.negate();
-                shape.translate(align_delta);
-                aabb.add_translate(align_delta);
-            }
-            aabb.x_max += opts.final_shape_padding.x * 2;
-            aabb.y_max += opts.final_shape_padding.y * 2;
-            aabb.expand_round_to_int();
-            shape.translate(opts.final_shape_padding);
-            unalign_delta.add(opts.final_shape_padding.negate());
+        ) OutputError!OUTPUT_GRID_DEF.with_ownership(.REGION).Grid() {
+            var aabb_f: AABB(Float) = .{};
+            shape.add_bounds_to_aabb(&aabb_f, .estimate_linear_when_linear_coeff_more_than_N_times_quadratic(ShapeModule.DEFAULT_LINEAR_ESTIMATE_RATIO));
+            aabb_f = aabb_f.expand_round_to_int();
             for (shape.contours.zig_slice_entire()) |contour| {
-                if (opts.align_shape_to_zero) {}
                 self.rasterize_contour(contour, opts);
             }
-            var output_grid_with_offset = output_grid_region.obtain_grid_opaque(@intFromFloat(aabb.x_max), @intFromFloat(aabb.y_max)) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
-            if (self.cells.width != num_cast(output_grid_with_offset.data_grid.width, Idx) or self.cells.height != num_cast(output_grid_with_offset.data_grid.height, Idx)) return OutputError.could_not_obtain_output_grid_for_given_size;
+            var output_region = output_grid_region.obtain_region_with_padding(@intFromFloat(aabb_f.x_max), @intFromFloat(aabb_f.y_max), opts.final_shape_padding.x, opts.final_shape_padding.y) orelse return OutputError.could_not_obtain_output_grid_for_given_size;
+            if (self.grid.get_width() > num_cast(output_region.get_width(), Idx) or self.grid.get_height() > num_cast(output_region.get_height(), Idx)) return OutputError.could_not_obtain_output_grid_for_given_size;
             var y: Idx = 0;
-            while (y < self.cells.height) : (y += 1) {
+            while (y < self.grid.get_height()) : (y += 1) {
                 var accum = self.row_cover.get(y);
                 var x: Idx = 0;
-                while (x < self.cells.width) : (x += 1) {
+                while (x < self.grid.get_width()) : (x += 1) {
                     const c: Cell = self.get_cell(x, y, opts);
                     const raw_val = accum + c.area;
                     accum += c.cover;
@@ -392,19 +383,10 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
                         },
                     }
                     const final_px = Math.upgrade_lerp_out(unfill_val, fill_val, coverage, OUTPUT_GRID_DEF.LIST_DEF.ELEM);
-                    output_grid_with_offset.data_grid.set_cell(x, y, final_px);
+                    output_region.set_cell(x, y, final_px);
                 }
             }
-            return output_grid_with_offset;
+            return output_region;
         }
-
-        pub fn write_to_grid(
-            self: Self,
-            comptime OUTPUT_GRID_DEF: GridDefinition,
-            output_grid_region: OUTPUT_GRID_DEF.Grid().Source,
-            unfill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
-            fill_val: OUTPUT_GRID_DEF.LIST_DEF.ELEM,
-            opts: RasterOptions,
-        ) OutputError!OUTPUT_GRID_DEF.Grid().DataGridWithParentOffset {}
     };
 }

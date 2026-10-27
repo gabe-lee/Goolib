@@ -195,6 +195,8 @@ fn print_payload(value: anytype, ind: usize, depth_limit: usize, comptime TMODE:
                         std.debug.print("0x{x} -> &{s}<ANYOPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "" });
                     } else if (p_info.child == anyopaque or @typeInfo(p_info.child) == .@"opaque") {
                         std.debug.print("0x{x} -> &{s}{s}<OPAQUE TYPE>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
+                    } else if (@typeInfo(p_info.child) == .@"fn") {
+                        std.debug.print("0x{x} -> &{s}{s}<FUNCTION TYPE>\n", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "", type_name(TMODE, p_info.child) });
                     } else {
                         std.debug.print("0x{x} -> &{s}", .{ @intFromPtr(value), if (p_info.attrs.@"const") "const " else "" });
                         const off: usize = switch (comptime OMODE) {

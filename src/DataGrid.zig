@@ -74,6 +74,11 @@ pub const Origin = enum(u8) {
     BOT_RIGHT,
 };
 
+pub const Ownership = enum(u8) {
+    ROOT,
+    REGION,
+};
+
 pub const RowColumnOrder = Root.CommonTypes.RowColumnOrder;
 
 pub const GridDefinitionNoElem = struct {
@@ -81,6 +86,7 @@ pub const GridDefinitionNoElem = struct {
     ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
     X_ORDER: XOrder = .LEFT_TO_RIGHT,
     Y_ORDER: YOrder = .TOP_TO_BOTTOM,
+    OWNERSHIP: Ownership = .ROOT,
 
     pub fn Grid(comptime self: GridDefinitionNoElem, comptime CELL: type) type {
         return DataGrid(self.with_cell_type(CELL));
@@ -108,6 +114,7 @@ pub const GridDefinitionNoList = struct {
     ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
     X_ORDER: XOrder = .LEFT_TO_RIGHT,
     Y_ORDER: YOrder = .TOP_TO_BOTTOM,
+    OWNERSHIP: Ownership = .ROOT,
 
     pub fn Grid(comptime self: GridDefinitionNoList, comptime LIST: Root.ListSlice.ListDef) type {
         return DataGrid(self.with_list_def(LIST));
@@ -128,6 +135,7 @@ pub const GridDefinition = struct {
     ROW_COLUMN_ORDER: RowColumnOrder = .ROW_MAJOR,
     X_ORDER: XOrder = .LEFT_TO_RIGHT,
     Y_ORDER: YOrder = .TOP_TO_BOTTOM,
+    OWNERSHIP: Ownership = .ROOT,
 
     pub fn Grid(comptime self: GridDefinition) type {
         return DataGrid(self);
@@ -139,54 +147,37 @@ pub const GridDefinition = struct {
             .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
             .X_ORDER = self.X_ORDER,
             .Y_ORDER = self.Y_ORDER,
+            .OWNERSHIP = self.OWNERSHIP,
         };
     }
-    pub fn with_ownership(comptime self: GridDefinition, comptime OWNERSHIP: Root.ListSlice.Ownership) GridDefinition {
+    pub fn with_list_ownership(comptime self: GridDefinition, comptime OWNERSHIP: Root.ListSlice.Ownership) GridDefinition {
         return GridDefinition{
             .LIST_DEF = self.LIST_DEF.with_ownership(OWNERSHIP),
             .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
             .X_ORDER = self.X_ORDER,
             .Y_ORDER = self.Y_ORDER,
+            .OWNERSHIP = self.OWNERSHIP,
+        };
+    }
+    pub fn with_ownership(comptime self: GridDefinition, comptime OWNERSHIP: Ownership) GridDefinition {
+        return GridDefinition{
+            .LIST_DEF = self.LIST_DEF,
+            .ROW_COLUMN_ORDER = self.ROW_COLUMN_ORDER,
+            .X_ORDER = self.X_ORDER,
+            .Y_ORDER = self.Y_ORDER,
+            .OWNERSHIP = OWNERSHIP,
         };
     }
 };
-
-// pub const BitmapOpaque = struct {
-//     bytes: List(u8),
-//     bytes_width: IDX,
-//     bytes_height: IDX,
-//     bytes_major_stride: IDX,
-//     owns_memory: bool,
-
-//     pub fn to_typed(self: BitmapOpaque, comptime DEF: GridDefinition) Bitmap(DEF) {
-//         const BMP = Bitmap(DEF);
-//         const new_width = self.bytes_width / @sizeOf(BMP.CELL);
-//         const new_height = self.bytes_height / @sizeOf(BMP.CELL);
-//         const new_stride = self.bytes_major_stride / @sizeOf(BMP.CELL);
-//         const recalced_width_bytes = new_width * @sizeOf(BMP.CELL);
-//         const recalced_height_bytes = new_height * @sizeOf(BMP.CELL);
-//         const recalced_stride_bytes = new_stride * @sizeOf(BMP.CELL);
-//         assert_with_reason(recalced_width_bytes == self.bytes_width, @src(), "cannot convert opaque DataGrid to one with pixel type `{s} x {d}`, loss of width bytes", .{ @typeName(BMP.CELL.TYPE), BMP.CELL.CHANNEL_COUNT });
-//         assert_with_reason(recalced_height_bytes == self.bytes_height, @src(), "cannot convert opaque DataGrid to one with pixel type `{s} x {d}`, loss of height bytes", .{ @typeName(BMP.CELL.TYPE), BMP.CELL.CHANNEL_COUNT });
-//         assert_with_reason(recalced_stride_bytes == self.bytes_major_stride, @src(), "cannot convert opaque DataGrid to one with pixel type `{s} x {d}`, loss of stride bytes", .{ @typeName(BMP.CELL.TYPE), BMP.CELL.CHANNEL_COUNT });
-//         return BMP{
-//             .pixels = self.bytes.cast_to_type(BMP.CELL),
-//             .width = new_width,
-//             .height = new_height,
-//             .major_stride = new_stride,
-//             .owns_memory = self.owns_memory,
-//         };
-//     }
-// };
 
 pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
     return struct {
         const Self = @This();
 
         cells: CellList = .{},
-        width: IDX = 0,
-        height: IDX = 0,
-        major_stride: IDX = 0,
+        root_size: IVec = .ZERO,
+        offset: if (IS_REGION) IVec else void = if (IS_REGION) .ZERO else {},
+        size: if (IS_REGION) IVec else void = if (IS_REGION) .ZERO else {},
 
         pub const CellList = DEFINITION.LIST_DEF.List();
         pub const Cell = DEFINITION.LIST_DEF.ELEM;
@@ -194,63 +185,39 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         pub const CellPtrConst = CellList.ElemPtrConst;
         pub const CellPtrMany = CellList.ElemPtrMany;
         pub const CellPtrManyConst = CellList.ElemPtrManyConst;
-        pub const IDX = DEFINITION.LIST_DEF.IDX;
+        pub const Idx = DEFINITION.LIST_DEF.IDX;
+        pub const IVec = Vec2.define_vec2_type(Idx);
         pub const CELL_BYTE_SIZE = @sizeOf(Cell);
         pub const ROW_COLUMN_ORDER = DEFINITION.ROW_COLUMN_ORDER;
         pub const X_ORDER = DEFINITION.X_ORDER;
         pub const Y_ORDER = DEFINITION.Y_ORDER;
         pub const DEF = DEFINITION;
+        pub const IS_ROOT = DEF.OWNERSHIP == .ROOT;
+        pub const IS_REGION = DEF.OWNERSHIP == .REGION;
 
-        const GridListAlloc = DEFINITION.with_ownership(.OWNED_ALLOCATED).Grid();
-        const GridListNoAlloc = DEFINITION.with_ownership(.OWNED_NOT_ALLOCATED).Grid();
-        const GridSlice = DEFINITION.with_ownership(.REFERENCED_MUTABLE).Grid();
-        const GridSliceConst = DEFINITION.with_ownership(.REFERENCED_IMMUTABLE).Grid();
+        const GridAllocRoot = DEFINITION.with_ownership(.ROOT).with_list_ownership(.OWNED_ALLOCATED).Grid();
+        const GridRoot = DEFINITION.with_ownership(.ROOT).Grid();
+        const GridRegion = DEFINITION.with_ownership(.REGION).Grid();
 
-        fn assert_major_stride_valid(width: IDX, height: IDX, stride: IDX, comptime src: std.builtin.SourceLocation) void {
-            if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
-                assert_with_reason(stride >= width, src, "major stride must be AT LEAST a large as width, but {d} < {d}", .{ stride, width });
-            } else {
-                assert_with_reason(stride >= height, src, "major stride must be AT LEAST a large as height, but {d} < {d}", .{ stride, height });
-            }
-        }
-
-        pub fn allocate_new(width: IDX, height: IDX, fill_value: ?Cell, alloc: Allocator) GridListAlloc {
-            const total = width * height;
-            var self = GridListAlloc{
+        pub fn allocate_new(root_size: IVec, fill_value: ?Cell, alloc: Allocator) GridAllocRoot {
+            const total = root_size.x * root_size.y;
+            var self = GridAllocRoot{
                 .cells = CellList.allocate_new_set_len(total, alloc),
-                .width = width,
-                .height = height,
-                .major_stride = if (ROW_COLUMN_ORDER == .ROW_MAJOR) width else height,
+                .root_size = root_size,
             };
             if (fill_value) |fill| {
                 self.fill_all(fill);
             }
             return self;
         }
-        pub fn allocate_new_with_major_stride(width: IDX, height: IDX, major_stride: IDX, fill_value: ?Cell, alloc: Allocator) GridListAlloc {
-            const total = width * height;
-            assert_major_stride_valid(width, height, major_stride, @src());
-            var self = GridListAlloc{
-                .cells = CellList.allocate_new_set_len(total, alloc),
-                .width = width,
-                .height = height,
-                .major_stride = if (ROW_COLUMN_ORDER == .ROW_MAJOR) width else height,
-            };
-            if (fill_value) |fill| {
-                self.fill_all(fill);
-            }
-            return self;
-        }
-        pub fn init_from_existing_list(width: IDX, height: IDX, fill_value: ?Cell, list: CellList, alloc: Allocator) Self {
-            const total = width * height;
+        pub fn init_repurpose_existing_cell_list(root_size: IVec, fill_value: ?Cell, list: CellList, alloc: Allocator) GridRoot {
+            const total = root_size.x * root_size.y;
             var self = Self{
                 .cells = list,
-                .width = width,
-                .height = height,
-                .major_stride = if (ROW_COLUMN_ORDER == .ROW_MAJOR) width else height,
+                .root_size = root_size,
             };
             self.cells.clear();
-            self.cells.grow_capacity_if_needed(@intCast(total), .GROW_BY_25_PERCENT, alloc);
+            self.cells.grow_capacity_if_needed(@intCast(total), .GROW_EXACT_NEEDED, alloc);
             self.cells.set_len_unchecked(total);
             if (fill_value) |fill| {
                 self.fill_all(fill);
@@ -259,59 +226,88 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         }
         pub fn free(self: *Self, alloc: Allocator) void {
             self.cells.free(alloc);
-            self.width = 0;
-            self.height = 0;
-            self.major_stride = 0;
+            self.* = .{};
         }
         pub fn free_if_non_zero(self: *Self, alloc: Allocator) void {
             self.cells.free_if_non_zero(alloc);
-            self.width = 0;
-            self.height = 0;
-            self.major_stride = 0;
+            self.* = .{};
         }
         pub fn clear(self: *Self) void {
+            assert_root(@src());
             self.cells.clear();
-            self.width = 0;
-            self.height = 0;
-            self.major_stride = 0;
+            self.root_size = .ZERO;
         }
-        // pub fn to_opaque(self: Self) BitmapOpaque {
-        //     return BitmapOpaque{
-        //         .bytes = self.cells.cast_to_byte_list(),
-        //         .bytes_height = self.height * @sizeOf(CELL),
-        //         .bytes_width = self.width * @sizeOf(CELL),
-        //         .bytes_major_stride = self.major_stride * @sizeOf(CELL),
-        //         .owns_memory = self.owns_memory,
-        //     };
-        // }
-
-        pub inline fn cell_count(self: Self) IDX {
-            return self.width * self.height;
+        fn assert_root(comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(IS_ROOT, src, "grid is not the root grid (it is a region)", .{});
         }
-        pub inline fn cells_slice(self: Self) CellList.Slice {
-            return self.cells.slice(0, self.cell_count());
-        }
-        pub inline fn cells_slice_const(self: Self) CellList.SliceConst {
-            return self.cells.slice_const(0, self.cell_count());
+        fn assert_region(comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(IS_REGION, src, "grid is not a region (it is the root grid)", .{});
         }
 
-        // pub fn has_all_channels(comptime channel_tags: []const [:0]const u8) bool {
-        //     inline for (channel_tags) |tag| {
-        //         if (!Types.is_valid_tag_name_for_enum(CHANNELS, tag)) return false;
-        //     }
-        //     return true;
-        // }
+        pub inline fn get_offset(self: Self) Vec {
+            switch (comptime DEF.OWNERSHIP) {
+                .ROOT => {
+                    return .ZERO;
+                },
+                .REGION => {
+                    return self.offset;
+                },
+            }
+        }
+        pub inline fn get_size(self: Self) Vec {
+            switch (comptime DEF.OWNERSHIP) {
+                .ROOT => {
+                    return self.root_size;
+                },
+                .REGION => {
+                    return self.size;
+                },
+            }
+        }
+        pub inline fn get_width(self: Self) Idx {
+            switch (comptime DEF.OWNERSHIP) {
+                .ROOT => {
+                    return self.root_size.x;
+                },
+                .REGION => {
+                    return self.size.x;
+                },
+            }
+        }
+        pub inline fn get_height(self: Self) Idx {
+            switch (comptime DEF.OWNERSHIP) {
+                .ROOT => {
+                    return self.root_size.y;
+                },
+                .REGION => {
+                    return self.size.y;
+                },
+            }
+        }
 
-        pub inline fn get_x_with_origin(self: Self, origin: Origin, x: IDX) IDX {
+        pub inline fn root_cell_count(self: Self) Idx {
+            return self.root_size.x * self.root_size.y;
+        }
+        pub inline fn cell_count(self: Self) Idx {
+            return self.get_width() * self.get_height();
+        }
+        pub inline fn root_cells_slice(self: Self) CellList.Slice {
+            return self.cells.slice(0, self.root_cell_count());
+        }
+        pub inline fn root_cells_slice_const(self: Self) CellList.SliceConst {
+            return self.cells.slice_const(0, self.root_cell_count());
+        }
+
+        pub inline fn get_x_with_origin(self: Self, origin: Origin, x: Idx) Idx {
             return switch (origin) {
-                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (self.width - 1 - x),
-                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (self.width - 1 - x),
+                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (self.get_size().x - 1 - x),
+                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (self.get_size().x - 1 - x),
             };
         }
-        pub inline fn get_y_with_origin(self: Self, origin: Origin, y: IDX) IDX {
+        pub inline fn get_y_with_origin(self: Self, origin: Origin, y: Idx) Idx {
             return switch (origin) {
-                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (self.height - 1 - y),
-                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (self.height - 1 - y),
+                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (self.get_size().y - 1 - y),
+                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (self.get_size().y - 1 - y),
             };
         }
         pub inline fn get_x_delta_with_origin(origin: Origin, x_delta: isize) isize {
@@ -328,122 +324,137 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         }
         pub inline fn get_x_with_origin_any(self: Self, origin: Origin, x: anytype) @TypeOf(x) {
             return switch (origin) {
-                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
-                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (num_cast(self.width, @TypeOf(x)) - 1 - x),
+                .BOT_LEFT, .TOP_LEFT => if (X_ORDER == .LEFT_TO_RIGHT) x else (num_cast(self.get_size().x, @TypeOf(x)) - 1 - x),
+                .BOT_RIGHT, .TOP_RIGHT => if (X_ORDER == .RIGHT_TO_LEFT) x else (num_cast(self.get_size().x, @TypeOf(x)) - 1 - x),
             };
         }
         pub inline fn get_y_with_origin_any(self: Self, origin: Origin, y: anytype) @TypeOf(y) {
             return switch (origin) {
-                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
-                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (num_cast(self.height, @TypeOf(y)) - 1 - y),
+                .TOP_LEFT, .TOP_RIGHT => if (Y_ORDER == .TOP_TO_BOTTOM) y else (num_cast(self.get_size().y, @TypeOf(y)) - 1 - y),
+                .BOT_LEFT, .BOT_RIGHT => if (Y_ORDER == .BOTTOM_TO_TOP) y else (num_cast(self.get_size().y, @TypeOf(y)) - 1 - y),
             };
         }
-        pub inline fn get_x_with_origin_and_span_width(self: Self, origin: Origin, x: IDX, width: IDX, width_direction: XOrder) IDX {
+        pub inline fn get_x_with_origin_and_span_width(self: Self, origin: Origin, x: Idx, width: Idx, width_direction: XOrder) Idx {
             const xx = self.get_x_with_origin(origin, x);
-            return switch (width_direction == X_ORDER) {
-                true => xx,
-                false => xx - width,
-            };
+            return if (width_direction == X_ORDER) xx else xx - width;
         }
-        pub inline fn get_y_with_origin_and_span_height(self: Self, origin: Origin, y: IDX, height: IDX, height_direction: XOrder) IDX {
+        pub inline fn get_y_with_origin_and_span_height(self: Self, origin: Origin, y: Idx, height: Idx, height_direction: YOrder) Idx {
             const yy = self.get_y_with_origin(origin, y);
-            return switch (height_direction == Y_ORDER) {
-                true => yy,
-                false => yy - height,
-            };
+            return if (height_direction == Y_ORDER) yy else yy - height;
         }
 
         pub fn move_cell_ptr_many(self: Self, x_delta: isize, y_delta: isize, ptr: CellPtrMany) CellPtrMany {
             const idx_delta = switch (ROW_COLUMN_ORDER) {
-                .ROW_MAJOR => MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.major_stride, isize)),
-                .COLUMN_MAJOR => MathX.minor_major_coord_to_idx(y_delta, x_delta, num_cast(self.major_stride, isize)),
+                .ROW_MAJOR => MathX.minor_major_coord_to_idx(x_delta, y_delta, num_cast(self.root_size.x, isize)),
+                .COLUMN_MAJOR => MathX.minor_major_coord_to_idx(y_delta, x_delta, num_cast(self.root_size.y, isize)),
             };
             return CellList.move_many_item_pointer(ptr, idx_delta);
         }
         pub inline fn move_cell_ptr_many_with_origin(self: Self, origin: Origin, x_delta: isize, y_delta: isize, ptr: CellPtrMany) CellPtrMany {
             return self.move_cell_ptr_many(get_x_delta_with_origin(origin, x_delta), get_y_delta_with_origin(origin, y_delta), ptr);
         }
-        pub fn move_cell_ptr(self: Self, x_delta: isize, y_delta: isize, ptr: CellPtr) CellPtr {
+        pub inline fn move_cell_ptr(self: Self, x_delta: isize, y_delta: isize, ptr: CellPtr) CellPtr {
             return CellList.cast_many_item_ptr_to_ptr(self.move_cell_ptr_many(x_delta, y_delta, CellList.cast_ptr_to_many_item_ptr(ptr)));
         }
         pub inline fn move_cell_ptr_with_origin(self: Self, origin: Origin, x_delta: isize, y_delta: isize, ptr: CellPtr) CellPtr {
             return CellList.cast_many_item_ptr_to_ptr(self.move_cell_ptr_many_with_origin(origin, x_delta, y_delta, CellList.cast_ptr_to_many_item_ptr(ptr)));
         }
 
-        pub fn get_idx_unchecked(self: Self, x: IDX, y: IDX) IDX {
+        pub fn get_idx_unchecked(self: Self, x: Idx, y: Idx) Idx {
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
-                    return MathX.minor_major_coord_to_idx(x, y, self.major_stride);
+                    return MathX.minor_major_coord_to_idx(x + self.get_offset().x, y + self.get_offset().y, self.root_size.x);
                 },
                 .COLUMN_MAJOR => {
-                    return MathX.minor_major_coord_to_idx(y, x, self.major_stride);
+                    return MathX.minor_major_coord_to_idx(y + self.get_offset().y, x + self.get_offset().x, self.root_size.y);
                 },
             }
         }
-        pub fn get_idx(self: Self, x: IDX, y: IDX) IDX {
-            assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.width, self.height });
+        pub fn get_idx(self: Self, x: Idx, y: Idx) Idx {
+            assert_with_reason(x < self.get_size().x and y < self.get_size().y, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.get_size().x, self.get_size().y });
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
-                    return MathX.minor_major_coord_to_idx(x, y, self.major_stride);
+                    return MathX.minor_major_coord_to_idx(x + self.get_offset().x, y + self.get_offset().y, self.root_size.x);
                 },
                 .COLUMN_MAJOR => {
-                    return MathX.minor_major_coord_to_idx(y, x, self.major_stride);
+                    return MathX.minor_major_coord_to_idx(y + self.get_offset().y, x + self.get_offset().x, self.root_size.y);
                 },
             }
         }
-        pub inline fn get_idx_with_origin(self: Self, origin: Origin, x: IDX, y: IDX) IDX {
+        pub fn get_idx_at_end_of_region(self: Self, x: Idx, y: Idx, width: Idx, height: Idx) Idx {
+            assert_with_reason(x < self.get_size().x and y < self.get_size().y, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.get_size().x, self.get_size().y });
+            switch (ROW_COLUMN_ORDER) {
+                .ROW_MAJOR => {
+                    return MathX.minor_major_coord_to_idx(x + self.get_offset().x, y + self.get_offset().y, self.root_size.x) + ((height - 1) * self.root_size.x) + (width);
+                },
+                .COLUMN_MAJOR => {
+                    return MathX.minor_major_coord_to_idx(y + self.get_offset().y, x + self.get_offset().x, self.root_size.y) + ((width - 1) * self.root_size.y) + (height);
+                },
+            }
+        }
+        pub fn get_idx_at_end_of_region_known_start_idx(self: Self, idx: Idx, width: Idx, height: Idx) Idx {
+            switch (ROW_COLUMN_ORDER) {
+                .ROW_MAJOR => {
+                    return idx + ((height - 1) * self.root_size.x) + (width);
+                },
+                .COLUMN_MAJOR => {
+                    return idx + ((width - 1) * self.root_size.y) + (height);
+                },
+            }
+        }
+        pub inline fn get_idx_with_origin(self: Self, origin: Origin, x: Idx, y: Idx) Idx {
             return self.get_idx(self.get_x_with_origin(origin, x), self.get_y_with_origin(origin, y));
         }
-        pub fn get_scanline(self: Self, x: IDX, y: IDX, length: IDX) CellList.Slice {
-            assert_with_reason(x < self.width and y < self.height, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.width, self.height });
+        pub fn get_scanline(self: Self, x: Idx, y: Idx, length: Idx) CellList.Slice {
+            assert_with_reason(x < self.get_size().x and y < self.get_size().y, @src(), "coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x, y, self.get_size().x, self.get_size().y });
             const start = self.get_idx(x, y);
             const end = start + length;
-            assert_with_reason(end <= self.width * self.height, @src(), "scanline starting from ({d}, {d}) with length {d} (end index = {d}) is outside the DataGrid length (len = {d})", .{ x, y, length, end, self.width * self.height });
+            assert_with_reason(end <= self.root_size.x * self.root_size.y, @src(), "scanline starting from ({d}, {d}) with length {d} (end index = {d}) is outside the DataGrid length (len = {d})", .{ x, y, length, end, self.root_size.x * self.root_size.y });
             return self.cells.slice(start, end);
         }
-        pub fn get_h_scanline(self: Self, x: IDX, y: IDX, width: IDX) CellList.Slice {
+        pub fn get_h_scanline(self: Self, x: Idx, y: Idx, width: Idx) CellList.Slice {
             Assert.assert_with_reason(ROW_COLUMN_ORDER == .ROW_MAJOR, @src(), "can only use `get_h_scanline` when `ROW_COLUMN_ORDER == .ROW_MAJOR`", .{});
             return self.get_scanline(x, y, width);
         }
-        pub fn get_h_scanline_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, width_direction: XOrder, width: IDX) CellList.Slice {
+        pub fn get_h_scanline_with_origin(self: Self, origin: Origin, x: Idx, y: Idx, width_direction: XOrder, width: Idx) CellList.Slice {
             return self.get_h_scanline(self.get_x_with_origin_and_span_width(origin, x, width, width_direction), y, width);
         }
-        pub fn get_v_scanline(self: Self, x: IDX, y: IDX, height: IDX) CellList.Slice {
+        pub fn get_v_scanline(self: Self, x: Idx, y: Idx, height: Idx) CellList.Slice {
             Assert.assert_with_reason(ROW_COLUMN_ORDER == .COLUMN_MAJOR, @src(), "can only use `get_v_scanline` when `ROW_COLUMN_ORDER == .COLUMN_MAJOR`", .{});
             return self.get_scanline(x, y, height);
         }
-        pub fn get_v_scanline_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, height_direction: YOrder, height: IDX) CellList.Slice {
+        pub fn get_v_scanline_with_origin(self: Self, origin: Origin, x: Idx, y: Idx, height_direction: YOrder, height: Idx) CellList.Slice {
             return self.get_v_scanline(x, self.get_y_with_origin_and_span_height(origin, y, height, height_direction), height);
         }
-        pub fn get_cell(self: Self, x: IDX, y: IDX) Cell {
+        pub fn get_cell(self: Self, x: Idx, y: Idx) Cell {
             const idx = self.get_idx(x, y);
             return self.cells.get(idx);
         }
-        pub fn get_cell_with_origin(self: Self, origin: Origin, x: IDX, y: IDX) Cell {
+        pub fn get_cell_with_origin(self: Self, origin: Origin, x: Idx, y: Idx) Cell {
             const idx = self.get_idx_with_origin(origin, x, y);
             return self.cells.get(idx);
         }
-        pub fn get_cell_ptr(self: Self, x: IDX, y: IDX) CellPtr {
+        pub fn get_cell_ptr(self: Self, x: Idx, y: Idx) CellPtr {
             const idx = self.get_idx(x, y);
             return self.cells.get_ptr(idx);
         }
-        pub fn get_cell_ptr_with_origin(self: Self, origin: Origin, x: IDX, y: IDX) CellPtr {
+        pub fn get_cell_ptr_with_origin(self: Self, origin: Origin, x: Idx, y: Idx) CellPtr {
             const idx = self.get_idx_with_origin(origin, x, y);
             return self.cells.get_ptr(idx);
         }
-        pub fn get_cell_ptr_many(self: Self, x: IDX, y: IDX) CellPtrMany {
+        pub fn get_cell_ptr_many(self: Self, x: Idx, y: Idx) CellPtrMany {
             const idx = self.get_idx(x, y);
             return self.cells.get_many_item_ptr(idx);
         }
-        pub fn get_cell_ptr_many_with_origin(self: Self, origin: Origin, x: IDX, y: IDX) CellPtrMany {
+        pub fn get_cell_ptr_many_with_origin(self: Self, origin: Origin, x: Idx, y: Idx) CellPtrMany {
             const idx = self.get_idx_with_origin(origin, x, y);
             return self.cells.get_many_item_ptr(idx);
         }
-        pub fn set_cell(self: Self, x: IDX, y: IDX, val: Cell) void {
+        pub fn set_cell(self: Self, x: Idx, y: Idx, val: Cell) void {
             const idx = self.get_idx(x, y);
             self.cells.set(idx, val);
         }
-        pub fn set_cell_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, val: Cell) void {
+        pub fn set_cell_with_origin(self: Self, origin: Origin, x: Idx, y: Idx, val: Cell) void {
             const idx = self.get_idx_with_origin(origin, x, y);
             self.cells.set(idx, val);
         }
@@ -475,8 +486,8 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             return self.lerp_sub_cell_with_origin(origin, x, y, lerp_named_lerp_f32);
         }
         pub fn lerp_sub_cell(self: Self, x: f32, y: f32, lerp_fn: *const fn (cell_a: Cell, cell_b: Cell, percent: f32) Cell) Cell {
-            var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.width)));
-            var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.height)));
+            var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.root_size.x)));
+            var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.root_size.y)));
             xx -= 0.5;
             yy -= 0.5;
             const left_i: isize = @intFromFloat(@floor(xx));
@@ -485,17 +496,17 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const top_i: isize = bot_i + 1;
             const percent_left_to_right: f32 = xx - @as(f32, @floatFromInt(left_i));
             const percent_top_to_bottom: f32 = yy - @as(f32, @floatFromInt(bot_i));
-            const left: IDX = @intCast(MathX.clamp_0_to_max(left_i, self.width - 1));
-            const right: IDX = @intCast(MathX.clamp_0_to_max(right_i, self.width - 1));
-            const top: IDX = @intCast(MathX.clamp_0_to_max(top_i, self.height - 1));
-            const bot: IDX = @intCast(MathX.clamp_0_to_max(bot_i, self.height - 1));
+            const left: Idx = @intCast(MathX.clamp_0_to_max(left_i, self.root_size.x - 1));
+            const right: Idx = @intCast(MathX.clamp_0_to_max(right_i, self.root_size.x - 1));
+            const top: Idx = @intCast(MathX.clamp_0_to_max(top_i, self.root_size.y - 1));
+            const bot: Idx = @intCast(MathX.clamp_0_to_max(bot_i, self.root_size.y - 1));
             const subcell_top_lr = lerp_fn(self.get_cell(left, top), self.get_cell(right, top), percent_left_to_right);
             const subcell_bot_lr = lerp_fn(self.get_cell(left, bot), self.get_cell(right, bot), percent_left_to_right);
             return lerp_fn(subcell_top_lr, subcell_bot_lr, percent_top_to_bottom);
         }
         pub fn lerp_sub_cell_with_origin(self: Self, origin: Origin, x: f32, y: f32, lerp_fn: *const fn (cell_a: Cell, cell_b: Cell, percent: f32) Cell) Cell {
-            var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.width)));
-            var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.height)));
+            var xx = MathX.clamp_0_to_max(x, @as(f32, @floatFromInt(self.root_size.x)));
+            var yy = MathX.clamp_0_to_max(y, @as(f32, @floatFromInt(self.root_size.y)));
             xx -= 0.5;
             yy -= 0.5;
             const left_i: isize = @intFromFloat(@floor(xx));
@@ -504,67 +515,60 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const top_i: isize = bot_i + 1;
             const percent_left_to_right: f32 = xx - @as(f32, @floatFromInt(left_i));
             const percent_top_to_bottom: f32 = yy - @as(f32, @floatFromInt(bot_i));
-            const left: IDX = @intCast(MathX.clamp_0_to_max(left_i, self.width - 1));
-            const right: IDX = @intCast(MathX.clamp_0_to_max(right_i, self.width - 1));
-            const top: IDX = @intCast(MathX.clamp_0_to_max(top_i, self.height - 1));
-            const bot: IDX = @intCast(MathX.clamp_0_to_max(bot_i, self.height - 1));
+            const left: Idx = @intCast(MathX.clamp_0_to_max(left_i, self.root_size.x - 1));
+            const right: Idx = @intCast(MathX.clamp_0_to_max(right_i, self.root_size.x - 1));
+            const top: Idx = @intCast(MathX.clamp_0_to_max(top_i, self.root_size.y - 1));
+            const bot: Idx = @intCast(MathX.clamp_0_to_max(bot_i, self.root_size.y - 1));
             const subcell_top_lr = lerp_fn(self.get_cell_with_origin(origin, left, top), self.get_cell_with_origin(origin, right, top), percent_left_to_right);
             const subcell_bot_lr = lerp_fn(self.get_cell_with_origin(origin, left, bot), self.get_cell_with_origin(origin, right, bot), percent_left_to_right);
             return lerp_fn(subcell_top_lr, subcell_bot_lr, percent_top_to_bottom);
         }
 
-        pub fn discard_and_resize(self: *Self, new_width: IDX, new_height: IDX, major_stride: ?IDX, fill_value: ?Cell, alloc: Allocator) void {
+        pub inline fn discard_and_realloc(self: *Self, new_root_width: Idx, new_root_height: Idx, fill_value: ?Cell, alloc: Allocator) void {
+            self.discard_and_realloc_with_growth(new_root_width, new_root_height, fill_value, .GROW_BY_25_PERCENT, alloc);
+        }
+        pub fn discard_and_realloc_with_growth(self: *Self, new_root_width: Idx, new_root_height: Idx, fill_value: ?Cell, growth: Root.CommonTypes.GrowthModel, alloc: Allocator) void {
+            assert_root(@src());
             self.cells.clear();
-            if (major_stride) |m_stride| {
-                assert_major_stride_valid(new_width, new_height, m_stride, @src());
-                self.major_stride = m_stride;
-            } else {
-                if (comptime DEF.ROW_COLUMN_ORDER == .ROW_MAJOR) {
-                    self.major_stride = new_width;
-                } else {
-                    self.major_stride = new_height;
-                }
-            }
-            if (new_width > 0 and new_height > 0) {
-                const new_end = self.get_idx_unchecked(new_width, new_height);
-                self.cells.grow_capacity_if_needed(new_end, .GROW_BY_25_PERCENT, alloc);
-                self.cells.set_len_unchecked(new_end);
+            if (new_root_width > 0 and new_root_height > 0) {
+                const new_total = new_root_width * new_root_height;
+                self.cells.grow_capacity_if_needed(new_total, growth, alloc);
+                self.cells.set_len_unchecked(new_total);
                 if (fill_value) |val| {
                     self.cells.memset_len(val);
                 }
             }
-            self.width = new_width;
-            self.height = new_height;
+            self.root_size.x = new_root_width;
+            self.root_size.y = new_root_height;
         }
 
-        pub fn resize(self: *Self, new_width: IDX, new_height: IDX, major_stride: ?IDX, anchor: ResizeAnchor, fill_value: ?Cell, alloc: Allocator) void {
-            if (new_width == 0 or new_height == 0) {
+        pub fn realloc(self: *Self, new_root_width: Idx, new_root_height: Idx, anchor: ResizeAnchor, fill_value: ?Cell, alloc: Allocator) void {
+            assert_root(@src());
+            if (new_root_width == 0 or new_root_height == 0) {
                 self.clear();
-                self.width = 0;
-                self.height = 0;
-                self.major_stride = 0;
+                self.root_size = .ZERO;
                 return;
             }
-            if (self.width == 0 or self.height == 0) {
-                self.discard_and_resize(new_width, new_height, fill_value, alloc);
+            if (self.root_size.x == 0 or self.root_size.y == 0) {
+                self.discard_and_realloc_with_growth(new_root_width, new_root_height, fill_value, .GROW_EXACT_NEEDED, alloc);
                 return;
             }
-            const half_old_width = self.width >> 1;
-            const half_old_height = self.height >> 1;
-            const half_new_width = new_width >> 1;
-            const half_new_height = new_height >> 1;
-            const min_width = @min(self.width, new_width);
-            const min_height = @min(self.height, new_height);
+            const half_old_width = self.root_size.x >> 1;
+            const half_old_height = self.root_size.y >> 1;
+            const half_new_width = new_root_width >> 1;
+            const half_new_height = new_root_height >> 1;
+            const min_width = @min(self.root_size.x, new_root_width);
+            const min_height = @min(self.root_size.y, new_root_height);
             const half_min_width = min_width >> 1;
             const half_min_height = min_height >> 1;
-            var min_x_copy_old: IDX = undefined;
-            var max_x_copy_old: IDX = undefined;
-            var min_y_copy_old: IDX = undefined;
-            var max_y_copy_old: IDX = undefined;
-            var min_x_copy_new: IDX = undefined;
-            var max_x_copy_new: IDX = undefined;
-            var min_y_copy_new: IDX = undefined;
-            var max_y_copy_new: IDX = undefined;
+            var min_x_copy_old: Idx = undefined;
+            var max_x_copy_old: Idx = undefined;
+            var min_y_copy_old: Idx = undefined;
+            var max_y_copy_old: Idx = undefined;
+            var min_x_copy_new: Idx = undefined;
+            var max_x_copy_new: Idx = undefined;
+            var min_y_copy_new: Idx = undefined;
+            var max_y_copy_new: Idx = undefined;
             switch (anchor) {
                 .TOP_LEFT, .MIDDLE_LEFT, .BOTTOM_LEFT => {
                     min_x_copy_old = 0;
@@ -579,10 +583,10 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                     max_x_copy_new = min_x_copy_new + min_width;
                 },
                 .TOP_RIGHT, .MIDDLE_RIGHT, .BOTTOM_RIGHT => {
-                    min_x_copy_old = self.width - min_width;
-                    max_x_copy_old = self.width;
-                    min_x_copy_new = new_width - min_width;
-                    max_x_copy_new = new_width;
+                    min_x_copy_old = self.root_size.x - min_width;
+                    max_x_copy_old = self.root_size.x;
+                    min_x_copy_new = new_root_width - min_width;
+                    max_x_copy_new = new_root_width;
                 },
             }
             switch (anchor) {
@@ -599,13 +603,13 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                     max_y_copy_new = min_y_copy_new + min_height;
                 },
                 .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT => {
-                    min_y_copy_old = self.height - min_height;
-                    max_y_copy_old = self.height;
-                    min_y_copy_new = new_height - min_height;
-                    max_y_copy_new = new_height;
+                    min_y_copy_old = self.root_size.y - min_height;
+                    max_y_copy_old = self.root_size.y;
+                    min_y_copy_new = new_root_height - min_height;
+                    max_y_copy_new = new_root_height;
                 },
             }
-            const new_grid = if (major_stride) |m_stride| Self.allocate_new_with_major_stride(new_width, new_height, m_stride, alloc) else Self.allocate_new(new_width, new_height, alloc);
+            const new_grid: GridAllocRoot = Self.allocate_new(.new(new_root_width, new_root_height), fill_value, alloc);
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
                     for (min_y_copy_old..max_y_copy_old, min_y_copy_new..max_y_copy_new) |old_y, new_y| {
@@ -627,11 +631,11 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 const fill_x1 = 0;
                 const fill_x2 = min_x_copy_new;
                 const fill_x3 = max_x_copy_new;
-                const fill_x4 = new_width;
+                const fill_x4 = new_root_width;
                 const fill_y1 = 0;
                 const fill_y2 = min_y_copy_new;
                 const fill_y3 = max_y_copy_new;
-                const fill_y4 = new_height;
+                const fill_y4 = new_root_height;
                 switch (ROW_COLUMN_ORDER) {
                     .ROW_MAJOR => {
                         new_grid.fill_rect_xy(fill_x1, fill_y1, fill_x4, fill_y2, fill);
@@ -650,12 +654,12 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             self.* = new_grid;
         }
 
-        fn fill_rect_internal(self: Self, x1: IDX, y1: IDX, x2: IDX, y2: IDX, width: IDX, height: IDX, fill_value: Cell) void {
+        fn fill_rect_internal(self: Self, x1: Idx, y1: Idx, x2: Idx, y2: Idx, width: Idx, height: Idx, fill_value: Cell) void {
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
                     if (y2 != y1) {
-                        if (x1 == 0 and width == self.width) {
-                            const fill_block = self.get_h_scanline(x1, y1, self.width * (height));
+                        if (x1 == 0 and width == self.root_size.x) {
+                            const fill_block = self.get_h_scanline(x1, y1, self.root_size.x * (height));
                             fill_block.memset_len(fill_value);
                         } else {
                             for (y1..y2) |y| {
@@ -667,8 +671,8 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 },
                 .COLUMN_MAJOR => {
                     if (x2 != x1) {
-                        if (y1 == 0 and height == self.height) {
-                            const fill_block = self.get_v_scanline(x1, y1, self.height * (width));
+                        if (y1 == 0 and height == self.root_size.y) {
+                            const fill_block = self.get_v_scanline(x1, y1, self.root_size.y * (width));
                             fill_block.memset_len(fill_value);
                         } else {
                             for (x1..x2) |x| {
@@ -682,31 +686,31 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
         }
 
         pub fn fill_all(self: Self, fill_color: Cell) void {
-            self.fill_rect(0, 0, self.width, self.height, fill_color);
+            self.fill_rect(0, 0, self.root_size.x, self.root_size.y, fill_color);
         }
-        pub fn fill_rect(self: Self, x: IDX, y: IDX, width: IDX, height: IDX, fill_val: Cell) void {
-            assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
+        pub fn fill_rect(self: Self, x: Idx, y: Idx, width: Idx, height: Idx, fill_val: Cell) void {
+            assert_with_reason(x + width <= self.root_size.x and y + height <= self.root_size.y, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x + width, y + height, self.root_size.x, self.root_size.y });
             const x2 = x + width;
             const y2 = y + height;
             self.fill_rect_internal(x, y, x2, y2, width, height, fill_val);
         }
-        pub fn fill_rect_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, width: IDX, height: IDX, width_dir: XOrder, height_dir: YOrder, fill_val: Cell) void {
+        pub fn fill_rect_with_origin(self: Self, origin: Origin, x: Idx, y: Idx, width: Idx, height: Idx, width_dir: XOrder, height_dir: YOrder, fill_val: Cell) void {
             const x1 = self.get_x_with_origin_and_span_width(origin, x, width, width_dir);
             const y1 = self.get_y_with_origin_and_span_height(origin, y, height, height_dir);
-            assert_with_reason(x1 + width <= self.width and y1 + height <= self.height, @src(), "max extent coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x1 + width, y1 + height, self.width, self.height });
+            assert_with_reason(x1 + width <= self.root_size.x and y1 + height <= self.root_size.y, @src(), "max extent coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x1 + width, y1 + height, self.root_size.x, self.root_size.y });
             const x2 = x + width;
             const y2 = y + height;
             self.fill_rect_internal(x1, y1, x2, y2, width, height, fill_val);
         }
-        pub fn fill_rect_xy(self: Self, x1: IDX, y1: IDX, x2: IDX, y2: IDX, fill_val: Cell) void {
+        pub fn fill_rect_xy(self: Self, x1: Idx, y1: Idx, x2: Idx, y2: Idx, fill_val: Cell) void {
             assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
             assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
-            assert_with_reason(x2 <= self.width and y2 <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x2, y2, self.width, self.height });
+            assert_with_reason(x2 <= self.root_size.x and y2 <= self.root_size.y, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x2, y2, self.root_size.x, self.root_size.y });
             const width = x2 - x1;
             const height = y2 - y1;
             self.fill_rect_internal(x1, y1, x2, y2, width, height, fill_val);
         }
-        pub fn fill_rect_xy_with_origin(self: Self, origin: Origin, x1: IDX, y1: IDX, x2: IDX, y2: IDX, fill_val: Cell) void {
+        pub fn fill_rect_xy_with_origin(self: Self, origin: Origin, x1: Idx, y1: Idx, x2: Idx, y2: Idx, fill_val: Cell) void {
             assert_with_reason(x1 <= x2, @src(), "x2 ({d}) is smaller than x1 ({d})", .{ x2, x1 });
             assert_with_reason(y1 <= y2, @src(), "y2 ({d}) is smaller than y1 ({d})", .{ y2, y1 });
             const width = x2 - x1;
@@ -715,13 +719,13 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const xx2 = self.get_x_with_origin(origin, x2);
             const yy1 = self.get_y_with_origin(origin, y1);
             const yy2 = self.get_y_with_origin(origin, y2);
-            assert_with_reason(xx2 <= self.width and yy2 <= self.height, @src(), "max extent coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ xx2, yy2, self.width, self.height });
+            assert_with_reason(xx2 <= self.root_size.x and yy2 <= self.root_size.y, @src(), "max extent coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ xx2, yy2, self.root_size.x, self.root_size.y });
             self.fill_rect_internal(xx1, yy1, xx2, yy2, width, height, fill_val);
         }
 
-        fn copy_rect_to_internal(source: Self, x_src: IDX, y_src: IDX, width: IDX, height: IDX, dest: Self, x_dest: IDX, y_dest: IDX) void {
-            assert_with_reason(x_src + width <= source.width and y_src + height <= source.height, @src(), "bottom-right source coordinate ({d}, {d}) is outside the source DataGrid width/height ({d}, {d})", .{ x_src + width, y_src + height, source.width, source.height });
-            assert_with_reason(x_dest + width <= dest.width and y_dest + height <= dest.height, @src(), "bottom-right destination coordinate ({d}, {d}) is outside the destination DataGrid width/height ({d}, {d})", .{ x_dest + width, y_dest + height, dest.width, dest.height });
+        fn copy_rect_to_internal(source: Self, x_src: Idx, y_src: Idx, width: Idx, height: Idx, dest: Self, x_dest: Idx, y_dest: Idx) void {
+            assert_with_reason(source.get_offset().x + x_src + width <= source.root_size.x and source.get_offset().y + y_src + height <= source.root_size.y, @src(), "bottom-right source coordinate ({d}, {d}) is outside the source DataGrid width/height ({d}, {d})", .{ source.get_offset().x + x_src + width, source.get_offset().y + y_src + height, source.root_size.x, source.root_size.y });
+            assert_with_reason(dest.get_offset().x + x_dest + width <= dest.root_size.x and dest.get_offset().y + y_dest + height <= dest.root_size.y, @src(), "bottom-right destination coordinate ({d}, {d}) is outside the destination DataGrid width/height ({d}, {d})", .{ dest.get_offset().x + x_dest + width, dest.get_offset().y + y_dest + height, dest.root_size.x, dest.root_size.y });
             const y_src_2 = y_src + height;
             const x_src_2 = x_src + width;
             const y_dest_2 = y_dest + height;
@@ -729,9 +733,9 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             switch (ROW_COLUMN_ORDER) {
                 .ROW_MAJOR => {
                     if (y_src_2 != y_src) {
-                        if (x_src == 0 and x_dest == 0 and width == source.width and width == dest.width) {
-                            const from_block = source.get_h_scanline(x_src, y_src, source.width * (height));
-                            const to_block = source.get_h_scanline(x_dest, y_dest, dest.width * (height));
+                        if (x_src == 0 and x_dest == 0 and width == source.root_size.x and width == dest.root_size.x) {
+                            const from_block = source.get_h_scanline(x_src, y_src, source.root_size.x * (height));
+                            const to_block = source.get_h_scanline(x_dest, y_dest, dest.root_size.x * (height));
                             from_block.copy_entire_self_to_dest_start(to_block);
                         } else {
                             for (y_src..y_src_2, y_dest..y_dest_2) |y, yy| {
@@ -744,9 +748,9 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
                 },
                 .COLUMN_MAJOR => {
                     if (x_src_2 != x_src) {
-                        if (y_src == 0 and y_dest == 0 and height == source.height and height == dest.height) {
-                            const from_block = source.get_v_scanline(x_src, y_src, source.height * (width));
-                            const to_block = source.get_v_scanline(x_dest, y_dest, dest.height * (width));
+                        if (y_src == 0 and y_dest == 0 and height == source.root_size.y and height == dest.root_size.y) {
+                            const from_block = source.get_v_scanline(x_src, y_src, source.root_size.y * (width));
+                            const to_block = source.get_v_scanline(x_dest, y_dest, dest.root_size.y * (width));
                             from_block.copy_entire_self_to_dest_start(to_block);
                         } else {
                             for (x_src..x_src_2, x_dest..x_dest_2) |x, xx| {
@@ -760,10 +764,10 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             }
         }
 
-        pub fn copy_rect_to(source: Self, x_src: IDX, y_src: IDX, width: IDX, height: IDX, dest: Self, x_dest: IDX, y_dest: IDX) void {
+        pub fn copy_rect_to(source: Self, x_src: Idx, y_src: Idx, width: Idx, height: Idx, dest: Self, x_dest: Idx, y_dest: Idx) void {
             source.copy_rect_to_internal(x_src, y_src, width, height, dest, x_dest, y_dest, false);
         }
-        pub fn copy_rect_to_with_origin(source: Self, origin: Origin, x_src: IDX, y_src: IDX, width: IDX, height: IDX, dest: Self, x_dest: IDX, y_dest: IDX, width_dir: XOrder, height_dir: YOrder) void {
+        pub fn copy_rect_to_with_origin(source: Self, origin: Origin, x_src: Idx, y_src: Idx, width: Idx, height: Idx, dest: Self, x_dest: Idx, y_dest: Idx, width_dir: XOrder, height_dir: YOrder) void {
             const xx_src = source.get_x_with_origin_and_span_width(origin, x_src, width, width_dir);
             const yy_src = source.get_y_with_origin_and_span_height(origin, y_src, height, height_dir);
             const xx_dest = dest.get_x_with_origin_and_span_width(origin, x_dest, width, width_dir);
@@ -771,34 +775,34 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             source.copy_rect_to_internal(xx_src, yy_src, width, height, dest, xx_dest, yy_dest, false);
         }
 
-        pub fn copy_rect_to_possible_overlap(source: Self, x_src: IDX, y_src: IDX, width: IDX, height: IDX, dest: Self, x_dest: IDX, y_dest: IDX) void {
+        pub fn copy_rect_to_possible_overlap(source: Self, x_src: Idx, y_src: Idx, width: Idx, height: Idx, dest: Self, x_dest: Idx, y_dest: Idx) void {
             source.copy_rect_to_internal(x_src, y_src, width, height, dest, x_dest, y_dest, true);
         }
-        pub fn copy_rect_to_possible_overlap_with_origin(source: Self, origin: Origin, x_src: IDX, y_src: IDX, width: IDX, height: IDX, dest: Self, x_dest: IDX, y_dest: IDX, width_dir: XOrder, height_dir: YOrder) void {
+        pub fn copy_rect_to_possible_overlap_with_origin(source: Self, origin: Origin, x_src: Idx, y_src: Idx, width: Idx, height: Idx, dest: Self, x_dest: Idx, y_dest: Idx, width_dir: XOrder, height_dir: YOrder) void {
             const xx_src = source.get_x_with_origin_and_span_width(origin, x_src, width, width_dir);
             const yy_src = source.get_y_with_origin_and_span_height(origin, y_src, height, height_dir);
             const xx_dest = dest.get_x_with_origin_and_span_width(origin, x_dest, width, width_dir);
             const yy_dest = dest.get_y_with_origin_and_span_height(origin, y_dest, height, height_dir);
             source.copy_rect_to_internal(xx_src, yy_src, width, height, dest, xx_dest, yy_dest, true);
         }
-
-        pub fn get_region(self: Self, x: IDX, y: IDX, width: IDX, height: IDX) GridSlice {
-            assert_with_reason(x + width <= self.width and y + height <= self.height, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ x + width, y + height, self.width, self.height });
-            const start_idx = self.get_idx(x, y);
-            const end_excl_idx = self.get_idx(x + width, y + height);
-            return GridSlice{
-                .cells = .slice(start_idx, end_excl_idx),
-                .width = width,
-                .height = height,
-                .major_stride = self.major_stride,
+        pub inline fn get_entire_region(self: Self) GridRegion {
+            return self.get_region(0, 0, self.get_width(), self.get_height());
+        }
+        pub fn get_region(self: Self, x: Idx, y: Idx, width: Idx, height: Idx) GridRegion {
+            assert_with_reason(self.get_offset().x + x + width <= self.root_size.x and self.get_offset().y + y + height <= self.root_size.y, @src(), "bottom-right coordinate ({d}, {d}) is outside the DataGrid width/height ({d}, {d})", .{ self.get_offset().x + x + width, self.get_offset().y + y + height, self.root_size.x, self.root_size.y });
+            return GridRegion{
+                .cells = self.cells,
+                .root_size = self.root_size,
+                .offset = .new(x, y),
+                .size = .new(width, height),
             };
         }
-        pub fn get_region_with_origin(self: Self, origin: Origin, x: IDX, y: IDX, width: IDX, width_direction: XOrder, height: IDX, height_direction: YOrder) GridSlice {
+        pub fn get_region_with_origin(self: Self, origin: Origin, x: Idx, y: Idx, width: Idx, width_direction: XOrder, height: Idx, height_direction: YOrder) GridRegion {
             const xx = self.get_x_with_origin_and_span_width(origin, x, width, width_direction);
             const yy = self.get_y_with_origin_and_span_height(origin, y, height, height_direction);
             return self.get_region(xx, yy, width, height);
         }
-        pub fn get_region_xy(self: Self, x1: IDX, y1: IDX, x2: IDX, y2: IDX) GridSlice {
+        pub fn get_region_xy(self: Self, x1: Idx, y1: Idx, x2: Idx, y2: Idx) GridRegion {
             const xx1 = @min(x1, x2);
             const yy1 = @min(y1, y2);
             const xx2 = @max(x1, x2);
@@ -807,7 +811,7 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             const height = yy2 - yy1;
             return self.get_region(xx1, yy1, width, height);
         }
-        pub fn get_region_xy_with_origin(self: Self, origin: Origin, x1: IDX, y1: IDX, x2: IDX, y2: IDX) GridSlice {
+        pub fn get_region_xy_with_origin(self: Self, origin: Origin, x1: Idx, y1: Idx, x2: Idx, y2: Idx) GridRegion {
             const xx1 = @min(x1, x2);
             const yy1 = @min(y1, y2);
             const xx2 = @max(x1, x2);
@@ -821,131 +825,86 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
 
         pub const SourceKind = enum(u8) {
             EXISTING,
-            ALLOCATE_NEW,
-            REUSE_CELL_BUFFER,
             PROVIDER_FUNC_OPAQUE,
             PROVIDER_FUNC_FROM_GRID,
         };
 
-        const Vec = Vec2.define_vec2_type(IDX);
+        const Vec = Vec2.define_vec2_type(Idx);
 
-        pub const DataGridWithParentOffset = struct {
-            data_grid: Self = .{},
-            parent_offset: Vec = .ZERO,
-
-            pub fn new_no_parent(grid: Self) DataGridWithParentOffset {
-                return DataGridWithParentOffset{
-                    .data_grid = grid,
-                };
-            }
-            pub fn new_with_parent(grid: Self, parent_offset: Vec) DataGridWithParentOffset {
-                return DataGridWithParentOffset{
-                    .data_grid = grid,
-                    .parent_offset = parent_offset,
-                };
-            }
-        };
-
-        pub const Source = union(SourceKind) {
+        pub const RegionSource = union(SourceKind) {
             EXISTING: struct {
-                grid_with_offset: DataGridWithParentOffset,
-                fill: ?Cell,
-            },
-            ALLOCATE_NEW: struct {
-                alloc: Allocator,
-                fill: ?Cell,
-            },
-            REUSE_CELL_BUFFER: struct {
-                cells: CellList,
-                alloc: Allocator,
+                region: GridRegion,
                 fill: ?Cell,
             },
             PROVIDER_FUNC_OPAQUE: struct {
-                func: *const fn (width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset,
+                func: *const fn (width: Idx, height: Idx, fill: ?Cell) ?GridRegion,
                 fill: ?Cell,
             },
             PROVIDER_FUNC_FROM_GRID: struct {
                 grid: Self,
-                func: *const fn (grid: Self, width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset,
+                func: *const fn (grid: Self, width: Idx, height: Idx, fill: ?Cell) ?GridRegion,
                 fill: ?Cell,
             },
 
-            pub fn existing_data_grid(grid_with_offset: DataGridWithParentOffset, fill: ?Cell) Source {
-                return Source{ .EXISTING = .{ .grid_with_offset = grid_with_offset, .fill = fill } };
+            pub fn existing_region(grid_with_offset: GridRegion, fill: ?Cell) RegionSource {
+                return RegionSource{ .EXISTING = .{ .region = grid_with_offset, .fill = fill } };
             }
-            pub fn allocate_new_data_grid(alloc: Allocator, fill: ?Cell) Source {
-                return Source{ .ALLOCATE_NEW = .{ .alloc = alloc, .fill = fill } };
+            pub fn data_grid_provider_opaque(func: *const fn (width: Idx, height: Idx, fill: ?Cell) ?GridRegion, fill: ?Cell) RegionSource {
+                return RegionSource{ .PROVIDER_FUNC_OPAQUE = .{ .func = func, .fill = fill } };
             }
-            pub fn reuse_cell_buffer(cells: CellList, alloc: Allocator, fill: ?Cell) Source {
-                return Source{ .REUSE_CELL_BUFFER = .{ .cells = cells, .alloc = alloc, .fill = fill } };
-            }
-            pub fn data_grid_provider_opaque(func: *const fn (width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset, fill: ?Cell) Source {
-                return Source{ .PROVIDER_FUNC_OPAQUE = .{ .func = func, .fill = fill } };
-            }
-            pub fn data_grid_provider_from_grid(grid: Self, func: *const fn (grid: Self, width: IDX, height: IDX, fill: ?Cell) ?DataGridWithParentOffset, fill: ?Cell) Source {
-                return Source{ .PROVIDER_FUNC_FROM_GRID = .{ .grid = grid, .func = func, .fill = fill } };
+            pub fn data_grid_provider_from_grid(grid: Self, func: *const fn (grid: Self, width: Idx, height: Idx, fill: ?Cell) ?GridRegion, fill: ?Cell) RegionSource {
+                return RegionSource{ .PROVIDER_FUNC_FROM_GRID = .{ .grid = grid, .func = func, .fill = fill } };
             }
 
-            pub fn obtain_grid(self: Source, width: IDX, height: IDX) ?DataGridWithParentOffset {
+            pub fn obtain_grid(self: RegionSource, width: Idx, height: Idx) ?GridRegion {
                 return switch (self) {
                     .EXISTING => |src| after_fill: {
-                        if (src.grid_with_offset.data_grid.width >= width and src.grid_with_offset.data_grid.height >= height) return null;
-                        if (src.fill) |fill| src.grid_with_offset.data_grid.fill_all(fill);
-                        break :after_fill src.grid_with_offset;
+                        if (src.region.get_width() < width or src.region.get_height() < height) return null;
+                        const adjusted = src.region.get_region(0, 0, width, height);
+                        if (src.fill) |fill| adjusted.fill_all(fill);
+                        break :after_fill adjusted;
                     },
-                    .ALLOCATE_NEW => |src| DataGridWithParentOffset.new_no_parent(Self.allocate_new(width, height, src.fill, src.alloc)),
-                    .REUSE_CELL_BUFFER => |src| DataGridWithParentOffset.new_no_parent(Self.init_from_existing_list(width, height, src.fill, src.cells, src.alloc)),
                     .PROVIDER_FUNC_OPAQUE => |src| src.func(width, height, src.fill),
                     .PROVIDER_FUNC_FROM_GRID => |src| src.func(src.grid, width, height, src.fill),
                 };
             }
-            pub fn obtain_grid_with_padding(self: Source, width: IDX, height: IDX, pad_x: IDX, pad_y: IDX) ?DataGridWithParentOffset {
+            pub fn obtain_region_with_padding(self: RegionSource, width: Idx, height: Idx, pad_x: Idx, pad_y: Idx) ?GridRegion {
                 var with_pad = self.obtain_grid(width + (2 * pad_x), height + (2 * pad_y)) orelse return null;
-                const dg_adjusted = with_pad.data_grid.get_region(pad_x, pad_y, width, height);
-                with_pad.data_grid = dg_adjusted;
-                with_pad.parent_offset.add(.new(pad_x, pad_y));
-                return with_pad;
+                const without_pad = with_pad.get_region(pad_x, pad_y, width, height);
+                return without_pad;
             }
-            pub fn obtain_grid_block(self: Source, width: IDX, height: IDX, comptime SUB_GRID_X_COUNT: IDX, comptime SUB_GRID_Y_COUNT: IDX) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset {
+            pub fn obtain_grid_block(self: RegionSource, width: Idx, height: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
                 const total_width = width * SUB_GRID_X_COUNT;
                 const total_height = height * SUB_GRID_Y_COUNT;
                 const total = self.obtain_grid(total_width, total_height) orelse return null;
-                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset = undefined;
-                var px: IDX = 0;
-                var py: IDX = 0;
+                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion = undefined;
+                var px: Idx = 0;
+                var py: Idx = 0;
                 for (0..SUB_GRID_Y_COUNT) |gy| {
                     px = 0;
                     for (0..SUB_GRID_X_COUNT) |gx| {
-                        const dg_adjusted = total.data_grid.get_region(px, py, width, height);
-                        const off_adjusted = total.parent_offset.add(px, py);
-                        out[gx][gy] = DataGridWithParentOffset{
-                            .data_grid = dg_adjusted,
-                            .parent_offset = off_adjusted,
-                        };
+                        const dg_adjusted = total.get_region(px, py, width, height);
+                        out[gx][gy] = dg_adjusted;
                         px += width;
                     }
                     py += height;
                 }
                 return out;
             }
-            pub fn obtain_grid_block_with_padding(self: Source, width: IDX, height: IDX, pad_x: IDX, pad_y: IDX, comptime SUB_GRID_X_COUNT: IDX, comptime SUB_GRID_Y_COUNT: IDX) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset {
+            pub fn obtain_grid_block_with_padding(self: RegionSource, width: Idx, height: Idx, pad_x: Idx, pad_y: Idx, comptime SUB_GRID_X_COUNT: Idx, comptime SUB_GRID_Y_COUNT: Idx) ?[SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion {
                 const width_and_pad = width + (2 * pad_x);
                 const height_and_pad = height + (2 * pad_y);
                 const total_width = width_and_pad * SUB_GRID_X_COUNT;
                 const total_height = height_and_pad * SUB_GRID_Y_COUNT;
                 const total = self.obtain_grid(total_width, total_height) orelse return null;
-                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]DataGridWithParentOffset = undefined;
-                var px: IDX = 0;
-                var py: IDX = 0;
+                var out: [SUB_GRID_X_COUNT][SUB_GRID_Y_COUNT]GridRegion = undefined;
+                var px: Idx = 0;
+                var py: Idx = 0;
                 for (0..SUB_GRID_Y_COUNT) |gy| {
                     px = 0;
                     for (0..SUB_GRID_X_COUNT) |gx| {
                         const dg_adjusted = total.data_grid.get_region(px + pad_x, py + pad_y, width, height);
-                        const off_adjusted = total.parent_offset.add(px + pad_x, py + pad_y);
-                        out[gx][gy] = DataGridWithParentOffset{
-                            .data_grid = dg_adjusted,
-                            .parent_offset = off_adjusted,
-                        };
+                        out[gx][gy] = dg_adjusted;
                         px += width_and_pad;
                     }
                     py += height_and_pad;

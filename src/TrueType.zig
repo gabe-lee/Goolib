@@ -643,7 +643,7 @@ pub const TrueTypeFont = struct {
         glyph: GlyphIndex,
         vertices: *const List(Vertex),
         known_aabb: ?AABB_i32,
-        data_grid: DataGrid_u8.Source,
+        data_grid: DataGrid_u8.RegionSource,
         flatness: PixelFlatness,
         scale_x: f32,
         scale_y: f32,
@@ -660,7 +660,7 @@ pub const TrueTypeFont = struct {
         glyph: GlyphIndex,
         vertices: *const List(Vertex),
         known_aabb: ?AABB_i32,
-        data_grid: DataGrid_u8.Source,
+        data_grid: DataGrid_u8.RegionSource,
         flatness: PixelFlatness,
         scale_x: f32,
         scale_y: f32,
@@ -2801,7 +2801,7 @@ test "TrueTypeFont -> load and render chars" {
         shape.translate(shape_shift_to_frame);
         shape_aabb = shape_aabb.with_mins_shifted_to_zero();
         const shape_aabb_max = shape_aabb.get_max_point();
-        const output_grid = OUT_GRID.init_from_existing_list(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2), 0, output_cells, alloc);
+        const output_grid = OUT_GRID.init_repurpose_existing_cell_list(.new(@intFromFloat(shape_aabb_max.x + 2), @intFromFloat(shape_aabb_max.y + 2)), 0, output_cells, alloc);
         raster.rasterize_to_existing_data_grid_default_lerp(&shape, .X_ONLY_EXPONENTIAL_FALLOFF, output_grid, 0, 255, .default_estimates(), alloc);
         _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
         // STB Rasterizer

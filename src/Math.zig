@@ -952,27 +952,30 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
         switch (quadratic_estimate) {
             .exact => break :check_estimate false,
             .estimate => |ratio| {
-                break :check_estimate @abs(b) / @abs(a) > ratio;
+                break :check_estimate @abs(b) / @abs(a) >= ratio;
             },
         }
     }) {
         return solve_quadratic_polynomial_for_zeros_advanced(b, c, d, linear_estimate).change_polynimial_degree(3);
     }
+    const b_norm = b / a;
+    const c_norm = c / a;
+    const d_norm = d / a;
     var result = CubicSolution(@TypeOf(a)){};
-    const a2 = a * a;
-    var q = (a2 - (3 * b)) / 9;
-    const r = ((a * ((2 * a2) - (9 * b))) + (27 * c)) / 54;
+    const b_norm_squared = b_norm * b_norm;
+    var q = (b_norm_squared - (3 * c_norm)) / 9;
+    const r = ((b_norm * ((2 * b_norm_squared) - (9 * c_norm))) + (27 * d_norm)) / 54;
     const r_squared = r * r;
     const q_cubed = q * q * q;
-    const third_a = a / 3;
+    const third_b_norm = b_norm / 3;
     if (r_squared < q_cubed) {
         var t = r / @sqrt(q_cubed);
         t = clamp(@as(T, -1), t, @as(T, 1));
         t = math.acos(t);
         q = @sqrt(q) * -2;
-        result.vals[0] = (q * @cos(t / 3)) - third_a;
-        result.vals[1] = (q * @cos((t + TAU) / 3)) - third_a;
-        result.vals[2] = (q * @cos((t - TAU) / 3)) - third_a;
+        result.vals[0] = (q * @cos(t / 3)) - third_b_norm;
+        result.vals[1] = (q * @cos((t + TAU) / 3)) - third_b_norm;
+        result.vals[2] = (q * @cos((t - TAU) / 3)) - third_b_norm;
         result.count = 3;
         result.mode = .finite_solutions;
         return result;
@@ -980,7 +983,7 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
         const s: T = if (r < 0) 1 else -1;
         const u = s * math.pow(T, @abs(r) + @sqrt(r_squared - q_cubed), @as(T, 1) / @as(T, 3));
         const v = if (u == 0) 0 else (q / u);
-        result.vals[0] = (u + v) - third_a;
+        result.vals[0] = (u + v) - third_b_norm;
         result.mode = .finite_solutions;
         if (u == v or check_estimate: {
             switch (double_root_estimate) {
@@ -990,7 +993,7 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
                 },
             }
         }) {
-            result.vals[1] = (-(u + v) / 2) - third_a;
+            result.vals[1] = (-(u + v) / 2) - third_b_norm;
             result.count = 2;
         } else {
             result.count = 1;

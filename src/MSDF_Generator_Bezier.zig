@@ -59,7 +59,7 @@ const num_cast = Root.Cast.num_cast;
 pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ESTIMATION_STEPS: comptime_int) type {
     assert_with_reason(Types.type_is_float(Float), @src(), "type `FLOAT_TYPE` must be a float type (f16, f32, f64, f80, f128), got type `{s}`", .{@typeName(Float)});
     return struct {
-        pub const MAX_NEGATIVE_FLOAT = -math.floatMax(Float);
+        pub const MAX_NEGATIVE_FLOAT = -math.inf(Float);
         pub const MAX_POSITIVE_FLOAT = math.floatMax(Float);
 
         pub const DISTANCE_DELTA_FACTOR = 1.001;
@@ -243,7 +243,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 return self.scale * (distance + self.translate);
             }
             pub fn calc_delta(self: DistanceMapping, distance_delta: Delta) Float {
-                return self.scale * (distance_delta.value + self.translate);
+                return self.scale * distance_delta.value;
             }
             pub fn calc_biased_normalized(self: DistanceMapping, bias: Float, distance: Float) Float {
                 return MathX.normalized_num_cast(MathX.clamp_0_to_1(self.calc(distance + bias) + 0.5), Float);
@@ -459,7 +459,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             };
                         }
                     }
-                } else if (signed_dist.percent < 0) {
+                } else if (signed_dist.percent > 1) {
                     const end_tangent_normal = self.tangent_at_interp(1).normalize();
                     const point_to_end_delta = point.subtract(self.get_end_point());
                     const point_to_end_delta_dot_end_tangent_normal = point_to_end_delta.dot(end_tangent_normal);
@@ -667,20 +667,20 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             }
 
             pub fn _convergent_curve_ordering_internal(p: [8]Point, control_points_before: u32, control_points_after: u32) i8 {
-                if (!(control_points_before > 0 and control_points_before > 0)) {
+                if (!(control_points_before > 0 and control_points_after > 0)) {
                     return 0;
                 }
                 const CORNER_IDX = 4;
-                var a1: Vector = undefined;
-                var a2: Vector = undefined;
-                var a3: Vector = undefined;
-                var b1: Vector = undefined;
-                var b2: Vector = undefined;
-                var b3: Vector = undefined;
+                var a1: Vector = .{};
+                var a2: Vector = .{};
+                var a3: Vector = .{};
+                var b1: Vector = .{};
+                var b2: Vector = .{};
+                var b3: Vector = .{};
                 a1 = p[CORNER_IDX - 1].subtract(p[CORNER_IDX]);
                 b1 = p[CORNER_IDX + 1].subtract(p[CORNER_IDX]);
                 if (control_points_before >= 2) {
-                    a2 = p[CORNER_IDX - 1].subtract(p[CORNER_IDX - 1]).subtract(a1);
+                    a2 = p[CORNER_IDX - 2].subtract(p[CORNER_IDX - 1]).subtract(a1);
                 }
                 if (control_points_after >= 2) {
                     b2 = p[CORNER_IDX + 2].subtract(p[CORNER_IDX + 1]).subtract(b1);
@@ -785,9 +785,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 b.simplify_degenerate_curve();
                 const a_points = a.get_points();
                 const b_points = b.get_points();
+                const a_order = a_points.len - 1;
+                const b_order = b_points.len - 1;
                 @memcpy(points[CORNER_IDX .. CORNER_IDX + b_points.len], b_points);
-                @memcpy(points[CORNER_IDX - a_points.len .. CORNER_IDX], a_points);
-                return _convergent_curve_ordering_internal(points, @intCast(a_points.len - 1), @intCast(b_points.len - 1));
+                @memcpy(points[CORNER_IDX - a_order .. CORNER_IDX], a_points[0..a_order]);
+                return _convergent_curve_ordering_internal(points, @intCast(a_order), @intCast(b_order));
             }
         };
 
@@ -852,7 +854,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
         pub const TrueDistanceSelector = struct {
             point: Point = .{},
-            min_signed_distance: SignedDistance = .{},
+            min_signed_distance: SignedDistance = .{ .distance = MAX_NEGATIVE_FLOAT },
 
             pub fn reset(self: *TrueDistanceSelector, point: Point) void {
                 const delta = DISTANCE_DELTA_FACTOR * point.subtract(self.point).length();
@@ -864,7 +866,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 _ = prev_edge;
                 _ = next_edge;
                 const delta = DISTANCE_DELTA_FACTOR * self.point.subtract(cache.point).length();
-                if (cache.abs_distance - delta < @abs(self.min_signed_distance.distance)) {
+                if (cache.abs_distance - delta <= @abs(self.min_signed_distance.distance)) {
                     const this_dist = edge.minimum_signed_distance_from_point(self.point);
                     if (this_dist.signed_dist.less_than(self.min_signed_distance)) {
                         self.min_signed_distance = this_dist.signed_dist;
@@ -896,8 +898,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub const DISTANCE_TYPE = Float;
 
             pub const EdgeCache = struct {
-                point: Point,
-                abs_distance: Float,
+                point: Point = .{},
+                abs_distance: Float = 0,
 
                 pub fn new(point: Point, abs_distance: Float) EdgeCache {
                     return EdgeCache{
@@ -928,14 +930,14 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             }
 
             pub fn add_edge(self: *PerpendicularDistanceSelector, cache: *EdgeCache, prev_edge: *const EdgeSegment, this_edge: *const EdgeSegment, next_edge: *const EdgeSegment) void {
-                if (self.base.edge_is_relevant(cache, self.point)) {
+                if (self.base.edge_is_relevant(cache.*, self.point)) {
                     const signed_distance = this_edge.minimum_signed_distance_from_point(self.point);
                     self.base.add_edge_true_distance(this_edge, signed_distance.signed_dist, signed_distance.percent);
                     cache.point = self.point;
                     cache.abs_distance = @abs(signed_distance.distance());
 
-                    const point_to_a_delta = self.point.subtract(this_edge.start_point());
-                    const point_to_b_delta = self.point.subtract(this_edge.end_point());
+                    const point_to_a_delta = self.point.subtract(this_edge.get_start_point());
+                    const point_to_b_delta = self.point.subtract(this_edge.get_end_point());
                     const a_tangent = this_edge.tangent_at_interp(0).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
                     const b_tangent = this_edge.tangent_at_interp(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
                     const prev_tangent = prev_edge.tangent_at_interp(1).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
@@ -946,7 +948,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     const b_domain_distance = -point_to_b_delta.dot(next_tan_plus_b_tan_norm);
                     if (a_domain_distance > 0) {
                         var perp_dist = signed_distance.distance();
-                        if (self.base.should_update_perpendicular_distance(&perp_dist, point_to_a_delta, a_tangent.negate())) {
+                        if (BaseData.should_update_perpendicular_distance(&perp_dist, point_to_a_delta, a_tangent.negate())) {
                             perp_dist = -perp_dist;
                             self.base.add_edge_perpendicular_distance(perp_dist);
                         }
@@ -954,7 +956,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     }
                     if (b_domain_distance > 0) {
                         var perp_dist = signed_distance.distance();
-                        if (self.base.should_update_perpendicular_distance(&perp_dist, point_to_b_delta, b_tangent)) {
+                        if (BaseData.should_update_perpendicular_distance(&perp_dist, point_to_b_delta, b_tangent)) {
                             self.base.add_edge_perpendicular_distance(perp_dist);
                         }
                         cache.b_perp_distance = perp_dist;
@@ -970,7 +972,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub fn median_distance(self: PerpendicularDistanceSelector) Float {
                 return self.base.calculate_distance(self.point);
             }
-            pub fn distance_and_median(self: TrueDistanceSelector) DistanceTypeAndMedian(Float) {
+            pub fn distance_and_median(self: PerpendicularDistanceSelector) DistanceTypeAndMedian(Float) {
                 const d = self.base.calculate_distance(self.point);
                 return DistanceTypeAndMedian(Float){
                     .distance = d,
@@ -978,15 +980,16 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 };
             }
             pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(Float);
+            pub const DISTANCE_TYPE = Float;
             pub fn merge(self: *PerpendicularDistanceSelector, other: PerpendicularDistanceSelector) void {
                 self.base.merge(other.base);
             }
 
             pub const BaseData = struct {
-                min_true_distance: SignedDistance = .{},
+                min_true_distance: SignedDistance = .{ .distance = MAX_NEGATIVE_FLOAT },
                 min_negative_perp_distance: Float = 0,
                 min_positive_perp_distance: Float = 0,
-                near_edge: ?*EdgeSegment = undefined,
+                near_edge: ?*const EdgeSegment = null,
                 near_edge_percent: Float = 0,
 
                 pub fn reset(self: *BaseData, delta: Float) void {
@@ -1012,7 +1015,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             cache.b_perp_distance - delta <= self.min_positive_perp_distance));
                 }
 
-                pub fn add_edge_true_distance(self: *BaseData, edge: *EdgeSegment, signed_distance: SignedDistance, percent: Float) void {
+                pub fn add_edge_true_distance(self: *BaseData, edge: *const EdgeSegment, signed_distance: SignedDistance, percent: Float) void {
                     if (signed_distance.less_than(self.min_true_distance)) {
                         self.min_true_distance = signed_distance;
                         self.near_edge = edge;
@@ -1189,10 +1192,19 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
         };
 
         pub const MultiAndTrueDistanceSelector = struct {
-            true_dist_selector: TrueDistanceSelector = .{},
             multi_dist_selector: MultiDistanceSelector = .{},
 
             pub const EdgeCache = MultiDistanceSelector.EdgeCache;
+
+            pub fn reset(self: *MultiAndTrueDistanceSelector, point: Point) void {
+                self.multi_dist_selector.reset(point);
+            }
+            pub fn add_edge(self: *MultiAndTrueDistanceSelector, cache: *EdgeCache, prev_edge: *const EdgeSegment, this_edge: *EdgeSegment, next_edge: *EdgeSegment) void {
+                self.multi_dist_selector.add_edge(cache, prev_edge, this_edge, next_edge);
+            }
+            pub fn merge(self: *MultiAndTrueDistanceSelector, other: MultiAndTrueDistanceSelector) void {
+                self.multi_dist_selector.merge(other.multi_dist_selector);
+            }
 
             pub fn distance(self: MultiAndTrueDistanceSelector) MultiAndTrueDistance {
                 const multi = self.multi_dist_selector.distance();
@@ -1200,19 +1212,20 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     .r = multi.r,
                     .g = multi.g,
                     .b = multi.b,
-                    .a = self.true_dist_selector.distance(),
+                    .a = self.multi_dist_selector.smallest_true_distance().distance,
                 };
             }
             pub fn median_distance(self: MultiAndTrueDistanceSelector) Float {
                 return self.distance().median_colored_distance();
             }
             pub fn distance_and_median(self: MultiAndTrueDistanceSelector) DistanceTypeAndMedian(MultiAndTrueDistance) {
-                const d = self.distance(self.point);
+                const d = self.distance();
                 return DistanceTypeAndMedian(MultiAndTrueDistance){
                     .distance = d,
                     .median = d.median_colored_distance(),
                 };
             }
+            pub const DISTANCE_TYPE = MultiAndTrueDistance;
             pub const DISTANCE_AND_MEDIAN_TYPE = DistanceTypeAndMedian(MultiAndTrueDistance);
         };
 
@@ -1407,13 +1420,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             edge_ref.deallocate(shape_alloc);
                         }
                         contour.edges.clear();
-                        var ref = EdgeSegmentRef.allocate_new(shape_alloc);
-                        ref.edge.* = parts[0];
-                        ref = EdgeSegmentRef.allocate_new(shape_alloc);
-                        ref.edge.* = parts[1];
-                        ref = EdgeSegmentRef.allocate_new(shape_alloc);
-                        ref.edge.* = parts[2];
-                        contour.edges.append_one(ref, shape_alloc);
+                        for (parts) |part| {
+                            const ref = EdgeSegmentRef.allocate_new(shape_alloc);
+                            ref.edge.* = part;
+                            _ = contour.edges.append_one(ref, shape_alloc);
+                        }
                     } else {
                         var prev_edge_ref: *EdgeSegmentRef = contour.edges.get_last_ptr();
                         var prev_tangent: Vector = undefined;
@@ -1746,7 +1757,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             const limit = contour.edges.get_len();
                             var edge_idx: u32 = 0;
                             while (edge_idx < limit) : (edge_idx += 1) {
-                                contour.edges.get_ptr((corner_idx + edge_idx) % limit).edge.color = colors[1 + MathX.range_trichotomy(0, edge_idx, limit, u32)];
+                                contour.edges.get_ptr((corner_idx + edge_idx) % limit).edge.color = colors[@intCast(1 + MathX.range_trichotomy(0, edge_idx, limit, i32))];
                             }
                         } else if (contour.edges.get_len() >= 1) {
                             // Less than three edge segments for three colors => edges must be split
@@ -1779,23 +1790,24 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             for (0..part_count) |part_idx| {
                                 contour.allocate_and_add_edge(parts[part_idx], shape_alloc);
                             }
-                        } else {
-                            // multiple corners
-                            const corner_count = corner_list.get_len();
-                            const last_corner_idx = corner_count - 1;
-                            var spline_idx: u32 = 0;
-                            const start_idx = corner_list.get(0);
-                            const limit = contour.edges.get_len();
-                            const initial_color = color;
-                            var i: u32 = 0;
-                            while (i < limit) : (i += 1) {
-                                const idx = (start_idx + i) % limit;
-                                if (spline_idx + 1 < corner_count and corner_list.get(spline_idx + 1) == idx) {
-                                    spline_idx += 1;
-                                    color.switch_color_with_ban(seed, EdgeColor.from_raw(num_cast(spline_idx == last_corner_idx, u8) * initial_color.raw()));
-                                }
-                                contour.edges.get(idx).edge.color = color;
+                        }
+                    } else {
+                        // Multiple corners
+                        const corner_count = corner_list.get_len();
+                        const last_corner_idx = corner_count - 1;
+                        var spline_idx: u32 = 0;
+                        const start_idx = corner_list.get(0);
+                        const limit = contour.edges.get_len();
+                        color.switch_color(seed);
+                        const initial_color = color;
+                        var i: u32 = 0;
+                        while (i < limit) : (i += 1) {
+                            const idx = (start_idx + i) % limit;
+                            if (spline_idx + 1 < corner_count and corner_list.get(spline_idx + 1) == idx) {
+                                spline_idx += 1;
+                                color.switch_color_with_ban(seed, EdgeColor.from_raw(num_cast(spline_idx == last_corner_idx, u8) * initial_color.raw()));
                             }
+                            contour.edges.get(idx).edge.color = color;
                         }
                     }
                 }
@@ -1846,7 +1858,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             const limit = contour.edges.get_len();
                             var edge_idx: u32 = 0;
                             while (edge_idx < limit) : (edge_idx += 1) {
-                                contour.edges.get_ptr((corner_idx + edge_idx) % limit).edge.color = colors[1 + MathX.range_trichotomy(0, edge_idx, limit, u32)];
+                                contour.edges.get_ptr((corner_idx + edge_idx) % limit).edge.color = colors[@intCast(1 + MathX.range_trichotomy(0, edge_idx, limit, i32))];
                             }
                         } else if (contour.edges.get_len() >= 1) {
                             // Less than three edge segments for three colors => edges must be split
@@ -1879,58 +1891,60 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             for (0..part_count) |part_idx| {
                                 contour.allocate_and_add_edge(parts[part_idx], shape_alloc);
                             }
-                        } else {
-                            // multiple corners
-                            const corner_count = corner_list.get_len();
-                            var major_corner_count = corner_count;
-                            var this_corner_idx: u32 = 0;
-                            if (corner_count > 3) {
-                                corner_list.get_ptr(0).prev_edge_length_estimate += spline_length;
-                                while (this_corner_idx < corner_count) : (this_corner_idx += 1) {
-                                    const this_len_estimate = corner_list.get(this_corner_idx).prev_edge_length_estimate;
-                                    const next_len_estimate = corner_list.get((this_corner_idx + 1) % corner_count).prev_edge_length_estimate;
-                                    const next_next_len_estimate = corner_list.get((this_corner_idx + 2) % corner_count).prev_edge_length_estimate;
-                                    if (this_len_estimate > next_len_estimate and next_len_estimate < next_next_len_estimate) {
-                                        corner_list.get_ptr(this_corner_idx).is_minor = true;
-                                        major_corner_count -= 1;
-                                    }
-                                }
-                            }
-                            var initial_color = EdgeColor.black;
-                            this_corner_idx = 0;
+                        }
+                    } else {
+                        // Multiple corners
+                        const corner_count = corner_list.get_len();
+                        var major_corner_count = corner_count;
+                        var this_corner_idx: u32 = 0;
+                        if (corner_count > 3) {
+                            corner_list.get_ptr(0).prev_edge_length_estimate += spline_length;
                             while (this_corner_idx < corner_count) : (this_corner_idx += 1) {
-                                if (!corner_list.get(this_corner_idx).is_minor) {
+                                const this_len_estimate = corner_list.get(this_corner_idx).prev_edge_length_estimate;
+                                const next_len_estimate = corner_list.get((this_corner_idx + 1) % corner_count).prev_edge_length_estimate;
+                                const next_next_len_estimate = corner_list.get((this_corner_idx + 2) % corner_count).prev_edge_length_estimate;
+                                if (this_len_estimate > next_len_estimate and next_len_estimate < next_next_len_estimate) {
+                                    corner_list.get_ptr(this_corner_idx).is_minor = true;
                                     major_corner_count -= 1;
-                                    color.switch_color_with_ban(seed, EdgeColor.from_raw(num_cast(major_corner_count * num_cast(initial_color.raw(), u32) == 0, u8)));
-                                    corner_list.get_ptr(this_corner_idx).color = color;
-                                    if (initial_color == EdgeColor.black) {
-                                        initial_color = color;
-                                    }
                                 }
                             }
-                            this_corner_idx = 0;
-                            while (this_corner_idx < corner_count) : (this_corner_idx += 1) {
-                                if (corner_list.get(this_corner_idx).is_minor) {
-                                    const next_color = corner_list.get((this_corner_idx + 1) % corner_count).color;
-                                    corner_list.get_ptr(this_corner_idx).color = color.bit_and(next_color).bit_xor(.white);
-                                } else {
-                                    color = corner_list.get(this_corner_idx).color;
+                        }
+                        var initial_color = EdgeColor.black;
+                        this_corner_idx = 0;
+                        while (this_corner_idx < corner_count) : (this_corner_idx += 1) {
+                            if (!corner_list.get(this_corner_idx).is_minor) {
+                                major_corner_count -= 1;
+                                // Reference: EdgeColor(!majorCornerCount*initialColor) - ban the initial color only once all major corners are colored.
+                                const banned = if (major_corner_count == 0) initial_color else EdgeColor.black;
+                                color.switch_color_with_ban(seed, banned);
+                                corner_list.get_ptr(this_corner_idx).color = color;
+                                if (initial_color == EdgeColor.black) {
+                                    initial_color = color;
                                 }
                             }
-                            var spline_idx: u32 = 0;
-                            const start_idx = corner_list.get(0).idx;
-                            color = corner_list.get(0).color;
-                            const limit = contour.edges.get_len();
-                            var i: u32 = 0;
-                            while (i < limit) : (i += 1) {
-                                const index = (start_idx + i) % limit;
-                                const next_spline_idx = spline_idx + 1;
-                                if (next_spline_idx < corner_count and corner_list.get(next_spline_idx).idx == index) {
-                                    color = corner_list.get(next_spline_idx).color;
-                                    spline_idx = next_spline_idx;
-                                }
-                                contour.edges.get(index).edge.color = color;
+                        }
+                        this_corner_idx = 0;
+                        while (this_corner_idx < corner_count) : (this_corner_idx += 1) {
+                            if (corner_list.get(this_corner_idx).is_minor) {
+                                const next_color = corner_list.get((this_corner_idx + 1) % corner_count).color;
+                                corner_list.get_ptr(this_corner_idx).color = color.bit_and(next_color).bit_xor(.white);
+                            } else {
+                                color = corner_list.get(this_corner_idx).color;
                             }
+                        }
+                        var spline_idx: u32 = 0;
+                        const start_idx = corner_list.get(0).idx;
+                        color = corner_list.get(0).color;
+                        const limit = contour.edges.get_len();
+                        var i: u32 = 0;
+                        while (i < limit) : (i += 1) {
+                            const index = (start_idx + i) % limit;
+                            const next_spline_idx = spline_idx + 1;
+                            if (next_spline_idx < corner_count and corner_list.get(next_spline_idx).idx == index) {
+                                color = corner_list.get(next_spline_idx).color;
+                                spline_idx = next_spline_idx;
+                            }
+                            contour.edges.get(index).edge.color = color;
                         }
                     }
                 }
@@ -2018,6 +2032,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         .selectors = List(EdgeSelectorType).allocate_new(shape.contours.get_len(), alloc),
                     };
                     self.selectors.set_len(shape.contours.get_len());
+                    for (self.selectors.zig_slice_entire()) |*selector| {
+                        selector.* = .{};
+                    }
                     for (shape.contours.zig_slice_entire()) |*contour| {
                         self.windings.append_one_assume_cap(contour.winding_orientation());
                     }
@@ -2044,9 +2061,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 pub fn distance(self: *Self, alloc: Allocator) EdgeSelectorType.DISTANCE_TYPE {
                     const contour_count = self.selectors.get_len();
-                    var shape_edge_selector: EdgeSelectorType = undefined;
-                    var inner_edge_selector: EdgeSelectorType = undefined;
-                    var outer_edge_selector: EdgeSelectorType = undefined;
+                    var shape_edge_selector: EdgeSelectorType = .{};
+                    var inner_edge_selector: EdgeSelectorType = .{};
+                    var outer_edge_selector: EdgeSelectorType = .{};
                     var selector_distances = List(EdgeSelectorType.DISTANCE_AND_MEDIAN_TYPE).allocate_new(contour_count, alloc);
                     defer selector_distances.free(alloc);
                     selector_distances.set_len(contour_count);
@@ -2220,17 +2237,17 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub fn protect_all(self: *ErrorCorrector) void {
                 var y: u32 = 0;
                 var x: u32 = undefined;
-                while (y < self.stencil.height) : (y += 1) {
+                while (y < self.stencil.get_height()) : (y += 1) {
                     x = 0;
-                    const row: []ErrorFlags = self.stencil.get_h_scanline(0, y, self.stencil.width).zig_slice_entire();
-                    while (x < self.stencil.width) : (x += 1) {
+                    const row: []ErrorFlags = self.stencil.get_h_scanline(0, y, self.stencil.get_width()).zig_slice_entire();
+                    while (x < self.stencil.get_width()) : (x += 1) {
                         row[x].add(.PROTECTED);
                     }
                 }
             }
 
             pub fn protect_corners(self: *ErrorCorrector, shape: *Shape) void {
-                if (self.stencil.height == 0 or self.stencil.width == 0) return;
+                if (self.stencil.get_height() == 0 or self.stencil.get_width() == 0) return;
                 for (shape.contours.zig_slice_entire()) |*contour| {
                     if (!contour.edges.is_empty()) {
                         var prev_edge = contour.edges.get_last().edge;
@@ -2242,30 +2259,30 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             if (common_color.has_one_or_zero_bits_set()) {
                                 // Find the four pixels that envelop the corner and mark them as protected.
                                 const p = self.transform.projection.project(this_edge.interp_point(0));
-                                const min_x: i32 = @intFromFloat(p.x - 0.5);
-                                const min_y: i32 = @intFromFloat(p.y - 0.5);
+                                const min_x: i32 = @intFromFloat(@floor(p.x - 0.5));
+                                const min_y: i32 = @intFromFloat(@floor(p.y - 0.5));
                                 const max_x = min_x + 1;
                                 const max_y = min_y + 1;
                                 // Check that the positions are within bounds.
                                 const min_x_in_bounds = min_x >= 0;
                                 const min_y_in_bounds = min_y >= 0;
-                                const max_x_in_bounds = max_x < self.stencil.width;
-                                const max_y_in_bounds = max_y < self.stencil.height;
+                                const max_x_in_bounds = max_x < self.stencil.get_width();
+                                const max_y_in_bounds = max_y < self.stencil.get_height();
                                 // Protect the corner pixels that are in bounds
                                 if (min_x_in_bounds) {
                                     if (min_y_in_bounds) {
-                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(min_x), @intCast(min_y)).* = ErrorFlags.flag(.PROTECTED);
+                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(min_x), @intCast(min_y)).add(.PROTECTED);
                                     }
                                     if (max_y_in_bounds) {
-                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(min_x), @intCast(max_y)).* = ErrorFlags.flag(.PROTECTED);
+                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(min_x), @intCast(max_y)).add(.PROTECTED);
                                     }
                                 }
                                 if (max_x_in_bounds) {
                                     if (min_y_in_bounds) {
-                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(max_x), @intCast(min_y)).* = ErrorFlags.flag(.PROTECTED);
+                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(max_x), @intCast(min_y)).add(.PROTECTED);
                                     }
                                     if (max_y_in_bounds) {
-                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(max_x), @intCast(max_y)).* = ErrorFlags.flag(.PROTECTED);
+                                        self.stencil.get_cell_ptr_with_origin(.BOT_LEFT, @intCast(max_x), @intCast(max_y)).add(.PROTECTED);
                                     }
                                 }
                             }
@@ -2283,10 +2300,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(self.transform.distance_mapping.calc_delta(.new(1)), 0)).length();
                 var y: u32 = 0;
                 var x: u32 = undefined;
-                while (y < msdf_region.height) : (y += 1) {
+                while (y < msdf_region.get_height()) : (y += 1) {
                     x = 0;
                     const row_ptr: [*]BMP.Cell = msdf_region.get_cell_ptr_many_with_origin(.BOT_LEFT, 0, y);
-                    while (x < msdf_region.width - 1) : (x += 1) {
+                    while (x < msdf_region.get_width() - 1) : (x += 1) {
                         const left = row_ptr[x];
                         const right = row_ptr[x + 1];
                         const left_median = left.median_of_3_channels(.R, .G, .B);
@@ -2303,11 +2320,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 // Vertical pixel pairs
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new(0, self.transform.distance_mapping.calc_delta(.new(1)))).length();
                 y = 0;
-                while (y < msdf_region.height - 1) : (y += 1) {
+                while (y < msdf_region.get_height() - 1) : (y += 1) {
                     x = 0;
                     const top_row_ptr: [*]BMP.Cell = msdf_region.get_cell_ptr_many_with_origin(.BOT_LEFT, 0, y + 1);
                     const bot_row_ptr: [*]BMP.Cell = msdf_region.get_cell_ptr_many_with_origin(.BOT_LEFT, 0, y);
-                    while (x < msdf_region.width) : (x += 1) {
+                    while (x < msdf_region.get_width()) : (x += 1) {
                         const top = top_row_ptr[x];
                         const bottom = bot_row_ptr[x];
                         const top_median = top.median_of_3_channels(.R, .G, .B);
@@ -2324,11 +2341,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 // Diagonal pixel pairs
                 radius = PROTECTION_RADIUS_TOLERANCE * self.transform.projection.un_project_vec(Vector.new_splat(self.transform.distance_mapping.calc_delta(.new(1)))).length();
                 y = 0;
-                while (y < msdf_region.height - 1) : (y += 1) {
+                while (y < msdf_region.get_height() - 1) : (y += 1) {
                     x = 0;
                     const top_row_ptr: [*]BMP.Cell = msdf_region.get_cell_ptr_many_with_origin(.BOT_LEFT, 0, y + 1);
                     const bot_row_ptr: [*]BMP.Cell = msdf_region.get_cell_ptr_many_with_origin(.BOT_LEFT, 0, y);
-                    while (x < msdf_region.width - 1) : (x += 1) {
+                    while (x < msdf_region.get_width() - 1) : (x += 1) {
                         const top_left = top_row_ptr[x];
                         const bottom_left = bot_row_ptr[x];
                         const top_right = top_row_ptr[x + 1];
@@ -2363,9 +2380,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 // Inspect all texels.
                 var y: u32 = 0;
                 var x: u32 = undefined;
-                while (y < msdf_region.height) : (y += 1) {
+                while (y < msdf_region.get_height()) : (y += 1) {
                     x = 0;
-                    while (x < msdf_region.width) : (x += 1) {
+                    while (x < msdf_region.get_width()) : (x += 1) {
                         const pixel = msdf_region.get_cell(x, y);
                         const pixel_median = pixel.median_of_3_channels(.R, .G, .B);
                         const stencil_flag_ptr: *ErrorFlags = self.stencil.get_cell_ptr(x, y);
@@ -2378,13 +2395,13 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         stencil_flag_ptr.add_if_true(.ERROR,
                             //
                             (x > 0 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_cell(x - 1, y), alloc)) or
-                                (x < msdf_region.width - 1 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), alloc)) or
+                                (x < msdf_region.get_width() - 1 and check.has_linear_artifact(horizontal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), alloc)) or
                                 (y > 0 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_cell(x, y - 1), alloc)) or
-                                (y < msdf_region.height - 1 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_cell(x, y + 1), alloc)) or
+                                (y < msdf_region.get_height() - 1 and check.has_linear_artifact(vertical_classifier, pixel_median, pixel, msdf_region.get_cell(x, y + 1), alloc)) or
                                 (x > 0 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x - 1, y - 1), alloc)) or
-                                (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x + 1, y - 1), alloc)) or
-                                (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x - 1, y + 1), alloc)) or
-                                (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x + 1, y + 1), alloc))
+                                (x < msdf_region.get_width() - 1 and y > 0 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x + 1, y - 1), alloc)) or
+                                (x > 0 and y < msdf_region.get_height() - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x - 1, y + 1), alloc)) or
+                                (x < msdf_region.get_width() - 1 and y < msdf_region.get_height() - 1 and check.has_diagonal_artifact(diagonal_classifier, pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x + 1, y + 1), alloc))
                                 //
                         );
                     }
@@ -2402,15 +2419,15 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 var y: u32 = 0;
                 var x: u32 = undefined;
                 var abs_x: u32 = undefined;
-                const last_x = msdf_region.width - 1;
+                const last_x = msdf_region.get_width() - 1;
                 //TODO: enable some sort of optional multi-threading here?
                 // Inspect all texels.
-                while (y < msdf_region.height) : ({
+                while (y < msdf_region.get_height()) : ({
                     y += 1;
                     reverse_x ^= 1;
                 }) {
                     abs_x = 0;
-                    while (abs_x < msdf_region.width) : (abs_x += 1) {
+                    while (abs_x < msdf_region.get_width()) : (abs_x += 1) {
                         switch (reverse_x) {
                             0 => {
                                 x = abs_x;
@@ -2432,13 +2449,13 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         stencil_flag_ptr.add_if_true(.ERROR,
                             //
                             (x > 0 and check.has_linear_artifact(distance_checker.classifier(.new(-1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_cell(x - 1, y), temp_alloc)) or
-                                (x < msdf_region.width - 1 and check.has_linear_artifact(distance_checker.classifier(.new(1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), temp_alloc)) or
-                                (y > 0 and check.has_linear_artifact(distance_checker.classifier(.new(0, 1), vertical_span), pixel_median, pixel, msdf_region.get_cell(x, y - 1), temp_alloc)) or
-                                (y < msdf_region.height - 1 and check.has_linear_artifact(distance_checker.classifier(.new(0, -1), vertical_span), pixel_median, pixel, msdf_region.get_cell(x, y + 1), temp_alloc)) or
-                                (x > 0 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x - 1, y - 1), temp_alloc)) or
-                                (x < msdf_region.width - 1 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x + 1, y - 1), temp_alloc)) or
-                                (x > 0 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x - 1, y + 1), temp_alloc)) or
-                                (x < msdf_region.width - 1 and y < msdf_region.height - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x + 1, y + 1), temp_alloc))
+                                (x < msdf_region.get_width() - 1 and check.has_linear_artifact(distance_checker.classifier(.new(1, 0), horizontal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), temp_alloc)) or
+                                (y > 0 and check.has_linear_artifact(distance_checker.classifier(.new(0, -1), vertical_span), pixel_median, pixel, msdf_region.get_cell(x, y - 1), temp_alloc)) or
+                                (y < msdf_region.get_height() - 1 and check.has_linear_artifact(distance_checker.classifier(.new(0, 1), vertical_span), pixel_median, pixel, msdf_region.get_cell(x, y + 1), temp_alloc)) or
+                                (x > 0 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x - 1, y - 1), temp_alloc)) or
+                                (x < msdf_region.get_width() - 1 and y > 0 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, -1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y - 1), msdf_region.get_cell(x + 1, y - 1), temp_alloc)) or
+                                (x > 0 and y < msdf_region.get_height() - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(-1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x - 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x - 1, y + 1), temp_alloc)) or
+                                (x < msdf_region.get_width() - 1 and y < msdf_region.get_height() - 1 and check.has_diagonal_artifact(distance_checker.classifier(.new(1, 1), diagonal_span), pixel_median, pixel, msdf_region.get_cell(x + 1, y), msdf_region.get_cell(x, y + 1), msdf_region.get_cell(x + 1, y + 1), temp_alloc))
                                 //
                         );
                     }
@@ -2450,11 +2467,11 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 var x: u32 = undefined;
                 var pixel_row: []FloatBitmap(NUM_CHANNELS).Cell = undefined;
                 var stencil_row: []ErrorFlags = undefined;
-                while (y < msdf_region.height) : (y += 1) {
+                while (y < msdf_region.get_height()) : (y += 1) {
                     x = 0;
-                    pixel_row = msdf_region.get_h_scanline(0, y, msdf_region.width).zig_slice_entire();
-                    stencil_row = self.stencil.get_h_scanline(0, y, msdf_region.width).zig_slice_entire();
-                    while (x < msdf_region.width) : (x += 1) {
+                    pixel_row = msdf_region.get_h_scanline(0, y, msdf_region.get_width()).zig_slice_entire();
+                    stencil_row = self.stencil.get_h_scanline(0, y, msdf_region.get_width()).zig_slice_entire();
+                    while (x < msdf_region.get_width()) : (x += 1) {
                         const error_check: ErrorFlags = stencil_row[x];
                         if (error_check.has_flag(.ERROR)) {
                             // Set all color channels to the median.
@@ -3041,7 +3058,6 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         };
                     },
                 };
-                // var average_scale = 0.5 * (projection.scale.x + projection.scale.y);
                 var winding_change = settings.change_or_keep_shape_windings;
                 if (winding_change == .GUESS_CORRECT_WINDING) {
                     // Get sign of signed distance outside bounds
@@ -3080,9 +3096,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     .EXISTING_BITMAP => |bmp| {
                         if (self.print_warnings_to_console) {
                             Assert.warn_with_reason(render_aabb.x_min >= 0, @src(), "The final bounds minimium x value is less than zero ({d}), possible cutoff of shape", .{render_aabb.x_min});
-                            Assert.warn_with_reason(MathX.upgrade_less_than_or_equal(render_aabb.x_max, bmp.width), @src(), "The final bounds maximum x value is greater than provided bitmap width ({d} > {d}), possible cutoff of shape", .{ render_aabb.x_max, bmp.width });
+                            Assert.warn_with_reason(MathX.upgrade_less_than_or_equal(render_aabb.x_max, bmp.get_width()), @src(), "The final bounds maximum x value is greater than provided bitmap width ({d} > {d}), possible cutoff of shape", .{ render_aabb.x_max, bmp.get_width() });
                             Assert.warn_with_reason(render_aabb.y_min >= 0, @src(), "The final bounds minimium y value is less than zero ({d}), possible cutoff of shape", .{render_aabb.y_min});
-                            Assert.warn_with_reason(MathX.upgrade_less_than_or_equal(render_aabb.y_max, bmp.height), @src(), "The final bounds maximum y value is greater than provided bitmap height ({d} > {d}), possible cutoff of shape", .{ render_aabb.y_max, bmp.height });
+                            Assert.warn_with_reason(MathX.upgrade_less_than_or_equal(render_aabb.y_max, bmp.get_height()), @src(), "The final bounds maximum y value is greater than provided bitmap height ({d} > {d}), possible cutoff of shape", .{ render_aabb.y_max, bmp.get_height() });
                         }
                         result.bitmap = bmp;
                     },
@@ -3097,7 +3113,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         switch (settings.bitmap_destination) {
                             .ALLOCATE_NEW_BITMAP => |bmp_alloc| {
                                 result.bitmap_allocator = bmp_alloc;
-                                result.bitmap = BMP.allocate_new(pixel_max.x, pixel_max.y, BMP.Cell{}, bmp_alloc);
+                                result.bitmap = BMP.allocate_new(.new(pixel_max.x, pixel_max.y), BMP.Cell{}, bmp_alloc);
                             },
                             .FROM_BITMAP_PROVIDER => |provider| {
                                 if (provider.provide_fn(provider.provider, pixel_max.x, pixel_max.y)) |provided_bmp| {
@@ -3170,10 +3186,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     .MTSDF => {
                         switch (self.edge_coloring_mode) {
                             .INKTRAP => {
-                                shape.edge_coloring_inktrap(settings.shape_allocator, &self.edge_coloring_corner_list_inktrap, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                                shape.edge_coloring_inktrap(settings.shape_allocator, &self.edge_coloring_corner_list_inktrap, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold.to_radians_raw(), &seed);
                             },
                             .SIMPLE => {
-                                shape.edge_coloring_simple(settings.shape_allocator, &self.edge_coloring_corner_list_simple, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold, &seed);
+                                shape.edge_coloring_simple(settings.shape_allocator, &self.edge_coloring_corner_list_simple, self.edge_coloring_corner_list_allocator, settings.corner_angle_threshold.to_radians_raw(), &seed);
                             },
                             .SKIP => {},
                         }
@@ -3220,10 +3236,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 var x: i32 = undefined;
                 var abs_x: u32 = undefined;
                 //TODO enable some sort of multi-threading here?
-                while (y < output.height) : (y += 1) {
+                while (y < output.get_height()) : (y += 1) {
                     abs_x = 0;
-                    x = if (x_dir == 1) 0 else @intCast(output.width - 1);
-                    while (abs_x < output.width) : ({
+                    x = if (x_dir == 1) 0 else @intCast(output.get_width() - 1);
+                    while (abs_x < output.get_width()) : ({
                         abs_x += 1;
                         x += x_dir;
                     }) {
@@ -3236,12 +3252,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 }
             }
 
-            // /// The output bitmap is assumed to be the correct size and the shape is assumed to have all preprocessing done
-            // pub fn generate_signed_distance_field_into_existing_bitmap_comptime_kind(self: *Generator, comptime kind: GeneratedKind, output: BitmapTypeForGeneratedKind(kind), shape: *Shape, transform: Transformation) void {}
-
             pub fn perform_error_correction(self: *Generator, comptime NUM_CHANNELS: comptime_int, msdf_bitmap: FloatBitmap(NUM_CHANNELS), shape: *Shape, transform: Transformation) void {
                 if (self.msdf_error_correction_mode == .DISABLED) return;
-                self.error_stencil_buffer.discard_and_resize(msdf_bitmap.width, msdf_bitmap.height, null, ErrorFlags.flag(.NONE), self.error_stencil_allocator);
+                self.error_stencil_buffer.discard_and_realloc(msdf_bitmap.get_width(), msdf_bitmap.get_height(), ErrorFlags.flag(.NONE), self.error_stencil_allocator);
                 var corrector = ErrorCorrector.init(self.error_stencil_buffer, transform);
                 corrector.min_deviation_ratio = self.min_deviation_ratio;
                 switch (self.msdf_error_correction_mode) {
@@ -3271,9 +3284,9 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         }
                         if (self.msdf_error_correction_distance_check_mode == .ALWAYS_CHECK_DISTANCE or self.msdf_error_correction_distance_check_mode == .CHECK_DISTANCE_AT_EDGE) {
                             if (self.overlap_support == .HANDLE_OVERLAPPING_CONTOURS) {
-                                corrector.find_errors_msdf_and_shape(OverlappingContourCombiner(EdgeSelectorForNumChannels(NUM_CHANNELS)), NUM_CHANNELS, msdf_bitmap, shape, self.temp_allocator);
+                                corrector.find_errors_msdf_and_shape(OverlappingContourCombiner(PerpendicularDistanceSelector), NUM_CHANNELS, msdf_bitmap, shape, self.temp_allocator);
                             } else {
-                                corrector.find_errors_msdf_and_shape(SimpleContourCombiner(EdgeSelectorForNumChannels(NUM_CHANNELS)), NUM_CHANNELS, msdf_bitmap, shape, self.temp_allocator);
+                                corrector.find_errors_msdf_and_shape(SimpleContourCombiner(PerpendicularDistanceSelector), NUM_CHANNELS, msdf_bitmap, shape, self.temp_allocator);
                             }
                         }
                     },
@@ -3417,6 +3430,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             const BMP = FloatBitmap(NUM_CHANNELS);
             return struct {
                 const Self = @This();
+                const Checker = Self;
 
                 shape_point: Point = .ZERO,
                 msdf_point: Point = .ZERO,
@@ -3436,6 +3450,41 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         .min_improve_ratio = min_improve_ratio,
                         .pixel_size = projection.un_project_vec(.ONE),
                     };
+                }
+
+                fn mix(a: Float, b: Float, weight: f64) Float {
+                    return @floatCast((1 - weight) * @as(f64, a) + weight * @as(f64, b));
+                }
+
+                fn interpolate_pixel(bitmap: BMP, pos: Point) BMP.Cell {
+                    const width_f: Float = @floatFromInt(bitmap.get_width());
+                    const height_f: Float = @floatFromInt(bitmap.get_height());
+                    const x: f64 = @as(f64, MathX.clamp_0_to_max(pos.x, width_f)) - 0.5;
+                    const y: f64 = @as(f64, MathX.clamp_0_to_max(pos.y, height_f)) - 0.5;
+                    const left_i: i32 = @intFromFloat(@floor(x));
+                    const bottom_i: i32 = @intFromFloat(@floor(y));
+                    const right_i = left_i + 1;
+                    const top_i = bottom_i + 1;
+                    const lr = x - @as(f64, @floatFromInt(left_i));
+                    const bt = y - @as(f64, @floatFromInt(bottom_i));
+                    const max_x: i32 = @intCast(bitmap.get_width() - 1);
+                    const max_y: i32 = @intCast(bitmap.get_height() - 1);
+                    const left: u32 = @intCast(MathX.clamp(@as(i32, 0), left_i, max_x));
+                    const right: u32 = @intCast(MathX.clamp(@as(i32, 0), right_i, max_x));
+                    const bottom: u32 = @intCast(MathX.clamp(@as(i32, 0), bottom_i, max_y));
+                    const top: u32 = @intCast(MathX.clamp(@as(i32, 0), top_i, max_y));
+                    const lb = bitmap.get_cell(left, bottom);
+                    const rb = bitmap.get_cell(right, bottom);
+                    const lt = bitmap.get_cell(left, top);
+                    const rt = bitmap.get_cell(right, top);
+                    var out = lb;
+                    inline for ([_]BMP.Cell.Channel{ .R, .G, .B }) |chan| {
+                        out.set(chan, mix(mix(lb.get(chan), rb.get(chan), lr), mix(lt.get(chan), rt.get(chan), lr), bt));
+                    }
+                    if (NUM_CHANNELS == 4) {
+                        out.set(.A, mix(mix(lb.get(.A), rb.get(.A), lr), mix(lt.get(.A), rt.get(.A), lr), bt));
+                    }
+                    return out;
                 }
 
                 pub fn classifier(self: *Self, direction: Vector, span: Float) ArtifactClassifier {
@@ -3465,7 +3514,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                             var new_pixel: BMP.Cell = undefined;
                             // Compute the color that would be currently interpolated at the artifact candidate's position.
                             const msdf_point = self.parent.msdf_point.add(t_vector);
-                            old_pixel = self.parent.msdf_bitmap.lerp_sub_cell_with_origin_fn_on_cell_f32(.BOT_LEFT, msdf_point.x, msdf_point.y);
+                            old_pixel = Checker.interpolate_pixel(self.parent.msdf_bitmap, msdf_point);
                             if (NUM_CHANNELS == 4) {
                                 new_pixel.set(.A, old_pixel.get(.A));
                             }
@@ -3538,7 +3587,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     const t = (pixel_a.get(channel) - 0.5) / (pixel_a.get(channel) - pixel_b.get(channel));
                     if (t > 0 and t < 1) {
                         // Interpolate all channel values at t.
-                        const mixed_pixel = pixel_a.lerp(pixel_b);
+                        const mixed_pixel = pixel_a.lerp(pixel_b, t);
                         // This is only an edge if the zero-distance channel is the median.
                         return MathX.median_of_3(f32, mixed_pixel.get(.R), mixed_pixel.get(.G), mixed_pixel.get(.B)) == mixed_pixel.get(channel);
                     }
@@ -3568,7 +3617,8 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     if (percent > ARTIFACT_T_EPSILON and percent < 1 - ARTIFACT_T_EPSILON) {
                         // Interpolate median at t and let the classifier decide if its value indicates an artifact.
                         const interp_median = pixel_a.lerp(pixel_b, percent).median_of_3_channels(.R, .G, .B);
-                        return classifier.is_artifact(percent, interp_median, classifier.range_test(0, 1, percent, a_median, b_median, interp_median), alloc);
+                        const flags = classifier.range_test(0, 1, percent, a_median, b_median, interp_median);
+                        return classifier.is_artifact(percent, interp_median, flags, alloc);
                     }
                     return false;
                 }
@@ -3576,7 +3626,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     const b_median = pixel_b.median_of_3_channels(.R, .G, .B);
                     return (
                         // Out of the pair, only report artifacts for the pixel further from the edge to minimize side effects.
-                        @abs(a_median - 0.5) >= @abs(b_median) and
+                        @abs(a_median - 0.5) >= @abs(b_median - 0.5) and
                             ( // Check points where each pair of color channels meets.
                                 has_linear_artifact_on_channel_pair(classifier, a_median, b_median, pixel_a, pixel_b, pixel_a.channel_delta(.R, .G), pixel_b.channel_delta(.R, .G), alloc) or
                                     has_linear_artifact_on_channel_pair(classifier, a_median, b_median, pixel_a, pixel_b, pixel_a.channel_delta(.G, .B), pixel_b.channel_delta(.G, .B), alloc) or
@@ -3682,6 +3732,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         .shape_edge_cache_list = List(CONTOUR_COMBINER.EDGE_CACHE_TYPE).allocate_new(@intCast(shape.edge_count()), alloc),
                     };
                     self.shape_edge_cache_list.set_len(shape.edge_count());
+                    @memset(self.shape_edge_cache_list.zig_slice_entire(), .{});
                     return self;
                 }
                 pub fn free(self: *Self, alloc: Allocator) void {
@@ -3691,14 +3742,16 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
 
                 pub fn distance(self: *Self, point: Point, alloc: Allocator) DISTANCE_TYPE {
                     self.contour_combiner.reset(point);
+                    var edge_cache_idx: u32 = 0;
                     for (self.shape.contours.zig_slice_entire(), 0..) |*contour, c| {
                         if (!contour.edges.is_empty()) {
                             var edge_selector = self.contour_combiner.edge_selector_ptr(@intCast(c));
                             var prev_edge = if (contour.edges.get_len() >= 2) contour.edges.get_nth_from_end_ptr(1) else contour.edges.get_ptr(0);
                             var curr_edge = contour.edges.get_last_ptr();
-                            for (contour.edges.zig_slice_entire(), 0..) |*next_edge, e| {
-                                const edge_cache_ptr = self.shape_edge_cache_list.get_ptr(@intCast(e));
+                            for (contour.edges.zig_slice_entire()) |*next_edge| {
+                                const edge_cache_ptr = self.shape_edge_cache_list.get_ptr(edge_cache_idx);
                                 edge_selector.add_edge(edge_cache_ptr, prev_edge.edge, curr_edge.edge, next_edge.edge);
+                                edge_cache_idx += 1;
                                 prev_edge = curr_edge;
                                 curr_edge = next_edge;
                             }
@@ -3742,10 +3795,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 var y: u32 = 0;
                 var x: u32 = undefined;
                 var is_filled: bool = undefined;
-                while (y < output.height) : (y += 1) {
+                while (y < output.get_height()) : (y += 1) {
                     x = 0;
                     shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, alloc);
-                    while (x < output.width) : (x += 1) {
+                    while (x < output.get_width()) : (x += 1) {
                         is_filled = scanline.is_filled_at_x(projection.un_project_x(num_cast(x, f32) + 0.5), fill_rule);
                         output.set_pixel_channel_with_origin(.BOT_LEFT, x, y, .A, num_cast(is_filled, f32));
                     }
@@ -3772,10 +3825,10 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     @memset(match_map.zig_slice_entire(), 0);
                 }
                 const double_signed_zero = signed_zero_value + signed_zero_value;
-                while (y < msdf.height) : (y += 1) {
+                while (y < msdf.get_height()) : (y += 1) {
                     x = 0;
                     shape.get_horizontal_scanline_intersections(projection.un_project_y(num_cast(y, f32) + 0.5), scanline, scanline_allocator);
-                    while (x < msdf.width) : (x += 1) {
+                    while (x < msdf.get_width()) : (x += 1) {
                         is_filled = scanline.is_filled_at_x(projection.un_project_x(num_cast(x, f32) + 0.5), fill_rule);
                         const pixel = msdf.get_cell_ptr_with_origin(.BOT_LEFT, x, y);
                         switch (mode) {
@@ -3808,19 +3861,18 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                         }
                     }
                 }
-                // This step is necessary to avoid artifacts when whole shape is inverted
                 if (ambiguous and (mode == .color_only or mode == .alpha_and_color)) {
                     y = 0;
                     m = 0;
-                    while (y < msdf.height) : (y += 1) {
+                    while (y < msdf.get_height()) : (y += 1) {
                         x = 0;
-                        while (x < msdf.width) : (x += 1) {
+                        while (x < msdf.get_width()) : (x += 1) {
                             if (match_map.get(m) == 0) {
                                 var neighbor_match: i8 = 0;
                                 if (x > 0) neighbor_match += match_map.get(m - 1);
-                                if (x < msdf.width - 1) neighbor_match += match_map.get(m + 1);
-                                if (y > 0) neighbor_match += match_map.get(m - num_cast(msdf.width, u32));
-                                if (y < msdf.height - 1) neighbor_match += match_map.get(m + num_cast(msdf.width, u32));
+                                if (x < msdf.get_width() - 1) neighbor_match += match_map.get(m + 1);
+                                if (y > 0) neighbor_match += match_map.get(m - num_cast(msdf.get_width(), u32));
+                                if (y < msdf.get_height() - 1) neighbor_match += match_map.get(m + num_cast(msdf.get_width(), u32));
                                 if (neighbor_match < 0) {
                                     const pixel = msdf.get_cell_ptr_with_origin(.BOT_LEFT, x, y);
                                     pixel.set(.R, double_signed_zero - pixel.get(.R));
@@ -3866,39 +3918,38 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
             pub fn render_msdf_using_cpu(comptime OUTPUT_BMP_DEF: DataGridDef, output: DataGrid(OUTPUT_BMP_DEF), comptime MSDF_NUM_CHANNELS: comptime_int, msdf: FloatBitmap(MSDF_NUM_CHANNELS), signed_pixel_range: Range, signed_threshhold: Float) void {
                 const OUT_BMP = DataGrid(OUTPUT_BMP_DEF);
                 const MSDF_BMP = FloatBitmap(MSDF_NUM_CHANNELS);
-                const msdf_has_alpha = comptime MSDF_BMP.has_all_channels(&DataGridModule.A_Channel.tag_names);
-                const msdf_has_color = comptime MSDF_BMP.has_all_channels(&DataGridModule.RGB_Channels.tag_names);
-                // const msdf_has_color_and_alpha = msdf_has_color and msdf_has_alpha;
+                const msdf_has_alpha = comptime MSDF_BMP.Cell.has_channel("A");
+                const msdf_has_color = comptime MSDF_BMP.Cell.has_all_channels(&.{ "R", "G", "B" });
                 const msdf_has_color_only = msdf_has_color and !msdf_has_alpha;
                 const msdf_has_alpha_only = !msdf_has_color and msdf_has_alpha;
-                const out_has_alpha = comptime OUT_BMP.has_all_channels(&DataGridModule.A_Channel.tag_names);
-                const out_has_color = comptime OUT_BMP.has_all_channels(&DataGridModule.RGB_Channels.tag_names);
+                const out_has_alpha = comptime OUT_BMP.Cell.has_channel("A");
+                const out_has_color = comptime OUT_BMP.Cell.has_all_channels(&.{ "R", "G", "B" });
                 const out_has_color_and_alpha = out_has_color and out_has_alpha;
                 const out_has_color_only = out_has_color and !out_has_alpha;
                 const out_has_alpha_only = !out_has_color and out_has_alpha;
                 assert_with_reason(out_has_color or out_has_alpha, @src(), "output bitmap format does not specify either RGB channels, an Alpha channel, or both, you must implement your own rendering algorithm", .{});
-                const scale = Vector.new(num_cast(msdf.width, f32) / num_cast(output.width, f32), num_cast(msdf.height, f32) / num_cast(output.height, f32));
+                const scale = Vector.new(num_cast(msdf.get_width(), f32) / num_cast(output.get_width(), f32), num_cast(msdf.get_height(), f32) / num_cast(output.get_height(), f32));
                 var y: u32 = 0;
                 var x: u32 = undefined;
                 if (signed_pixel_range.low == signed_pixel_range.high) {
-                    while (y < output.height) : (y += 1) {
+                    while (y < output.get_height()) : (y += 1) {
                         x = 0;
-                        while (x < output.width) : (x += 1) {
-                            const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).scale(scale);
-                            const msdf_interp = msdf.lerp_sub_cell_with_origin(.top_left, f32, msdf_point.x, msdf_point.y);
-                            const output_ptr = output.get_cell_ptr_with_origin(.top_left, x, y);
+                        while (x < output.get_width()) : (x += 1) {
+                            const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).multiply(scale);
+                            const msdf_interp = msdf.lerp_sub_cell_with_origin_fn_on_cell_f32(.TOP_LEFT, msdf_point.x, msdf_point.y);
+                            const output_ptr = output.get_cell_ptr_with_origin(.TOP_LEFT, x, y);
                             if (out_has_alpha_only) {
                                 if (msdf_has_alpha) {
-                                    output_ptr.set(.A, MathX.normalized_num_cast(msdf_interp.get(.A) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.A, MathX.normalized_num_cast(msdf_interp.get(.A) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
                                 } else {
                                     const median = msdf_interp.median_of_3_channels(.R, .G, .B);
                                     output_ptr.set(.A, MathX.normalized_num_cast(median >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
                                 }
                             } else if (out_has_color_only) {
                                 if (msdf_has_color) {
-                                    output_ptr.set(.R, MathX.normalized_num_cast(msdf_interp.get(.R) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    output_ptr.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    output_ptr.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.R, MathX.normalized_num_cast(msdf_interp.get(.R) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    output_ptr.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    output_ptr.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
                                 } else {
                                     const greyscale = OUT_BMP.Cell.MAX_VALS.multiply_scalar(MathX.normalized_num_cast(msdf_interp.get(.A) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
                                     output_ptr.* = greyscale;
@@ -3909,30 +3960,30 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                                     output_ptr.* = white_with_alpha;
                                 } else if (msdf_has_color_only) {
                                     var color_fully_opaque = OUT_BMP.Cell.MAX_VALS.with_set(.R, MathX.normalized_num_cast(msdf_interp.get(.R) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    color_fully_opaque.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    color_fully_opaque.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    color_fully_opaque.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    color_fully_opaque.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
                                     output_ptr.* = color_fully_opaque;
                                 } else {
-                                    output_ptr.set(.R, MathX.normalized_num_cast(msdf_interp.get(.R) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    output_ptr.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    output_ptr.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
-                                    output_ptr.set(.A, MathX.normalized_num_cast(msdf_interp.get(.A) >= signed_threshhold, OUT_BMP.CHANNEL_TYPE));
+                                    output_ptr.set(.R, MathX.normalized_num_cast(msdf_interp.get(.R) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    output_ptr.set(.G, MathX.normalized_num_cast(msdf_interp.get(.G) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    output_ptr.set(.B, MathX.normalized_num_cast(msdf_interp.get(.B) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
+                                    output_ptr.set(.A, MathX.normalized_num_cast(msdf_interp.get(.A) >= signed_threshhold, OUT_BMP.DEF.LIST_DEF.ELEM));
                                 }
                             }
                         }
                     }
                 } else {
-                    const output_size_sum = num_cast(output.width + output.height, f32);
-                    const msdf_size_sum = num_cast(msdf.width + msdf.height, f32);
+                    const output_size_sum = num_cast(output.get_width() + output.get_height(), f32);
+                    const msdf_size_sum = num_cast(msdf.get_width() + msdf.get_height(), f32);
                     const px_range_ratio = signed_pixel_range.multiplied_by(output_size_sum / msdf_size_sum);
                     const dist_map = DistanceMapping.new_from_range_inverse(px_range_ratio);
                     const bias = 0.5 - signed_threshhold;
-                    while (y < output.height) : (y += 1) {
+                    while (y < output.get_height()) : (y += 1) {
                         x = 0;
-                        while (x < output.width) : (x += 1) {
+                        while (x < output.get_width()) : (x += 1) {
                             const msdf_point = Point.new(num_cast(x, f32) + 0.5, num_cast(y, f32) + 0.5).scale(scale);
-                            const msdf_interp = msdf.lerp_sub_cell_with_origin(.top_left, f32, msdf_point.x, msdf_point.y);
-                            const output_ptr = output.get_cell_ptr_with_origin(.top_left, x, y);
+                            const msdf_interp = msdf.lerp_sub_cell_with_origin_fn_on_cell_f32(.TOP_LEFT, msdf_point.x, msdf_point.y);
+                            const output_ptr = output.get_cell_ptr_with_origin(.TOP_LEFT, x, y);
                             if (out_has_alpha_only) {
                                 if (msdf_has_alpha) {
                                     output_ptr.set(.A, dist_map.calc_biased_normalized_out(bias, msdf_interp.get(.A)));
@@ -4051,18 +4102,31 @@ test "BezierMSDFGenerator -> Triangle" {
         .shape = S,
         .shape_allocator = alloc,
         .projection = .manual(Gen.Projection{ .scale = .new_splat(1), .translate = .new(0, 0) }),
-        .range_mode = .NATIVE_UNITS,
-        .distance_range_width = 1,
+        .range_mode = .PIXELS,
+        .distance_range_width = 4,
         .bitmap_destination = .allocate_new_bitmap(alloc),
     };
     const settings_sdf = Gen.Generator.ShapeSettings(.SDF){
         .shape = S,
         .shape_allocator = alloc,
         .projection = .manual(Gen.Projection{ .scale = .new_splat(1), .translate = .new(0, 0) }),
-        .range_mode = .NATIVE_UNITS,
-        .distance_range_width = 1,
+        .range_mode = .PIXELS,
+        .distance_range_width = 4,
         .bitmap_destination = .allocate_new_bitmap(alloc),
     };
+    // const RENDER_GRID_DEF = DataGridDef{
+    //     .LIST_DEF = .{
+    //         .ELEM = ColorModule.define_color_type(u8, .BGRA),
+    //         .OWNERSHIP = .OWNED_ALLOCATED,
+    //     },
+    //     .ROW_COLUMN_ORDER = .ROW_MAJOR,
+    //     .X_ORDER = .LEFT_TO_RIGHT,
+    //     .Y_ORDER = .BOTTOM_TO_TOP,
+    //     .OWNERSHIP = .ROOT,
+    // };
+    // const RENDER_GRID_DEF_REGION = RENDER_GRID_DEF.with_ownership(.REGION);
+    // var output_rendered_bmp = RENDER_GRID_DEF.Grid().allocate_new(.new(52, 52), .{}, alloc);
+    // const output_rendered_bmp_region = output_rendered_bmp.get_entire_region();
     try std.Io.Dir.cwd().createDirPath(io, "test_out/msdf_gen");
     const seed: u64 = @bitCast(std.Io.Clock.now(.real, io).toMilliseconds());
 
@@ -4072,6 +4136,8 @@ test "BezierMSDFGenerator -> Triangle" {
         break :fail Gen.Generator.GeneratedResult(.SDF){};
     };
     _ = try Root.FileFormat.Bitmap.save_bitmap_to_file("test_out/msdf_gen/triangle_sdf_1.bmp", Gen.BitmapTypeForGeneratedKind(.SDF).DEF, good_result_sdf.bitmap, .{ .bits_per_pixel = .BPP_8 }, .convert_using_func(Gen.BitmapTypeForGeneratedKind(.SDF).DEF.LIST_DEF.ELEM.to_bgra_u8_raw), alloc, io);
+    // Gen.Rasterize.render_msdf_using_cpu(RENDER_GRID_DEF_REGION, output_rendered_bmp_region, 1, good_result_sdf.bitmap, .new_centered_at_zero(4), 2);
+    // _ = try Root.FileFormat.Bitmap.save_bitmap_to_file("test_out/msdf_gen/triangle_sdf_1_rendered.bmp", RENDER_GRID_DEF_REGION, output_rendered_bmp_region, .{ .bits_per_pixel = .BPP_8 }, .no_conversion_needed_alpha_with_white_channels(), alloc, io);
     const result_or_err_msdf = generator.generate(.MSDF, settings_msdf, seed);
     const good_result_msdf = if (result_or_err_msdf) |r| r else |_| fail: {
         try Test.expect_no_err_union(result_or_err_msdf, "generator.generate(.MSDF, settings_msdf)", "got error when no error expected", .{});

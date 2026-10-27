@@ -215,8 +215,11 @@ pub fn DataConversion(comptime DATA_IN: type) type {
         /// Channels not used by the output will be ignored
         CONVERT_USING_FUNC: *const fn (data: DATA_IN) BGRA,
 
-        pub fn no_conversion_needed_alpha() Self {
-            return Self{ .NO_CONVERSION_NEEDED_ALPHA = {} };
+        pub fn no_conversion_needed_alpha_becomes_color_channels() Self {
+            return Self{ .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS = {} };
+        }
+        pub fn no_conversion_needed_alpha_with_white_channels() Self {
+            return Self{ .NO_CONVERSION_NEEDED_ALPHA_WITH_WHITE_CHANNELS = {} };
         }
         pub fn no_conversion_needed_bgr() Self {
             return Self{ .NO_CONVERSION_NEEDED_BGR = {} };
@@ -285,19 +288,19 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     var pixel_row_byte_width: u32 = undefined;
     var pixel_data_offset: u32 = undefined;
     if (settings.bits_per_pixel.raw() <= 8) {
-        const idx_width_naive = data_grid.width / pixels_per_advance;
-        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < data_grid.width) @as(u32, 1) else @as(u32, 0));
-        const idx_height = data_grid.height;
-        index_map = IDX_GRID.allocate_new(idx_width, idx_height, null, index_map_alloc);
+        const idx_width_naive = data_grid.get_width() / pixels_per_advance;
+        const idx_width = idx_width_naive + (if ((idx_width_naive * pixels_per_advance) < data_grid.get_width()) @as(u32, 1) else @as(u32, 0));
+        const idx_height = data_grid.get_height();
+        index_map = IDX_GRID.allocate_new(.new(idx_width, idx_height), null, index_map_alloc);
         var index_pixel_bit: u8 = 0;
         var curr_index_pixel: u8 = 0;
         var y: u32 = 0;
         var px: u32 = 0;
         var ix: u32 = 0;
-        while (y < data_grid.height) : (y += 1) {
+        while (y < data_grid.get_height()) : (y += 1) {
             px = 0;
             ix = 0;
-            while (px < data_grid.width) : (px += 1) {
+            while (px < data_grid.get_width()) : (px += 1) {
                 const cell = data_grid.get_cell_with_origin(.BOT_LEFT, px, y);
                 const bgra: BGRA = switch (data_conversion) {
                     .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS => make: {
@@ -345,16 +348,16 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
         }
         size += color_palette_list.get_len() * 4;
         pixel_data_offset = size;
-        pixel_row_byte_width = index_map.width;
+        pixel_row_byte_width = index_map.get_width();
     } else {
         pixel_data_offset = size;
-        const whole_advances_per_width = data_grid.width / pixels_per_advance;
-        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < data_grid.width) @as(u32, 1) else @as(u32, 0));
+        const whole_advances_per_width = data_grid.get_width() / pixels_per_advance;
+        const total_advances_per_width = whole_advances_per_width + (if ((whole_advances_per_width * pixels_per_advance) < data_grid.get_width()) @as(u32, 1) else @as(u32, 0));
         pixel_row_byte_width = total_advances_per_width * bytes_per_advance;
     }
     const row_stride_byte_width = std.mem.alignForward(u32, pixel_row_byte_width, 4);
     const gap_after_row = row_stride_byte_width - pixel_row_byte_width;
-    const total_pixel_data_length = row_stride_byte_width * data_grid.height;
+    const total_pixel_data_length = row_stride_byte_width * data_grid.get_height();
     size += total_pixel_data_length;
     // Core header
     try writer.writeByte('B'); //0x00
@@ -367,8 +370,8 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     try writer.writeInt(u32, pixel_data_offset, .little); //0x0A
     // DIB V5 header
     try writer.writeInt(u32, BMP_DIB_HEADER_V5_SIZE, .little); //0x0E
-    try writer.writeInt(u32, data_grid.width, .little); //0x12
-    try writer.writeInt(u32, data_grid.height, .little); //0x16
+    try writer.writeInt(u32, data_grid.get_width(), .little); //0x12
+    try writer.writeInt(u32, data_grid.get_height(), .little); //0x16
     try writer.writeInt(u16, settings.color_planes, .little); //0x1A
     try writer.writeInt(u16, settings.bits_per_pixel.raw(), .little); //0x1C
     try writer.writeInt(u32, @backingInt(settings.compression), .little); //0x1E
@@ -423,8 +426,8 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     // Pixel Data
     if (settings.bits_per_pixel.raw() <= 8) {
         var y: u32 = 0;
-        while (y < index_map.height) : (y += 1) {
-            const row = index_map.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, index_map.width).zig_slice_entire();
+        while (y < index_map.get_height()) : (y += 1) {
+            const row = index_map.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, index_map.get_width()).zig_slice_entire();
             const row_bytes = std.mem.sliceAsBytes(row);
             _ = try writer.write(row_bytes);
             _ = try writer.write(PAD_BYTES[0..gap_after_row]);
@@ -432,10 +435,10 @@ pub fn write_bitmap_datagrid_to_writer(writer: *std.Io.Writer, comptime GRID_DEF
     } else {
         var y: u32 = 0;
         var x: u32 = undefined;
-        while (y < data_grid.height) : (y += 1) {
+        while (y < data_grid.get_height()) : (y += 1) {
             x = 0;
-            const row: []GRID_DEF.LIST_DEF.ELEM = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) data_grid.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, data_grid.width).zig_slice_entire() else undefined;
-            while (x < data_grid.width) : (x += 1) {
+            const row: []GRID_DEF.LIST_DEF.ELEM = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) data_grid.get_h_scanline_with_origin(.BOT_LEFT, 0, y, .LEFT_TO_RIGHT, data_grid.get_width()).zig_slice_entire() else undefined;
+            while (x < data_grid.get_width()) : (x += 1) {
                 const cell = if (GRID_DEF.ROW_COLUMN_ORDER == .ROW_MAJOR and GRID_DEF.X_ORDER == .LEFT_TO_RIGHT) row[x] else data_grid.get_cell_with_origin(.BOT_LEFT, x, y);
                 switch (settings.bits_per_pixel) {
                     .BPP_32 => {

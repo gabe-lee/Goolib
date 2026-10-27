@@ -93,7 +93,7 @@ pub fn LinearBezier(comptime T: type) type {
             return self.p[1];
         }
 
-        pub fn interp_point(self: Self, percent: anytype) Point {
+        pub fn interp_point(self: Self, percent: T) Point {
             return Vector.lerp(self.p[0], self.p[1], percent);
         }
 
@@ -135,8 +135,8 @@ pub fn LinearBezier(comptime T: type) type {
             const point_to_start_delta_cross_line_delta = point_to_start_delta.cross(line_delta);
             const point_delta_seg_delta_cross_sign = MathX.sign_nonzero(point_to_start_delta_cross_line_delta);
             const dist = point_delta_seg_delta_cross_sign * point_to_nearest_endpoint_distance;
-            const line_normal = line_delta.normalize();
-            const point_to_nearest_endpoint_normal = point_to_nearest_endpoint_delta.normalize_using_length(point_to_nearest_endpoint_distance);
+            const line_normal = line_delta.normalize_may_be_zero(.NORM_ZERO_IS_LAST_COMPONENT_1);
+            const point_to_nearest_endpoint_normal = point_to_nearest_endpoint_delta.normalize_may_be_zero_with_length(point_to_nearest_endpoint_distance, .NORM_ZERO_IS_LAST_COMPONENT_1);
             const dot = @abs(line_normal.dot(point_to_nearest_endpoint_normal));
             return SignedDistanceWithPercent(T).new(dist, dot, percent);
         }
@@ -235,7 +235,7 @@ pub fn QuadraticBezier(comptime T: type) type {
             };
         }
 
-        pub fn interp_point(self: Self, percent: anytype) Point {
+        pub fn interp_point(self: Self, percent: T) Point {
             return Vector.quadratic_interp(self.p[0], self.p[1], self.p[2], percent);
         }
 
@@ -247,7 +247,7 @@ pub fn QuadraticBezier(comptime T: type) type {
             return self.p[2].subtract(self.p[0]);
         }
 
-        pub fn tangent_at_interp(self: Self, percent: anytype) Vector {
+        pub fn tangent_at_interp(self: Self, percent: T) Vector {
             const dir_2_1 = self.p[1].subtract(self.p[0]);
             const dir_3_2 = self.p[2].subtract(self.p[1]);
             const tangent = dir_2_1.lerp(dir_3_2, percent);
@@ -257,7 +257,7 @@ pub fn QuadraticBezier(comptime T: type) type {
             return tangent;
         }
 
-        pub fn tangent_change_at_interp(self: Self, percent: anytype) Vector {
+        pub fn tangent_change_at_interp(self: Self, percent: T) Vector {
             _ = percent;
             return (self.p[2].subtract(self.p[1])).subtract(self.p[1].subtract(self.p[0]));
         }
@@ -672,29 +672,33 @@ pub fn CubicBezier(comptime T: type) type {
                 }
             }
             const STEP = @as(T, 1) / @as(T, @floatFromInt(precision));
-            for (0..precision) |i| {
+            // Note: `precision` is used for both the number of search starts and the
+            // number of Newton refinement steps, mirroring MSDFGEN_CUBIC_SEARCH_STARTS/STEPS.
+            for (0..precision + 1) |i| {
                 var t = STEP * @as(T, @floatFromInt(i));
-                const t_squared = t * t;
-                const t_cubed = t_squared * t;
-                const t_3 = t * 3;
-                const t_6 = t_3 * 2;
-                const t_squared_3 = t_squared * 3;
-                var point_to_current_interp_point_delta = point_to_start_delta.add_scale(segment_1_delta, t_3).add_scale(segment_d1_d2_delta, t_squared_3).add_scale(segment_dd12_dd23_delta, t_cubed);
-                var calc_delta_1 = segment_1_delta.scale(3).add_scale(segment_d1_d2_delta, t_6).add_scale(segment_dd12_dd23_delta, t_squared_3);
-                var calc_delta_2 = segment_d1_d2_delta.scale(6).add_scale(segment_dd12_dd23_delta, t_6);
+                var t_squared = t * t;
+                var t_cubed = t_squared * t;
+                var point_to_current_interp_point_delta = point_to_start_delta.add_scale(segment_1_delta, t * 3).add_scale(segment_d1_d2_delta, t_squared * 3).add_scale(segment_dd12_dd23_delta, t_cubed);
+                var calc_delta_1 = segment_1_delta.scale(3).add_scale(segment_d1_d2_delta, t * 6).add_scale(segment_dd12_dd23_delta, t_squared * 3);
+                var calc_delta_2 = segment_d1_d2_delta.scale(6).add_scale(segment_dd12_dd23_delta, t * 6);
                 var better_min_dist_percent = t - (point_to_current_interp_point_delta.dot(calc_delta_1) / (calc_delta_1.dot_self() + point_to_current_interp_point_delta.dot(calc_delta_2)));
                 if (better_min_dist_percent > 0 and better_min_dist_percent < 1) {
                     var remaining_steps: usize = precision;
-                    while (better_min_dist_percent > 0 and better_min_dist_percent < 1) {
+                    while (true) {
                         t = better_min_dist_percent;
-                        point_to_current_interp_point_delta = point_to_start_delta.add_scale(segment_1_delta, t_3).add_scale(segment_d1_d2_delta, t_squared_3).add_scale(segment_dd12_dd23_delta, t_cubed);
-                        calc_delta_1 = segment_1_delta.scale(3).add_scale(segment_d1_d2_delta, t_6).add_scale(segment_dd12_dd23_delta, t_squared_3);
-                        if (remaining_steps <= 0) {
+                        t_squared = t * t;
+                        t_cubed = t_squared * t;
+                        point_to_current_interp_point_delta = point_to_start_delta.add_scale(segment_1_delta, t * 3).add_scale(segment_d1_d2_delta, t_squared * 3).add_scale(segment_dd12_dd23_delta, t_cubed);
+                        calc_delta_1 = segment_1_delta.scale(3).add_scale(segment_d1_d2_delta, t * 6).add_scale(segment_dd12_dd23_delta, t_squared * 3);
+                        remaining_steps -= 1;
+                        if (remaining_steps == 0) {
                             break;
                         }
-                        remaining_steps -= 1;
-                        calc_delta_2 = segment_d1_d2_delta.scale(6).add_scale(segment_dd12_dd23_delta, t_6);
+                        calc_delta_2 = segment_d1_d2_delta.scale(6).add_scale(segment_dd12_dd23_delta, t * 6);
                         better_min_dist_percent = t - (point_to_current_interp_point_delta.dot(calc_delta_1) / (calc_delta_1.dot_self() + point_to_current_interp_point_delta.dot(calc_delta_2)));
+                        if (!(better_min_dist_percent > 0 and better_min_dist_percent < 1)) {
+                            break;
+                        }
                     }
                     const point_to_current_interp_point_distance = point_to_current_interp_point_delta.length();
                     if (point_to_current_interp_point_distance < @abs(min_distance)) {
@@ -702,18 +706,17 @@ pub fn CubicBezier(comptime T: type) type {
                         percent = t;
                     }
                 }
-                if (percent >= 0 and percent <= 1) {
-                    return SignedDistanceWithPercent(T).new(min_distance, 0, percent);
-                }
-                if (percent < 0.5) {
-                    // percent < 0
-                    return SignedDistanceWithPercent(T).new(min_distance, @abs(start_tangent.normalize().dot(point_to_start_delta.normalize_using_length(point_to_start_delta_length))), percent);
-                } else {
-                    // percent > 1
-                    return SignedDistanceWithPercent(T).new(min_distance, @abs(end_tangent.normalize().dot(point_to_end_delta.normalize_using_length(point_to_end_delta_length))), percent);
-                }
             }
-            unreachable;
+            if (percent >= 0 and percent <= 1) {
+                return SignedDistanceWithPercent(T).new(min_distance, 0, percent);
+            }
+            if (percent < 0.5) {
+                // percent < 0
+                return SignedDistanceWithPercent(T).new(min_distance, @abs(start_tangent.normalize().dot(point_to_start_delta.normalize_using_length(point_to_start_delta_length))), percent);
+            } else {
+                // percent > 1
+                return SignedDistanceWithPercent(T).new(min_distance, @abs(end_tangent.normalize().dot(point_to_end_delta.normalize_using_length(point_to_end_delta_length))), percent);
+            }
         }
         pub fn reverse(self: *Self) void {
             const tmp_1 = self.p[3];
@@ -760,8 +763,7 @@ pub fn CubicBezier(comptime T: type) type {
                 var solutions = MathX.solve_cubic_polynomial_for_zeros_advanced(segment_12d_23d_diff.y, 3 * segment_12_diff.y, 3 * segment_1.y, self.p[0].y - y_value, double_root_estimate, quadratic_estimate, linear_estimate);
                 solutions.sort_by_val_small_to_large();
                 var i: usize = 0;
-                while (i < solutions.count and result.count < 3) {
-                    i += 1;
+                while (i < solutions.count and result.count < 3) : (i += 1) {
                     const percent = solutions.vals[i];
                     const percent_squared = percent * percent;
                     const percent_cubed = percent_squared * percent;

@@ -61,6 +61,9 @@ const Shape = ShapeModule.Shape;
 const ScanlineRasterizer = ShapeModule.ScanlineRasterizer;
 const CellAccumulatorRasterizer = ShapeModule.ASCA_Rasterizer;
 const Vec = Vec2.define_vec2_type(f32);
+
+const DEBUG_VAL = Root.Utils.DebugPrint.debug_val;
+
 pub const TEST_TRI_OUTER = [3]Vec2.define_vec2_type(f32){
     Vec.new(2, 2),
     Vec.new(27, 52),
@@ -153,7 +156,7 @@ test "Shape -> Scanline Rasterized Triangle" {
     const Raster = ScanlineRasterizer(f32, EdgeColor, .WHITE, i8, OUT_DEF);
     var raster = Raster.init_with_intersection_capacity(8, alloc);
     defer raster.free(alloc);
-    var output_grid = OUT_GRID.allocate_new(54, 54, 0, alloc);
+    var output_grid = OUT_GRID.allocate_new(.new(54, 54), 0, alloc);
     defer output_grid.free(alloc);
     var inner: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
     var outer: [3]EdgeWithUserdata(f32, EdgeColor, .WHITE) = undefined;
@@ -185,7 +188,7 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
         .Y_ORDER = .TOP_TO_BOTTOM,
     };
     const OUT_GRID = DataGrid(OUT_DEF);
-    var output_grid = OUT_GRID.allocate_new(54, 54, 0, alloc);
+    var output_grid = OUT_GRID.allocate_new(.new(56, 56), 0, alloc);
     defer output_grid.free(alloc);
 
     var inner: [3]EdgeWithUserdata(f32, void, {}) = undefined;
@@ -202,18 +205,14 @@ test "Shape -> Analytical Cell/Span Accumulator Rasterized Triangle" {
     var raster = Rasterizer.init_empty(alloc);
     defer raster.free();
 
-    raster.clear_and_resize(output_grid.width, output_grid.height, null);
-
+    raster.clear_and_realloc(output_grid.get_width() - 4, output_grid.get_height() - 4);
     const opts = RasterOpts{
         .tolerance = 0.1,
         .fill_rule = .EVEN_ODD,
     };
-    // Accumulate all contour edges
-    raster.rasterize_shape(triangle, opts);
 
-    _ = try raster.write_to_grid(OUT_DEF, .existing_data_grid(.{ .data_grid = output_grid }, 0), 0, 255, opts);
+    _ = try raster.rasterize_shape_to_grid(triangle, opts, OUT_DEF, .existing_region(output_grid.get_entire_region(), 0), 0, 255);
 
-    // Save to file or inspect
     const io = std.testing.io;
     try std.Io.Dir.cwd().createDirPath(io, "test_out/shape");
     _ = try Root.FileFormat.Bitmap.save_bitmap_to_file(
