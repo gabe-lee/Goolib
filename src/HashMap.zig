@@ -24,9 +24,11 @@ const build = @import("builtin");
 
 pub const SwissTableHashMapModule = @import("./HashMap_SwissTable.zig");
 pub const SwissTableHashMap = SwissTableHashMapModule.SwissHashMap;
+pub const HashAdapters = @import("./HashMap_HashAdapters.zig");
 
 comptime {
     if (build.is_test) {
         _ = @import("./HashMap_Tests.zig");
+        _ = @import("./HashMap_HashAdapters.zig");
     }
 }

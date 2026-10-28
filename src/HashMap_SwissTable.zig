@@ -88,6 +88,8 @@ fn BackingList(comptime KEY: type, comptime VAL: type) type {
     return ListFullDefinition(BackingListSlot(KEY, VAL), u64, .SPLIT_FIELDS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
 }
 
+pub const DefaultHash = std.hash.Wyhash;
+
 const GetMode = enum {
     VAL,
     PTR,
