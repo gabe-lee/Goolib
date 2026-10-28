@@ -118,13 +118,32 @@ const OptMode = enum {
 };
 
 pub const Overrides = struct {
-    OVERRIDE_MAX_LOAD_PERCENT: ?MaxLoadRational = null,
+    OVERRIDE_MAX_LOAD_PERCENT: ?MaxLoad = null,
     OVERRIDE_SIMD_LANE_COUNT: ?comptime_int = null,
 };
 
 pub const MaxLoadRational = struct {
     numerator: comptime_int,
     denominator: comptime_int,
+};
+
+pub const MaxLoad = union(enum) {
+    RATIONAL: MaxLoadRational,
+    BIT_SHIFT: comptime_int,
+
+    pub fn fraction(comptime numerator: comptime_int, comptime denominator: comptime_int) MaxLoad {
+        return MaxLoad{ .RATIONAL = .{ .numerator = numerator, .denominator = denominator } };
+    }
+    pub fn bit_shift(comptime shift: comptime_int) MaxLoad {
+        return MaxLoad{ .BIT_SHIFT = shift };
+    }
+
+    pub fn calc(comptime self: MaxLoad, val: anytype) @TypeOf(val) {
+        return switch (comptime self) {
+            .RATIONAL => |frac| (val * frac.numerator) / frac.denominator,
+            .BIT_SHIFT => |shift| val - (val >> shift),
+        };
+    }
 };
 const CellState = enum(u8) {
     EMPTY = 0b10000000,
@@ -168,7 +187,14 @@ pub fn SwissHashMap(
     comptime OVERRIDES: Overrides,
 ) type {
     if (comptime OVERRIDES.OVERRIDE_MAX_LOAD_PERCENT) |MAX| {
-        assert_with_reason(MAX.denominator > 0 and MAX.numerator > 0 and MAX.numerator <= MAX.denominator, @src(), "when overloading the max load values, `denominator` must be greater than 0, `numerator` must be greater than 0, and `numerator` must be <= `denominator`, got `{d}/{d}`", .{ MAX.numerator, MAX.denominator });
+        switch (MAX) {
+            .RATIONAL => |frac| {
+                assert_with_reason(frac.denominator > 0 and frac.numerator > 0 and frac.numerator <= frac.denominator, @src(), "when overriding the max-load values, `denominator` and `numerator` must be greater than 0, and `numerator` must be <= `denominator`, got `{d}/{d}`", .{ frac.numerator, frac.denominator });
+            },
+            .BIT_SHIFT => |shift| {
+                assert_with_reason(shift > 0, @src(), "when overriding the max-load values, `shift` must be greater than 0, got `{d}`", .{shift});
+            },
+        }
     }
     return struct {
         const Self = @This();
@@ -193,10 +219,7 @@ pub fn SwissHashMap(
             out += 1;
             break :round_pow_2 out;
         } else std.simd.suggestVectorLength(u8) orelse 1));
-        pub const MAX_LOAD = if (OVERRIDES.OVERRIDE_MAX_LOAD_PERCENT) |MAX| MAX else MaxLoadRational{
-            .numerator = 14,
-            .denominator = 16,
-        };
+        const MAX_LOAD: MaxLoad = if (OVERRIDES.OVERRIDE_MAX_LOAD_PERCENT) |MAX| MAX else MaxLoad.bit_shift(3);
         const StateVector = @Vector(SIMD_SIZE, u8);
         const BoolVector = @Vector(SIMD_SIZE, bool);
         const EMPTY_STATE_VECTOR: StateVector = @splat(@backingInt(CellState.EMPTY));
@@ -429,7 +452,7 @@ pub fn SwissHashMap(
 
         fn grow_internal(self: *Self, min_slots: u64, alloc: Allocator) void {
             var new_cap: u64 = pow2_ceil(@max(SIMD_SIZE, self.cap << 1));
-            while ((new_cap * MAX_LOAD.numerator) / MAX_LOAD.denominator <= min_slots) {
+            while (MAX_LOAD.calc(new_cap) <= min_slots) {
                 new_cap <<= 1;
             }
             const new_state_cap = new_cap + SIMD_SIZE;
@@ -578,7 +601,7 @@ pub fn SwissHashMap(
         }
         pub fn insert_key_hash_parts_get_idx(self: *Self, key: KEY, key_hash_parts: HashParts, alloc: Allocator) u64 {
             const len_plus_dead_plus_one = self.len + self.dead + 1;
-            if (len_plus_dead_plus_one >= ((self.cap * MAX_LOAD.numerator) / MAX_LOAD.denominator)) {
+            if (len_plus_dead_plus_one >= MAX_LOAD.calc(self.cap)) {
                 self.grow_internal(len_plus_dead_plus_one, alloc);
             }
             return self.insert_key_hash_parts_get_idx_assume_cap(key, key_hash_parts);

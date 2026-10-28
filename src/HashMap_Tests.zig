@@ -45,7 +45,7 @@ const Map = SwissTable.SwissHashMap(i32, i32, hash_i32, equal_i32, .{});
 const MapScalar = SwissTable.SwissHashMap(i32, i32, hash_i32, equal_i32, .{ .OVERRIDE_SIMD_LANE_COUNT = 1 });
 const MapColliding = SwissTable.SwissHashMap(i32, i32, hash_zero, equal_i32, .{});
 const MapHalfLoad = SwissTable.SwissHashMap(i32, i32, hash_i32, equal_i32, .{
-    .OVERRIDE_MAX_LOAD_PERCENT = .{ .numerator = 1, .denominator = 2 },
+    .OVERRIDE_MAX_LOAD_PERCENT = .fraction(1, 2),
 });
 
 fn testInsertContainsGet(comptime M: type) !void {
