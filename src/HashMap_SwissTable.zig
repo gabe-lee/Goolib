@@ -302,8 +302,13 @@ pub fn SwissHashMap(
         pub inline fn contains(self: Self, key: KEY) bool {
             return self.contains_hash(key, HASH(key));
         }
-        fn get_internal(self: Self, key: KEY, key_hash_parts: HashParts, comptime MODE: GetMode, comptime OPT: OptMode) MODE.Type(VAL, OPT) {
-            assert_with_reason(self.cap > 0, @src(), "hash map contains 0 items, nothing to get", .{});
+        fn get_internal(self: Self, key: KEY, key_hash_parts: HashParts, comptime MODE: GetMode, comptime OPT: OptMode) MODE.Type(OPT, VAL) {
+            if (self.cap == 0) {
+                switch (comptime OPT) {
+                    .MUST_EXIST => assert_unreachable(@src(), "hash map contains 0 items, nothing to get", .{}),
+                    .OPTIONAL => return null,
+                }
+            }
             if (comptime SIMD_SIZE > 1) {
                 var index: u64 = key_hash_parts.code & self.mask;
                 const key_state_vec: StateVector = @splat(key_hash_parts.state.raw());
@@ -341,7 +346,7 @@ pub fn SwissHashMap(
                 while (true) {
                     const stored_state = self.state_list[index];
                     if (stored_state == key_hash_parts.state) {
-                        if (KEYS_EQUAL(key, self.keys_list[index])) switch (comptime MODE) {
+                        if (KEYS_EQUAL(key, self.keys_list[index])) return switch (comptime MODE) {
                             .VAL => self.val_list[index],
                             .PTR => &self.val_list[index],
                             .PTR_CONST => &self.val_list[index],

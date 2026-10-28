@@ -262,3 +262,131 @@ test "SwissHashMap -> miscellaneous public API" {
     try std.testing.expect(map.delete_key_report_existed(12));
     try std.testing.expect(!map.delete_key_report_existed(9999));
 }
+
+fn testGetters(comptime M: type) !void {
+    const alloc = std.testing.allocator;
+    var map: M = .{};
+    defer map.deinit(alloc);
+
+    // Optional getters report absence on a completely empty map.
+    try std.testing.expectEqual(@as(?i32, null), map.get_if_exists(0));
+    try std.testing.expectEqual(@as(?i32, null), map.get_if_exists_key_hash(0, M.hash(0)));
+    try std.testing.expectEqual(@as(?i32, null), map.get_if_exists_key_hash_parts(0, M.hash_parts(0)));
+    try std.testing.expectEqual(@as(?*i32, null), map.get_ptr_if_exists(0));
+    try std.testing.expectEqual(@as(?*i32, null), map.get_ptr_if_exists_key_hash(0, M.hash(0)));
+    try std.testing.expectEqual(@as(?*i32, null), map.get_ptr_if_exists_key_hash_parts(0, M.hash_parts(0)));
+    try std.testing.expectEqual(@as(?*const i32, null), map.get_ptr_const_if_exists(0));
+    try std.testing.expectEqual(@as(?*const i32, null), map.get_ptr_const_if_exists_key_hash(0, M.hash(0)));
+    try std.testing.expectEqual(@as(?*const i32, null), map.get_ptr_const_if_exists_key_hash_parts(0, M.hash_parts(0)));
+
+    for (0..300) |i| {
+        const key: i32 = @intCast(i);
+        map.insert(key, key * 3, alloc);
+    }
+
+    // Every getter variant agrees on keys that are present.
+    for (0..300) |i| {
+        const key: i32 = @intCast(i);
+        const expected: i32 = key * 3;
+
+        try std.testing.expectEqual(expected, map.get(key));
+        try std.testing.expectEqual(expected, map.get_key_hash(key, M.hash(key)));
+        try std.testing.expectEqual(expected, map.get_key_hash_parts(key, M.hash_parts(key)));
+
+        try std.testing.expectEqual(@as(?i32, expected), map.get_if_exists(key));
+        try std.testing.expectEqual(@as(?i32, expected), map.get_if_exists_key_hash(key, M.hash(key)));
+        try std.testing.expectEqual(@as(?i32, expected), map.get_if_exists_key_hash_parts(key, M.hash_parts(key)));
+
+        try std.testing.expectEqual(expected, map.get_ptr(key).*);
+        try std.testing.expectEqual(expected, map.get_ptr_key_hash(key, M.hash(key)).*);
+        try std.testing.expectEqual(expected, map.get_ptr_key_hash_parts(key, M.hash_parts(key)).*);
+
+        try std.testing.expectEqual(@as(?*i32, map.get_ptr(key)), map.get_ptr_if_exists(key));
+        try std.testing.expectEqual(@as(?*i32, map.get_ptr_key_hash(key, M.hash(key))), map.get_ptr_if_exists_key_hash(key, M.hash(key)));
+        try std.testing.expectEqual(@as(?*i32, map.get_ptr_key_hash_parts(key, M.hash_parts(key))), map.get_ptr_if_exists_key_hash_parts(key, M.hash_parts(key)));
+
+        try std.testing.expectEqual(expected, map.get_ptr_const(key).*);
+        try std.testing.expectEqual(expected, map.get_ptr_const_key_hash(key, M.hash(key)).*);
+        try std.testing.expectEqual(expected, map.get_ptr_const_key_hash_parts(key, M.hash_parts(key)).*);
+
+        try std.testing.expectEqual(@as(?*const i32, map.get_ptr_const(key)), map.get_ptr_const_if_exists(key));
+        try std.testing.expectEqual(@as(?*const i32, map.get_ptr_const_key_hash(key, M.hash(key))), map.get_ptr_const_if_exists_key_hash(key, M.hash(key)));
+        try std.testing.expectEqual(@as(?*const i32, map.get_ptr_const_key_hash_parts(key, M.hash_parts(key))), map.get_ptr_const_if_exists_key_hash_parts(key, M.hash_parts(key)));
+    }
+
+    // The returned pointer is the slot the key actually lives in.
+    for ([_]i32{ 0, 7, 150, 299 }) |key| {
+        const idx = map.insert_key_get_idx(key, alloc);
+        try std.testing.expectEqual(&map.val_list[idx], map.get_ptr(key));
+        try std.testing.expectEqual(key * 3, map.val_list[idx]);
+    }
+
+    // Missing keys in a non-empty map (probe chains must end at an EMPTY cell).
+    for ([_]i32{ -1, -50, 1000, 5000, 123456 }) |key| {
+        try std.testing.expectEqual(@as(?i32, null), map.get_if_exists(key));
+        try std.testing.expectEqual(@as(?*i32, null), map.get_ptr_if_exists(key));
+        try std.testing.expectEqual(@as(?*const i32, null), map.get_ptr_const_if_exists(key));
+    }
+
+    // Overwriting through a pointer is observable through every getter.
+    map.get_ptr(42).* = -1;
+    map.get_ptr_if_exists(43).?.* = -2;
+    map.get_ptr_key_hash(44, M.hash(44)).* = -3;
+    map.get_ptr_key_hash_parts(45, M.hash_parts(45)).* = -4;
+    map.get_ptr_if_exists_key_hash(46, M.hash(46)).?.* = -5;
+    map.get_ptr_if_exists_key_hash_parts(47, M.hash_parts(47)).?.* = -6;
+    try std.testing.expectEqual(@as(i32, -1), map.get(42));
+    try std.testing.expectEqual(@as(i32, -2), map.get_if_exists(43).?);
+    try std.testing.expectEqual(@as(i32, -3), map.get_ptr(44).*);
+    try std.testing.expectEqual(@as(i32, -4), map.get_ptr_const_if_exists(45).?.*);
+    try std.testing.expectEqual(@as(i32, -5), map.get(46));
+    try std.testing.expectEqual(@as(i32, -6), map.get_ptr_const(47).*);
+
+    // Restore the original values so the tombstone checks below can compare them.
+    map.get_ptr(42).* = 42 * 3;
+    map.get_ptr(43).* = 43 * 3;
+    map.get_ptr(44).* = 44 * 3;
+    map.get_ptr(45).* = 45 * 3;
+    map.get_ptr(46).* = 46 * 3;
+    map.get_ptr(47).* = 47 * 3;
+
+    // Getters must keep probing past tombstones left by removal.
+    for (0..300) |i| {
+        if (i % 2 == 0) _ = map.remove_key_if_exists(@intCast(i));
+    }
+    try std.testing.expectEqual(@as(u64, 150), map.len);
+    for (0..300) |i| {
+        const key: i32 = @intCast(i);
+        if (i % 2 == 0) {
+            try std.testing.expectEqual(@as(?i32, null), map.get_if_exists(key));
+            try std.testing.expectEqual(@as(?*i32, null), map.get_ptr_if_exists(key));
+            try std.testing.expectEqual(@as(?*const i32, null), map.get_ptr_const_if_exists(key));
+        } else {
+            try std.testing.expectEqual(key * 3, map.get(key));
+            try std.testing.expectEqual(key * 3, map.get_ptr_const(key).*);
+            try std.testing.expectEqual(@as(?i32, key * 3), map.get_if_exists_key_hash(key, M.hash(key)));
+            try std.testing.expectEqual(@as(?i32, key * 3), map.get_if_exists_key_hash_parts(key, M.hash_parts(key)));
+        }
+    }
+
+    // Reinserting a removed key makes it visible to the getters again.
+    for (0..300) |i| {
+        if (i % 2 != 0) continue;
+        const key: i32 = @intCast(i);
+        map.insert(key, key * 5, alloc);
+        try std.testing.expectEqual(key * 5, map.get(key));
+    }
+}
+
+test "SwissHashMap -> getters (simd)" {
+    try testGetters(Map);
+    try testGetters(MapHalfLoad);
+}
+
+test "SwissHashMap -> getters (scalar)" {
+    try testGetters(MapScalar);
+}
+
+test "SwissHashMap -> getters with identical h1/h2" {
+    try testGetters(MapColliding);
+}
