@@ -64,6 +64,7 @@ pub const GenericAllocator = @import("./GenericAllocator.zig");
 pub const GenId = @import("./GenId.zig");
 pub const GetSetType = @import("./GetSetType.zig");
 pub const SerialUnion = @import("./SerialUnion.zig");
+pub const HashMap = @import("./HashMap.zig");
 pub const ImageUtils = @import("./ImageUtils.zig");
 // pub const InsertionSort = @import("./InsertionSort.zig");
 pub const Iterator = @import("./Iterator.zig");
@@ -138,6 +139,7 @@ comptime {
         _ = @import("./GenId.zig");
         _ = @import("./GetSetType.zig");
         _ = @import("./SerialUnion.zig");
+        _ = @import("./HashMap.zig");
         _ = @import("./ImageUtils.zig");
         // _ = @import("./InsertionSort.zig");
         _ = @import("./Iterator.zig");

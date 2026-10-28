@@ -763,12 +763,22 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             assert_with_reason(start <= end_exclusive and end_exclusive <= get_cap(self), @src(), "memset exceeds entire memory capacity, memset end = {d}, capacity = {d}", .{ end_exclusive, get_cap(self) });
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    @memset(zig_slice_entire(self), val);
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            @memset(zig_slice_entire(self), val);
+                        },
+                    }
                 },
                 .SPLIT_FIELDS => {
-                    inline for (ORDERED_FIELD_NAMES[0..], 0..) |name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx)[start..end_exclusive];
-                        @memset(field_slice, @field(val, name));
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const tstart = true_idx(self, start);
+                            const tend = true_idx(self, end_exclusive);
+                            inline for (ORDERED_FIELD_NAMES[0..], 0..) |name, fidx| {
+                                const field_slice = field_slice_from_field_idx(self, fidx)[tstart.idx..tend.idx];
+                                @memset(field_slice, @field(val, name));
+                            }
+                        },
                     }
                 },
             }
@@ -778,6 +788,35 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub fn memset_cap(self: List, val: ELEM) void {
             self.memset_range(val, 0, get_cap(self));
+        }
+        pub fn memset_field_range(self: List, comptime field: Field, val: FieldType(field), start: IDX, end_exclusive: IDX) void {
+            assert_mutable(@src());
+            assert_with_reason(start <= end_exclusive and end_exclusive <= get_cap(self), @src(), "memset exceeds entire memory capacity, memset end = {d}, capacity = {d}", .{ end_exclusive, get_cap(self) });
+            switch (comptime FIELD_LAYOUT) {
+                .WHOLE_STRUCTS => {
+                    var i = start;
+                    while (i < end_exclusive) : (i += 1) {
+                        self.set_field(field, i, val);
+                    }
+                },
+                .SPLIT_FIELDS => {
+                    switch (comptime INDEX_LAYOUT) {
+                        .SERIAL_INDEXES => {
+                            const tstart = true_idx(self, start);
+                            const tend = true_idx(self, end_exclusive);
+                            const fidx: usize = @intCast(@backingInt(field));
+                            const field_slice = field_slice_from_field_idx(self, fidx)[tstart.idx..tend.idx];
+                            @memset(field_slice, val);
+                        },
+                    }
+                },
+            }
+        }
+        pub fn memset_field_len(self: List, comptime field: Field, val: ELEM) void {
+            self.memset_field_range(field, val, 0, get_len(self));
+        }
+        pub fn memset_field_cap(self: List, comptime field: Field, val: ELEM) void {
+            self.memset_field_range(field, val, 0, get_cap(self));
         }
         //****************
         // GET
@@ -1169,6 +1208,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub inline fn set_len_unchecked(self: *List, new_len: IDX) void {
             self.data_len = new_len;
+        }
+        pub inline fn set_len_to_cap(self: *List) void {
+            self.data_len = self.get_cap();
         }
         pub inline fn incr_len_unchecked(self: *List, count: IDX) void {
             self.data_len += count;
@@ -1904,6 +1946,10 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     self.root_cap = new_exact_cap;
                 },
             }
+        }
+        pub fn grow(self: *List, capacity: IDX, growth: Growth, alloc: Allocator) void {
+            const adjusted_capacity = growth.calc(capacity);
+            realloc_internal(self, adjusted_capacity, alloc, .ERRORS_ARE_UNREACHABLE);
         }
         pub fn grow_capacity_if_needed(self: *List, need_capacity: IDX, growth: Growth, alloc: Allocator) void {
             if (self.root_cap < need_capacity) {

@@ -631,6 +631,14 @@ pub fn abs_difference(a: anytype, b: @TypeOf(a)) @TypeOf(a) {
     }
 }
 
+pub fn round_up_to_multiple(val: anytype, multiple: @TypeOf(val)) @TypeOf(val) {
+    return ((val + multiple - 1) / multiple) * multiple;
+}
+
+pub fn round_up_to_multiple_pow_2(val: anytype, multiple: @TypeOf(val)) @TypeOf(val) {
+    return (val + (multiple - 1)) & ~(multiple - 1);
+}
+
 pub fn change_per_unit_time_required_to_reach_val_at_time(comptime T: type, current: T, target: T, time: T) T {
     return (target - current) * (1.0 / time);
 }

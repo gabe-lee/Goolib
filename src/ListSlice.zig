@@ -502,6 +502,15 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         pub inline fn memset_cap(self: ListSelf, val: ELEM) void {
             return IMPL.memset_cap(self, val);
         }
+        pub inline fn memset_field_range(self: ListSelf, comptime field: Field, val: FieldType(field), start: IDX, end_exclusive: IDX) void {
+            return IMPL.memset_field_range(self, field, val, start, end_exclusive);
+        }
+        pub inline fn memset_field_len(self: ListSelf, comptime field: Field, val: ELEM) void {
+            return IMPL.memset_field_len(self, field, val);
+        }
+        pub inline fn memset_field_cap(self: ListSelf, comptime field: Field, val: ELEM) void {
+            return IMPL.memset_field_cap(self, field, val);
+        }
         //****************
         // GET
         //****************
@@ -612,6 +621,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         }
         pub inline fn set_len_unchecked(self: *ListSelf, new_len: IDX) void {
             return IMPL.set_len_unchecked(self, new_len);
+        }
+        pub inline fn set_len_to_cap(self: *ListSelf) void {
+            return IMPL.set_len_to_cap(self);
         }
         pub inline fn incr_len_unchecked(self: *ListSelf, count: IDX) void {
             return IMPL.incr_len_unchecked(self, count);
@@ -842,6 +854,9 @@ pub fn ListFullDefinition(comptime ELEM: type, comptime IDX: type, comptime FIEL
         //**************
         // ALLOC/REALLOC
         //**************
+        pub inline fn grow(self: *ListSelf, capacity: IDX, growth: Growth, alloc: Allocator) void {
+            return IMPL.grow(self, capacity, growth, alloc);
+        }
         pub inline fn grow_capacity_if_needed(self: *ListSelf, need_capacity: IDX, growth: Growth, alloc: Allocator) void {
             return IMPL.grow_capacity_if_needed(self, need_capacity, growth, alloc);
         }
