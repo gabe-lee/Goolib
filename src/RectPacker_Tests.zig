@@ -28,9 +28,11 @@ const RectPacker = Root.RectPacker;
 const Vec2 = Root.Vec2;
 const Rect2 = Root.Rect2;
 
-const PackerF32 = RectPacker.RowPacker(f32, u16);
-const PackerU32 = RectPacker.RowPacker(u32, u8);
-const PackerU8 = RectPacker.RowPacker(u8, u8);
+const PackerF32 = RectPacker.RowPacker(f32, u16, .CLAIM_ONLY);
+const PackerU32 = RectPacker.RowPacker(u32, u8, .CLAIM_ONLY);
+const PackerU8 = RectPacker.RowPacker(u8, u8, .CLAIM_ONLY);
+const PackerF32Release = RectPacker.RowPacker(f32, u16, .CLAIM_AND_RELEASE);
+const PackerU32Release = RectPacker.RowPacker(u32, u8, .CLAIM_AND_RELEASE);
 
 const VecF = Vec2.define_vec2_type(f32);
 const RectF = Rect2.define_rect2_type(f32);
@@ -390,4 +392,201 @@ test "RowPacker -> claimed rects stay in bounds and do not overlap" {
         count += 1;
     }
     try std.testing.expectEqual(sizes.len, count);
+}
+
+test "RowPacker -> released rect is reused from its hole in the open row" {
+    const alloc = std.testing.allocator;
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const c = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
+    try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
+    try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 10));
+
+    packer.release_rect(b);
+    try std.testing.expectEqual(@as(u16, 2), packer.claim_count);
+
+    // The row tail is full, so the only fitting space is the released hole.
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(d.rect, RectF.new_xywh(40, 0, 40, 10));
+    try std.testing.expectEqual(@as(u16, 3), packer.claim_count);
+}
+
+test "RowPacker -> claiming a smaller rect splits a hole into reusable remainders" {
+    const alloc = std.testing.allocator;
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const c = packer.claim_rect(VecF.new(20, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 20));
+    try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 20));
+    try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 20));
+
+    packer.release_rect(b);
+
+    const d = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(d.rect, RectF.new_xywh(40, 0, 10, 10));
+
+    // The 40x20 hole was split into a 30x20 right strip and a 10x10 bottom strip.
+    const e = packer.claim_rect(VecF.new(30, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(e.rect, RectF.new_xywh(50, 0, 30, 20));
+
+    const f = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(f.rect, RectF.new_xywh(40, 10, 10, 10));
+
+    // All space in the first shelf is occupied again; the next claim starts a new row.
+    const g = packer.claim_rect(VecF.new(1, 1), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(g.rect, RectF.new_xywh(0, 20, 1, 1));
+}
+
+test "RowPacker -> holes survive when the open row becomes a constrained row" {
+    const alloc = std.testing.allocator;
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
+    try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
+    packer.release_rect(b);
+
+    // Force the open row to close; its hole must move to the constrained row.
+    const c = packer.claim_rect(VecF.new(100, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(c.rect, RectF.new_xywh(0, 10, 100, 20));
+    try std.testing.expectEqual(@as(u16, 1), c.row_idx);
+    try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
+
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(d.rect, RectF.new_xywh(40, 0, 40, 10));
+}
+
+test "RowPacker -> releasing every rect in a constrained row makes the shelf reusable" {
+    const alloc = std.testing.allocator;
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const c = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(c.rect, RectF.new_xywh(0, 10, 40, 20));
+    try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
+
+    packer.release_rect(a);
+    packer.release_rect(b);
+    try std.testing.expectEqual(@as(u16, 1), packer.claim_count);
+
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectF(d.rect, RectF.new_xywh(0, 0, 40, 10));
+}
+
+test "RowPacker -> release_aabb fills its hole" {
+    const alloc = std.testing.allocator;
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
+    try std.testing.expectEqual(@as(f32, 40), b.aabb.x_min);
+
+    packer.release_aabb(b);
+    const c = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try std.testing.expectEqual(@as(f32, 40), c.aabb.x_min);
+    try std.testing.expectEqual(@as(f32, 0), c.aabb.y_min);
+    try std.testing.expectEqual(@as(f32, 80), c.aabb.x_max);
+    try std.testing.expectEqual(@as(f32, 10), c.aabb.y_max);
+}
+
+test "RowPacker -> release works with unsigned coordinates" {
+    const alloc = std.testing.allocator;
+    var packer = PackerU32Release.init(2, RectU.new_xywh(0, 0, 100, 100), 1000, alloc);
+    defer packer.free();
+
+    const a = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectU(a.rect, RectU.new_xywh(0, 0, 40, 10));
+    try expectRectU(b.rect, RectU.new_xywh(40, 0, 40, 10));
+
+    packer.release_rect(b);
+    const c = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
+    try expectRectU(c.rect, RectU.new_xywh(40, 0, 40, 10));
+}
+
+test "RowPacker -> randomized release and reclaim invariants" {
+    const alloc = std.testing.allocator;
+    const region = RectF.new_xywh(-10, 25, 200, 150);
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE);
+    const random = prng.random();
+
+    const rotations = [_]RectPacker.RowPackerModule.RotationMode{
+        .do_not_allow_rotation(),
+        .allow_90_degree_rotation(),
+        .always_force_90_degree_rotation(),
+    };
+    const wastes = [_]RectPacker.RowPackerModule.WasteMode{
+        .ignore_waste(),
+        .least_waste(),
+    };
+    const thresholds = [_]PackerF32Release.Threshold{
+        .ignore_threshold(),
+        .default_threshold(),
+        .custom_threshold(4),
+    };
+
+    for (rotations) |rotation| {
+        for (wastes) |waste| {
+            for (thresholds) |threshold| {
+                var packer = PackerF32Release.init(0, region, 6, alloc);
+                defer packer.free();
+
+                var live: [64]PackerF32Release.RectResult = undefined;
+                var live_count: usize = 0;
+
+                for (0..300) |_| {
+                    const should_release = live_count > 0 and random.intRangeAtMost(u8, 0, 1) == 0;
+                    if (should_release) {
+                        const release_idx = random.intRangeLessThan(usize, 0, live_count);
+                        packer.release_rect(live[release_idx]);
+                        live[release_idx] = live[live_count - 1];
+                        live_count -= 1;
+                        try std.testing.expectEqual(live_count, packer.claim_count);
+                        continue;
+                    }
+
+                    const size = VecF.new(
+                        @floatFromInt(random.intRangeAtMost(u32, 1, 60)),
+                        @floatFromInt(random.intRangeAtMost(u32, 1, 40)),
+                    );
+                    const result = packer.claim_rect(size, threshold, waste, rotation) orelse continue;
+                    const rect = result.rect;
+                    try std.testing.expect(rect.pos.x >= region.pos.x);
+                    try std.testing.expect(rect.pos.y >= region.pos.y);
+                    try std.testing.expect(rect.pos.x + rect.size.x <= region.pos.x + region.size.x);
+                    try std.testing.expect(rect.pos.y + rect.size.y <= region.pos.y + region.size.y);
+                    for (live[0..live_count]) |other| {
+                        try std.testing.expect(!strictlyOverlaps(rect, other.rect));
+                    }
+
+                    if (live_count == live.len) {
+                        packer.release_rect(result);
+                    } else {
+                        live[live_count] = result;
+                        live_count += 1;
+                    }
+                    try std.testing.expectEqual(live_count, packer.claim_count);
+                }
+
+                while (live_count > 0) {
+                    live_count -= 1;
+                    packer.release_rect(live[live_count]);
+                }
+                try std.testing.expectEqual(@as(u16, 0), packer.claim_count);
+            }
+        }
+    }
 }
