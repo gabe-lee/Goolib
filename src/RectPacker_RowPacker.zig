@@ -23,15 +23,21 @@
 
 const std = @import("std");
 const build = @import("builtin");
+const math = std.math;
 
 const Root = @import("./_root.zig");
 const MathX = Root.Math;
 const ListFull = Root.ListSlice.ListFullDefinition;
+const Pool = Root.Pool.Pool;
 const AABB2 = Root.AABB2;
 const Rect2 = Root.Rect2;
 const Vec2 = Root.Vec2;
 const Allocator = std.mem.Allocator;
 const DummyAlloc = Root.DummyAllocator;
+const Assert = Root.Assert;
+
+const assert_with_reason = Assert.assert_with_reason;
+const assert_unreachable = Assert.assert_unreachable;
 
 comptime {
     if (build.is_test) {
@@ -39,7 +45,10 @@ comptime {
     }
 }
 
-pub const FINAL_PASS_CREATE_NEW_ROW_THRESHOLD_MULTIPLIER = 2;
+const ReleaseMode = enum {
+    CLAIM_ONLY,
+    CLAIM_AND_RELEASE,
+};
 
 /// Packs rectangles into horizontal rows (shelves), filling each row from left to
 /// right and starting a new row below the previous one.
@@ -57,20 +66,28 @@ pub const FINAL_PASS_CREATE_NEW_ROW_THRESHOLD_MULTIPLIER = 2;
 /// Only completely unused space is tracked. Individual rect eviction is not
 /// supported, but all state (other than allocation capacity) can be reused after
 /// calling `reset`.
-pub fn RowPacker(comptime T: type, comptime IDX: type) type {
+pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: ReleaseMode) type {
     return struct {
         const Self = @This();
         const AABB = AABB2.define_aabb2_type(T);
         const Rect = Rect2.define_rect2_type(T);
         const Vec = Vec2.define_vec2_type(T);
         const RowList = ListFull(ConstrainedRow, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
-        /// Sentinel used for `min_height` before a row has claimed any rects.
-        /// Using the max value (instead of a region size) keeps the threshold
-        /// arithmetic valid for unsigned integer component types.
+        const CAN_RELEASE = RELEASE_MODE == .CLAIM_AND_RELEASE;
+        const HolePool = Pool(.{
+            .LIST_DEF = .{
+                .ELEM = Hole,
+                .FIELD_LAYOUT = .WHOLE_STRUCTS,
+                .IDX = IDX,
+                .INDEX_LAYOUT = .SERIAL_INDEXES,
+                .OWNERSHIP = .OWNED_ALLOCATED,
+            },
+            .BLOCK_SIZE = 64,
+            .THREADING = .SINGLE_THREADED,
+        }, Hole{});
         const MAX_HEIGHT: T = MathX.max_value(T);
+        const INVALID_IDX = math.maxInt(IDX);
 
-        /// Doubles a threshold, saturating for integer component types so values
-        /// near `MAX_HEIGHT` cannot overflow in the final-pass heuristic.
         inline fn doubled_threshold(value: T) T {
             return switch (@typeInfo(T)) {
                 .int => value *| 2,
@@ -81,11 +98,16 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
 
         alloc: Allocator = DummyAlloc.allocator_panic,
         constrained_rows: RowList = .{},
+        holes_pool: if (CAN_RELEASE) HolePool else void = if (CAN_RELEASE) .{} else {},
         unconstrained_row: UnconstrainedRow = .{},
         full_region: Rect = .{ .pos = .{}, .size = .{} },
         default_height_fit_threshold: T = 0,
         total_wasted_area: T = 0,
         claim_count: IDX = 0,
+
+        fn assert_can_release(src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(CAN_RELEASE, src, "cannot release rects when packer defined as .CLAIM_ONLY", .{});
+        }
 
         pub fn init(cap: usize, region: Rect, default_height_fit_threshold: T, alloc: Allocator) Self {
             return Self{
@@ -96,6 +118,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                 .default_height_fit_threshold = default_height_fit_threshold,
                 .total_wasted_area = 0,
                 .claim_count = 0,
+                .holes_pool = .init_empty(alloc),
             };
         }
 
@@ -104,10 +127,12 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             self.unconstrained_row = UnconstrainedRow.init(self.full_region);
             self.total_wasted_area = 0;
             self.claim_count = 0;
+            self.holes_pool.clear_retain_blocks();
         }
 
         pub fn free(self: *Self) void {
             self.constrained_rows.free_if_non_zero(self.alloc);
+            self.holes_pool.clear_and_free_blocks();
             self.* = .{};
         }
 
@@ -133,9 +158,9 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`rect.size.x == size.y` AND `rect.size.y == size.x`)
-        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?RectWithRotation {
+        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?RectResult {
             if (self.claim_position(size, threshold, waste, rotation)) |pos_with_rot| {
-                return RectWithRotation{
+                return RectResult{
                     .rect = if (pos_with_rot.is_rotated) Rect{
                         .pos = pos_with_rot.pos,
                         .size = size.flip_components(),
@@ -146,7 +171,10 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                     .is_rotated = pos_with_rot.is_rotated,
                 };
             }
-            return null;
+            if (self.next_packer == null) {
+                return null;
+            }
+            return self.next_packer.?.claim_rect(size, threshold, waste, rotation);
         }
 
         /// Same as `claim_position()`, but it automatically builds an `AABB` from the returned position
@@ -155,9 +183,9 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`(aabb.x_max - aabb.x_min) == size.y` AND `(aabb.y_max - aabb.y_min) == size.x`)
-        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?AABB_WithRotation {
+        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?AABB_Result {
             if (self.claim_position(size, threshold, waste, rotation)) |pos_with_rot| {
-                return AABB_WithRotation{
+                return AABB_Result{
                     .aabb = if (pos_with_rot.is_rotated) AABB{
                         .x_min = pos_with_rot.pos.x,
                         .y_min = pos_with_rot.pos.y,
@@ -175,17 +203,8 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             return null;
         }
 
-        /// The returned `Vec`, if not null, is the minimum position of an `AABB` or `Rect` that has the
-        /// provided `size`
-        ///
-        /// A null value indicates there were no available spaces for the given size
-        ///
-        /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
-        /// should be treated as rotated 90 degrees (space width == `size.y` AND space height == `size.x`)
-        pub fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?PosWithRotation {
+        fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode) ?PosResult {
             const allow_unrotated = rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION;
-            // Force-rotation must also handle square rects, whose rotated size is
-            // identical to their unrotated size.
             const allow_rotated = switch (rotation) {
                 .DO_NOT_ALLOW_ROTATION => false,
                 .ALLOW_90_DEGREE_ROTATION => size.x != size.y,
@@ -207,31 +226,31 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             var best_threshold: Candidate = .{};
 
             const rows = self.constrained_rows.zig_slice_entire();
-            const row_count = self.constrained_rows.get_len();
-            var row_idx: IDX = 0;
-            while (row_idx < row_count) : (row_idx += 1) {
-                evaluate_row(rows[row_idx], .constrained, row_idx, size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
+            const constrained_row_count = self.constrained_rows.get_len();
+            var constrained_row_idx: IDX = 0;
+            while (constrained_row_idx < constrained_row_count) : (constrained_row_idx += 1) {
+                evaluate_constrained_row(rows[constrained_row_idx], constrained_row_idx, size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
                 if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
                     return self.claim_candidate(candidate, waste);
                 }
             }
 
-            evaluate_row(self.unconstrained_row, .unconstrained, 0, size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
+            evaluate_unconstrained_row(self.unconstrained_row, self.constrained_rows.get_len(), size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
             if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
                 return self.claim_candidate(candidate, waste);
             }
 
-            const selected = if (best_threshold.kind != .none) best_threshold else best_any;
-            if (best_threshold.kind == .none and threshold_value != null) {
+            const selected = if (best_threshold.kind != .NONE) best_threshold else best_any;
+            if (best_threshold.kind == .NONE and threshold_value != null) {
                 if (self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated)) |pos| {
                     return pos;
                 }
             }
-            if (selected.kind == .none) {
+            if (selected.kind == .NONE) {
                 if (threshold_value != null) return null;
                 return self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated);
             }
-            if (waste == .LEAST_WASTE and best_threshold.kind == .none and selected.kind == .unconstrained) {
+            if (waste == .LEAST_WASTE and best_threshold.kind == .NONE and selected.kind == .UNCONSTRAINED) {
                 const extended_threshold = doubled_threshold(threshold_value orelse self.default_height_fit_threshold);
                 if (self.unconstrained_row.can_fit_size_on_new_row(selected.size) and
                     !self.unconstrained_row.new_height_is_within_threshold(extended_threshold, selected.size.y))
@@ -244,20 +263,20 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
         }
 
         const RowKind = enum(u2) {
-            none,
-            constrained,
-            unconstrained,
+            NONE,
+            CONSTRAINED,
+            UNCONSTRAINED,
         };
 
         const Candidate = struct {
-            kind: RowKind = .none,
+            kind: RowKind = .NONE,
             row_idx: IDX = 0,
             size: Vec = .{},
             rotated: bool = false,
             waste: T = 0,
 
             inline fn consider(self: *Candidate, waste_mode: WasteMode, kind: RowKind, row_idx: IDX, claim_size: Vec, rotated: bool, candidate_waste: T) void {
-                if (self.kind == .none or (waste_mode == .LEAST_WASTE and candidate_waste < self.waste)) {
+                if (self.kind == .NONE or (waste_mode == .LEAST_WASTE and candidate_waste < self.waste)) {
                     self.* = .{
                         .kind = kind,
                         .row_idx = row_idx,
@@ -269,9 +288,8 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             }
         };
 
-        inline fn evaluate_row(
-            row: anytype,
-            row_kind: RowKind,
+        inline fn evaluate_constrained_row(
+            row: ConstrainedRow,
             row_idx: IDX,
             size: Vec,
             rot_size: Vec,
@@ -283,16 +301,35 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             best_any: *Candidate,
         ) void {
             if (allow_unrotated and row.can_fit_size(size)) {
-                consider_claim(row, row_kind, row_idx, size, false, waste_mode, threshold_value, best_threshold, best_any);
+                consider_constrained_claim(row, row_idx, size, false, waste_mode, threshold_value, best_threshold, best_any);
             }
             if (allow_rotated and row.can_fit_size(rot_size)) {
-                consider_claim(row, row_kind, row_idx, rot_size, true, waste_mode, threshold_value, best_threshold, best_any);
+                consider_constrained_claim(row, row_idx, rot_size, true, waste_mode, threshold_value, best_threshold, best_any);
             }
         }
 
-        inline fn consider_claim(
-            row: anytype,
-            row_kind: RowKind,
+        inline fn evaluate_unconstrained_row(
+            row: UnconstrainedRow,
+            row_idx: IDX,
+            size: Vec,
+            rot_size: Vec,
+            allow_unrotated: bool,
+            allow_rotated: bool,
+            waste_mode: WasteMode,
+            threshold_value: ?T,
+            best_threshold: *Candidate,
+            best_any: *Candidate,
+        ) void {
+            if (allow_unrotated and row.can_fit_size(size)) {
+                consider_unconstrained_claim(row, row_idx, size, false, waste_mode, threshold_value, best_threshold, best_any);
+            }
+            if (allow_rotated and row.can_fit_size(rot_size)) {
+                consider_unconstrained_claim(row, row_idx, rot_size, true, waste_mode, threshold_value, best_threshold, best_any);
+            }
+        }
+
+        inline fn consider_unconstrained_claim(
+            row: UnconstrainedRow,
             row_idx: IDX,
             claim_size: Vec,
             rotated: bool,
@@ -302,10 +339,28 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             best_any: *Candidate,
         ) void {
             const candidate_waste: T = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
-            best_any.consider(waste_mode, row_kind, row_idx, claim_size, rotated, candidate_waste);
+            best_any.consider(waste_mode, .UNCONSTRAINED, row_idx, claim_size, rotated, candidate_waste);
             if (threshold_value) |t| {
                 if (row.new_height_is_within_threshold(t, claim_size.y)) {
-                    best_threshold.consider(waste_mode, row_kind, row_idx, claim_size, rotated, candidate_waste);
+                    best_threshold.consider(waste_mode, .UNCONSTRAINED, row_idx, claim_size, rotated, candidate_waste);
+                }
+            }
+        }
+        inline fn consider_constrained_claim(
+            row: ConstrainedRow,
+            row_idx: IDX,
+            claim_size: Vec,
+            rotated: bool,
+            waste_mode: WasteMode,
+            threshold_value: ?T,
+            best_threshold: *Candidate,
+            best_any: *Candidate,
+        ) void {
+            const candidate_waste: T = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
+            best_any.consider(waste_mode, .CONSTRAINED, row_idx, claim_size, rotated, candidate_waste);
+            if (threshold_value) |t| {
+                if (row.new_height_is_within_threshold(t, claim_size.y)) {
+                    best_threshold.consider(waste_mode, .CONSTRAINED, row_idx, claim_size, rotated, candidate_waste);
                 }
             }
         }
@@ -313,46 +368,47 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
         inline fn first_fit_ready(waste_mode: WasteMode, threshold_value: ?T, best_threshold: Candidate, best_any: Candidate) ?Candidate {
             if (waste_mode != .IGNORE_WASTE) return null;
             if (threshold_value == null) {
-                return if (best_any.kind == .none) null else best_any;
+                return if (best_any.kind == .NONE) null else best_any;
             }
-            return if (best_threshold.kind == .none) null else best_threshold;
+            return if (best_threshold.kind == .NONE) null else best_threshold;
         }
 
-        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode) PosWithRotation {
+        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode) PosResult {
             self.claim_count +|= 1;
             switch (candidate.kind) {
-                .constrained => {
+                .CONSTRAINED => {
                     const row = &self.constrained_rows.zig_slice_entire()[candidate.row_idx];
                     const pos = if (waste_mode == .LEAST_WASTE)
                         row.claim_pos_known_waste(candidate.size, candidate.waste, &self.total_wasted_area)
                     else
                         row.claim_pos(candidate.size, &self.total_wasted_area);
-                    return PosWithRotation.new(pos, candidate.rotated);
+                    return PosResult.new(pos, candidate.rotated, candidate.row_idx);
                 },
-                .unconstrained => {
+                .UNCONSTRAINED => {
                     const pos = if (waste_mode == .LEAST_WASTE)
                         self.unconstrained_row.claim_pos_known_waste(candidate.size, candidate.waste, &self.total_wasted_area)
                     else
                         self.unconstrained_row.claim_pos(candidate.size, &self.total_wasted_area);
-                    return PosWithRotation.new(pos, candidate.rotated);
+                    return PosResult.new(pos, candidate.rotated, candidate.row_idx);
                 },
-                .none => unreachable,
+                .NONE => unreachable,
             }
         }
 
-        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool) PosWithRotation {
+        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool) PosResult {
             if (!self.unconstrained_row.is_empty()) {
                 const closed_row = self.unconstrained_row.extract_constrained_row(self.full_region);
                 self.constrained_rows.append_one(closed_row, self.alloc);
             }
             self.claim_count +|= 1;
-            return PosWithRotation.new(
+            return PosResult.new(
                 self.unconstrained_row.claim_pos_known_waste(size, 0, &self.total_wasted_area),
                 rotated,
+                self.constrained_rows.get_len(),
             );
         }
 
-        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool) ?PosWithRotation {
+        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool) ?PosResult {
             if (allow_unrotated and self.unconstrained_row.can_fit_size_on_new_row(size)) {
                 return self.claim_on_new_row(size, false);
             }
@@ -362,47 +418,51 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             return null;
         }
 
-        pub const PosWithRotation = struct {
+        pub const PosResult = struct {
             pos: Vec = .{},
             is_rotated: bool = false,
+            row_idx: IDX = 0,
 
-            pub fn new(pos: Vec, is_rotated: bool) PosWithRotation {
-                return PosWithRotation{
+            pub fn new(pos: Vec, is_rotated: bool, row_idx: IDX) PosResult {
+                return PosResult{
                     .pos = pos,
                     .is_rotated = is_rotated,
+                    .row_idx = row_idx,
                 };
             }
         };
-        pub const RectWithRotation = struct {
+        pub const RectResult = struct {
             rect: Rect = .{ .pos = .{}, .size = .{} },
             is_rotated: bool = false,
+            row_idx: IDX = 0,
 
-            pub fn new(rect: Rect, is_rotated: bool) RectWithRotation {
-                return RectWithRotation{
+            pub fn new(rect: Rect, is_rotated: bool, row_idx: IDX) RectResult {
+                return RectResult{
                     .rect = rect,
                     .is_rotated = is_rotated,
+                    .row_idx = row_idx,
                 };
             }
 
-            pub fn top_left(self: RectWithRotation) Vec {
+            pub fn top_left(self: RectResult) Vec {
                 if (self.is_rotated) {
                     return self.rect.top_right();
                 }
                 return self.rect.top_left();
             }
-            pub fn top_right(self: RectWithRotation) Vec {
+            pub fn top_right(self: RectResult) Vec {
                 if (self.is_rotated) {
                     return self.rect.bot_right();
                 }
                 return self.rect.top_right();
             }
-            pub fn bot_left(self: RectWithRotation) Vec {
+            pub fn bot_left(self: RectResult) Vec {
                 if (self.is_rotated) {
                     return self.rect.top_left();
                 }
                 return self.rect.bot_left();
             }
-            pub fn bot_right(self: RectWithRotation) Vec {
+            pub fn bot_right(self: RectResult) Vec {
                 if (self.is_rotated) {
                     return self.rect.bot_left();
                 }
@@ -410,36 +470,38 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             }
         };
 
-        pub const AABB_WithRotation = struct {
+        pub const AABB_Result = struct {
             aabb: AABB = .{},
             is_rotated: bool = false,
+            row_idx: IDX = 0,
 
-            pub fn new(aabb: AABB, is_rotated: bool) AABB_WithRotation {
-                return AABB_WithRotation{
+            pub fn new(aabb: AABB, is_rotated: bool, row_idx: IDX) AABB_Result {
+                return AABB_Result{
                     .aabb = aabb,
                     .is_rotated = is_rotated,
+                    .row_idx = row_idx,
                 };
             }
 
-            pub fn top_left(self: AABB_WithRotation) Vec {
+            pub fn top_left(self: AABB_Result) Vec {
                 if (self.is_rotated) {
                     return self.aabb.top_right();
                 }
                 return self.aabb.top_left();
             }
-            pub fn top_right(self: AABB_WithRotation) Vec {
+            pub fn top_right(self: AABB_Result) Vec {
                 if (self.is_rotated) {
                     return self.aabb.bot_right();
                 }
                 return self.aabb.top_right();
             }
-            pub fn bot_left(self: AABB_WithRotation) Vec {
+            pub fn bot_left(self: AABB_Result) Vec {
                 if (self.is_rotated) {
                     return self.aabb.top_left();
                 }
                 return self.aabb.bot_left();
             }
-            pub fn bot_right(self: AABB_WithRotation) Vec {
+            pub fn bot_right(self: AABB_Result) Vec {
                 if (self.is_rotated) {
                     return self.aabb.bot_left();
                 }
@@ -450,37 +512,62 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
         const ConstrainedRow = struct {
             pos: Vec = .{},
             width: T = 0,
+            used_width: T = 0,
             min_height: T = 0,
             max_height: T = 0,
+            num_claimed: IDX = 0,
+            next_hole: ?*Hole = undefined,
 
-            pub inline fn can_fit_width(self: ConstrainedRow, width: T) bool {
+            inline fn can_fit_width(self: ConstrainedRow, width: T) bool {
                 return self.width >= width;
             }
-            pub inline fn can_fit_height(self: ConstrainedRow, height: T) bool {
+            inline fn can_fit_height(self: ConstrainedRow, height: T) bool {
                 return self.max_height >= height;
             }
-            pub inline fn can_fit_size(self: ConstrainedRow, size: Vec) bool {
+            inline fn can_fit_size(self: ConstrainedRow, size: Vec) bool {
                 return self.width >= size.x and self.max_height >= size.y;
             }
-            pub inline fn claim_pos(self: *ConstrainedRow, size: Vec, total_waste_ptr: *T) Vec {
+            inline fn claim_pos(self: *ConstrainedRow, size: Vec, total_waste_ptr: *T) Vec {
                 const waste = self.wasted_area_if_claimed(size);
                 return self.claim_pos_known_waste(size, waste, total_waste_ptr);
             }
-            pub inline fn claim_pos_known_waste(self: *ConstrainedRow, size: Vec, waste: T, total_waste_pointer: *T) Vec {
+            inline fn claim_pos_known_waste(self: *ConstrainedRow, size: Vec, waste: T, total_waste_pointer: *T) Vec {
                 const pos = self.pos;
                 self.pos.x += size.x;
                 self.width -= size.x;
                 self.min_height = @min(self.min_height, size.y);
                 total_waste_pointer.* += waste;
+                self.num_claimed += 1;
                 return pos;
             }
-            pub fn new_height_is_within_threshold(self: ConstrainedRow, threshold: T, height: T) bool {
+            fn new_height_is_within_threshold(self: ConstrainedRow, threshold: T, height: T) bool {
                 if (height > self.max_height) return false;
                 const new_min = @min(self.min_height, height);
                 return self.max_height - new_min <= threshold;
             }
-            pub fn wasted_area_if_claimed(self: ConstrainedRow, size: Vec) T {
+            fn wasted_area_if_claimed(self: ConstrainedRow, size: Vec) T {
                 return (self.max_height - size.y) * size.x;
+            }
+            fn release_position(self: *ConstrainedRow, pos: Vec, size: Vec, hole: *Hole, hole_pool: *HolePool) void {
+                assert_with_reason(self.num_claimed > 0, @src(), "no rects claimed in row, nothing to release", .{});
+                assert_with_reason(pos.y >= self.pos.y and pos.y + size.y <= self.pos.y + self.max_height and pos.x >= (self.pos.x - self.used_width) and pos.x + size.x <= self.pos.x, @src(), "rect to release is not fully within the row, rect: {}, row: {}", .{ Rect.new(pos, size), Rect.new(self.pos, .new(self.width + self.used_width, self.max_height)) });
+                self.num_claimed -= 1;
+                if (self.num_claimed == 0) {
+                    var possible_next_hole = self.next_hole;
+                    while (possible_next_hole) |next_hole| {
+                        possible_next_hole = next_hole.next;
+                        hole_pool.release(next_hole);
+                    }
+                    self.min_height = MAX_HEIGHT;
+                    self.max_height = 0;
+                    self.pos.x -= self.used_width;
+                    self.width += self.used_width;
+                    self.used_width = 0;
+                    self.next_hole = null;
+                    return;
+                }
+                hole.next = self.next_hole;
+                self.next_hole = hole;
             }
         };
 
@@ -491,6 +578,8 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
             min_height: T = 0,
             max_height: T = 0,
             true_max_height: T = 0,
+            num_claimed: IDX = 0,
+            next_hole: ?*Hole = undefined,
 
             fn init(region: Rect) UnconstrainedRow {
                 return UnconstrainedRow{
@@ -502,20 +591,20 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                     .true_max_height = region.size.y,
                 };
             }
-            pub inline fn is_empty(self: UnconstrainedRow) bool {
+            inline fn is_empty(self: UnconstrainedRow) bool {
                 return self.used_width == 0 and self.max_height == 0;
             }
-            pub inline fn can_fit_size(self: UnconstrainedRow, size: Vec) bool {
+            inline fn can_fit_size(self: UnconstrainedRow, size: Vec) bool {
                 return self.width >= size.x and self.true_max_height >= size.y;
             }
-            pub inline fn can_fit_size_on_new_row(self: UnconstrainedRow, size: Vec) bool {
+            inline fn can_fit_size_on_new_row(self: UnconstrainedRow, size: Vec) bool {
                 return self.width + self.used_width >= size.x and self.true_max_height - self.max_height >= size.y;
             }
-            pub inline fn claim_pos(self: *UnconstrainedRow, size: Vec, total_waste_ptr: *T) Vec {
+            inline fn claim_pos(self: *UnconstrainedRow, size: Vec, total_waste_ptr: *T) Vec {
                 const waste = self.wasted_area_if_claimed(size);
                 return self.claim_pos_known_waste(size, waste, total_waste_ptr);
             }
-            pub inline fn claim_pos_known_waste(self: *UnconstrainedRow, size: Vec, waste: T, total_waste_ptr: *T) Vec {
+            inline fn claim_pos_known_waste(self: *UnconstrainedRow, size: Vec, waste: T, total_waste_ptr: *T) Vec {
                 const pos = self.pos;
                 self.pos.x += size.x;
                 self.width -= size.x;
@@ -523,18 +612,17 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                 self.min_height = @min(self.min_height, size.y);
                 self.max_height = @max(self.max_height, size.y);
                 total_waste_ptr.* += waste;
+                self.num_claimed += 1;
                 return pos;
             }
 
-            pub fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: T, height: T) bool {
+            fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: T, height: T) bool {
                 const new_min = @min(self.min_height, height);
                 const new_max = @max(self.max_height, height);
                 return new_max - new_min <= threshold;
             }
-            pub fn wasted_area_if_claimed(self: UnconstrainedRow, size: Vec) T {
+            fn wasted_area_if_claimed(self: UnconstrainedRow, size: Vec) T {
                 if (size.y > self.max_height) {
-                    // Growing the row exposes the area above the previously claimed,
-                    // shorter rects.
                     const delta = size.y - self.max_height;
                     return delta * self.used_width;
                 } else {
@@ -543,12 +631,15 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                 }
             }
 
-            pub fn extract_constrained_row(self: *UnconstrainedRow, full_region: Rect) ConstrainedRow {
+            fn extract_constrained_row(self: *UnconstrainedRow, full_region: Rect) ConstrainedRow {
                 const row = ConstrainedRow{
                     .pos = self.pos,
                     .min_height = self.min_height,
                     .max_height = self.max_height,
                     .width = self.width,
+                    .num_claimed = self.num_claimed,
+                    .num_holes = self.num_holes,
+                    .first_hole = self.first_hole,
                 };
                 self.pos.x = full_region.pos.x;
                 self.pos.y += self.max_height;
@@ -557,9 +648,76 @@ pub fn RowPacker(comptime T: type, comptime IDX: type) type {
                 self.min_height = MAX_HEIGHT;
                 self.width = full_region.size.x;
                 self.used_width = 0;
+                self.num_claimed = 0;
+                self.num_holes = 0;
+                self.first_hole = 0;
                 return row;
             }
+
+            fn release_position(self: *UnconstrainedRow, pos: Vec, size: Vec, hole: *Hole, hole_pool: *HolePool) void {
+                assert_with_reason(self.num_claimed > 0, @src(), "no rects claimed in row, nothing to release", .{});
+                assert_with_reason(pos.y >= self.pos.y and pos.y + size.y <= self.pos.y + self.max_height and pos.x >= (self.pos.x - self.used_width) and pos.x + size.x <= self.pos.x, @src(), "rect to release is not fully within the row, rect: {}, row: {}", .{ Rect.new(pos, size), Rect.new(self.pos, .new(self.width + self.used_width, self.max_height)) });
+                self.num_claimed -= 1;
+                if (self.num_claimed == 0) {
+                    var possible_next_hole = self.next_hole;
+                    while (possible_next_hole) |next_hole| {
+                        possible_next_hole = next_hole.next;
+                        hole_pool.release(next_hole);
+                    }
+                    self.min_height = MAX_HEIGHT;
+                    self.max_height = 0;
+                    self.pos.x -= self.used_width;
+                    self.width += self.used_width;
+                    self.used_width = 0;
+                    self.next_hole = null;
+                    return;
+                }
+                hole.next = self.next_hole;
+                self.next_hole = hole;
+            }
         };
+
+        pub const Hole = struct {
+            rect: Rect = .{},
+            next: ?*Hole = undefined,
+        };
+
+        pub fn release_rect(self: *Self, rect: RectResult) void {
+            assert_can_release(@src());
+            assert_with_reason(rect.rect.to_aabb2().fully_within(self.full_region.to_aabb2()), @src(), "rect is not within packer region", .{});
+            assert_with_reason(rect.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for rect is out of bounds for packer", .{});
+            assert_with_reason(self.claim_count > 0, @src(), "no rectangles claimed in packer, nothing to release", .{});
+            self.claim_count -= 1;
+            if (self.claim_count == 0) {
+                self.reset();
+                return;
+            }
+            const new_hole = self.holes_pool.claim();
+            if (rect.row_idx == self.constrained_rows.get_len()) {
+                self.unconstrained_row.release_position(rect.pos, rect.size, new_hole, &self.holes_pool);
+                return;
+            }
+            const row: *ConstrainedRow = self.constrained_rows.get_ptr(rect.row_idx);
+            row.release_position(rect.rect.pos, rect.rect.size, new_hole, &self.holes_pool);
+        }
+        pub fn release_aabb(self: *Self, aabb: AABB_Result) void {
+            assert_can_release(@src());
+            assert_with_reason(aabb.aabb.fully_within(self.full_region.to_aabb2()), @src(), "aabb is not within packer region", .{});
+            assert_with_reason(aabb.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for aabb is out of bounds for packer", .{});
+            assert_with_reason(self.claim_count > 0, @src(), "no rectangles claimed in packer, nothing to release", .{});
+            self.claim_count -= 1;
+            if (self.claim_count == 0) {
+                self.reset();
+                return;
+            }
+            const new_hole = self.holes_pool.claim();
+            if (aabb.row_idx == self.constrained_rows.get_len()) {
+                self.unconstrained_row.release_position(aabb.aabb.get_min_point(), aabb.aabb.get_size(), new_hole, &self.holes_pool);
+                return;
+            }
+            const row: *ConstrainedRow = self.constrained_rows.get_ptr(aabb.row_idx);
+            row.release_position(aabb.aabb.get_min_point(), aabb.aabb.get_size(), new_hole, &self.holes_pool);
+        }
     };
 }
 

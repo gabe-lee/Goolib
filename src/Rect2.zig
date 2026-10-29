@@ -45,8 +45,8 @@ pub fn define_rect2_type(comptime T: type) type {
             else => false,
         };
 
-        pos: T_Vec2,
-        size: T_Vec2,
+        pos: T_Vec2 = .{},
+        size: T_Vec2 = .{},
 
         pub fn new_xywh(x: T, y: T, w: T, h: T) T_Rect2 {
             return T_Rect2{ .pos = .new(x, y), .size = .new(w, h) };

@@ -323,6 +323,10 @@ pub fn define_aabb2_type(comptime T: type) type {
             };
         }
 
+        pub fn fully_within(self: T_AABB2, other: T_AABB2) bool {
+            return self.x_min >= other.x_min and self.x_max <= other.x_max and self.y_min >= other.y_min and self.y_max <= other.y_max;
+        }
+
         pub fn overlaps(self: T_AABB2, other: T_AABB2) bool {
             return self.x_max >= other.x_min and other.x_max >= self.x_min and self.y_max >= other.y_min and other.y_max >= self.y_min;
         }
