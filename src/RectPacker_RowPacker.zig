@@ -25,6 +25,7 @@ const std = @import("std");
 const build = @import("builtin");
 
 const Root = @import("./_root.zig");
+const Cast = Root.Cast;
 const MathX = Root.Math;
 const ListFull = Root.ListSlice.ListFullDefinition;
 const Pool = Root.Pool.Pool;
@@ -37,6 +38,7 @@ const Assert = Root.Assert;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const num_cast = Cast.num_cast;
 
 comptime {
     if (build.is_test) {
@@ -89,10 +91,16 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
         }, Hole{});
         const MAX_HEIGHT: T = MathX.max_value(T);
 
-        inline fn doubled_threshold(value: T) T {
+        inline fn doubled_threshold(value: ThresholdVal) ThresholdVal {
             return switch (@typeInfo(T)) {
-                .int => value *| 2,
-                .float => value * 2,
+                .int => ThresholdVal{
+                    .flat_tolerance = value.flat_tolerance *| 2,
+                    .percent = value.percent * 0.5,
+                },
+                .float => ThresholdVal{
+                    .flat_tolerance = value.flat_tolerance * 2,
+                    .percent = value.percent * 0.5,
+                },
                 else => @compileError("RowPacker requires an integer or floating-point coordinate type"),
             };
         }
@@ -102,15 +110,27 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
         holes_pool: if (CAN_RELEASE) HolePool else void = if (CAN_RELEASE) HolePool{ .alloc = DummyAlloc.allocator_panic } else {},
         unconstrained_row: UnconstrainedRow = .{},
         full_region: Rect = .{ .pos = .{}, .size = .{} },
-        default_height_fit_threshold: T = 0,
+        default_height_fit_threshold: ThresholdVal = .threshold_val(0.9, 4),
         total_wasted_area: T = 0,
         claim_count: IDX = 0,
+
+        pub const ThresholdVal = struct {
+            percent: f32 = 0.9,
+            flat_tolerance: T = 10,
+
+            pub fn threshold_val(percent: f32, flat_tolerance: T) ThresholdVal {
+                return ThresholdVal{
+                    .percent = percent,
+                    .flat_tolerance = flat_tolerance,
+                };
+            }
+        };
 
         fn assert_can_release(src: ?std.builtin.SourceLocation) void {
             assert_with_reason(CAN_RELEASE, src, "cannot release rects when packer defined as .CLAIM_ONLY", .{});
         }
 
-        pub fn init(cap: usize, region: Rect, default_height_fit_threshold: T, alloc: Allocator) Self {
+        pub fn init(cap: usize, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator) Self {
             var self = Self{
                 .alloc = alloc,
                 .constrained_rows = RowList.allocate_new(@intCast(cap), alloc),
@@ -147,7 +167,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
         pub const Threshold = union(ThresholdMode) {
             IGNORE_THRESHOLD: void,
             DEFAULT_THRESHOLD: void,
-            CUSTOM_THRESHOLD: T,
+            CUSTOM_THRESHOLD: ThresholdVal,
 
             pub inline fn ignore_threshold() Threshold {
                 return Threshold{ .IGNORE_THRESHOLD = {} };
@@ -155,8 +175,8 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             pub inline fn default_threshold() Threshold {
                 return Threshold{ .DEFAULT_THRESHOLD = {} };
             }
-            pub inline fn custom_threshold(threshold: T) Threshold {
-                return Threshold{ .CUSTOM_THRESHOLD = threshold };
+            pub inline fn custom_threshold(percent: f32, flat_tolerance: T) Threshold {
+                return Threshold{ .CUSTOM_THRESHOLD = .threshold_val(percent, flat_tolerance) };
             }
         };
 
@@ -219,7 +239,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             if ((!allow_unrotated or !fits_region_unrotated) and (!allow_rotated or !fits_region_rotated)) return null;
 
             const rot_size = size.flip_components();
-            const threshold_value: ?T = switch (threshold) {
+            const threshold_value: ?ThresholdVal = switch (threshold) {
                 .IGNORE_THRESHOLD => null,
                 .DEFAULT_THRESHOLD => self.default_height_fit_threshold,
                 .CUSTOM_THRESHOLD => |t| t,
@@ -301,7 +321,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             allow_unrotated: bool,
             allow_rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -322,7 +342,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             allow_unrotated: bool,
             allow_rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -344,7 +364,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             allow_unrotated: bool,
             allow_rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -367,7 +387,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             claim_size: Vec,
             rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -384,7 +404,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             claim_size: Vec,
             rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -402,7 +422,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             claim_size: Vec,
             rotated: bool,
             waste_mode: WasteMode,
-            threshold_value: ?T,
+            threshold_value: ?ThresholdVal,
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
@@ -415,7 +435,7 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
             }
         }
 
-        inline fn first_fit_ready(waste_mode: WasteMode, threshold_value: ?T, best_threshold: Candidate, best_any: Candidate) ?Candidate {
+        inline fn first_fit_ready(waste_mode: WasteMode, threshold_value: ?ThresholdVal, best_threshold: Candidate, best_any: Candidate) ?Candidate {
             if (waste_mode != .IGNORE_WASTE) return null;
             if (threshold_value == null) {
                 return if (best_any.kind == .NONE) null else best_any;
@@ -657,10 +677,14 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
                 self.num_claimed += 1;
                 return pos;
             }
-            fn new_height_is_within_threshold(self: ConstrainedRow, threshold: T, height: T) bool {
+            fn new_height_is_within_threshold(self: ConstrainedRow, threshold: ThresholdVal, height: T) bool {
                 if (height > self.max_height) return false;
                 const new_min = @min(self.min_height, height);
-                return self.max_height - new_min <= threshold;
+                const new_min_f: f32 = num_cast(new_min, f32);
+                const max_f = num_cast(self.max_height, f32);
+                const within_percent = (new_min_f / max_f) >= threshold.percent;
+                if (within_percent) return true;
+                return self.max_height - new_min <= threshold.flat_tolerance;
             }
             fn wasted_area_if_claimed(self: ConstrainedRow, size: Vec) T {
                 return (self.max_height - size.y) * size.x;
@@ -740,10 +764,14 @@ pub fn RowPacker(comptime T: type, comptime IDX: type, comptime RELEASE_MODE: Re
                 return pos;
             }
 
-            fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: T, height: T) bool {
-                const new_min = @min(self.min_height, height);
-                const new_max = @max(self.max_height, height);
-                return new_max - new_min <= threshold;
+            fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: ThresholdVal, height: T) bool {
+                const new_min: T = @min(self.min_height, height);
+                const new_max: T = @max(self.max_height, height);
+                const new_min_f: f32 = num_cast(new_min, f32);
+                const new_max_f: f32 = num_cast(new_max, f32);
+                const within_percent = (new_min_f / new_max_f) >= threshold.percent;
+                if (within_percent) return true;
+                return (new_max - new_min) <= threshold.flat_tolerance;
             }
             fn wasted_area_if_claimed(self: UnconstrainedRow, size: Vec) T {
                 if (size.y > self.max_height) {

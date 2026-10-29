@@ -67,7 +67,7 @@ fn strictlyOverlaps(a: RectF, b: RectF) bool {
 
 test "RowPacker -> shelf layout" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -89,7 +89,7 @@ test "RowPacker -> shelf layout" {
 
 test "RowPacker -> total_wasted_area accounts for exposed area" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     _ = packer.claim_rect(VecF.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -105,7 +105,7 @@ test "RowPacker -> total_wasted_area accounts for exposed area" {
 
 test "RowPacker -> forced rotation uses existing rows for square rects" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), 1000, alloc);
+    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .ignore_waste(), .always_force_90_degree_rotation()).?;
@@ -126,7 +126,7 @@ test "RowPacker -> forced rotation uses existing rows for square rects" {
 
 test "RowPacker -> rotated sizes cannot overflow the region on a new row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), 1000, alloc);
+    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(50, 60), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation()).?;
@@ -144,7 +144,7 @@ test "RowPacker -> rotated sizes cannot overflow the region on a new row" {
 
 test "RowPacker -> threshold starts a new row, constrained rows are reused" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), 1, alloc);
+    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -170,7 +170,7 @@ test "RowPacker -> threshold starts a new row, constrained rows are reused" {
 
 test "RowPacker -> final-pass heuristic opens a new row when ignoring thresholds" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), 1, alloc);
+    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -186,7 +186,7 @@ test "RowPacker -> final-pass heuristic opens a new row when ignoring thresholds
 
 test "RowPacker -> zero initial capacity grows on demand" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(0, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation()).?;
@@ -202,7 +202,7 @@ test "RowPacker -> zero initial capacity grows on demand" {
 
 test "RowPacker -> unsigned integer coordinates" {
     const alloc = std.testing.allocator;
-    var packer = PackerU32.init(4, RectU.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerU32.init(4, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     _ = packer.claim_rect(VecU.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -217,7 +217,7 @@ test "RowPacker -> unsigned integer coordinates" {
 
 test "RowPacker -> respects the region position" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation()).?;
@@ -229,7 +229,7 @@ test "RowPacker -> respects the region position" {
 
 test "RowPacker -> claim_aabb rotates with the rect" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 50, 100), 1000, alloc);
+    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_aabb(VecF.new(80, 40), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation()).?;
@@ -242,7 +242,7 @@ test "RowPacker -> claim_aabb rotates with the rect" {
 
 test "RowPacker -> reset clears all state" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation()).?;
@@ -261,14 +261,14 @@ test "RowPacker -> reset clears all state" {
 
 test "RowPacker -> least waste picks between constrained rows and the open row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     // Build two constrained rows with different heights plus an open row.
     _ = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
-    const b = packer.claim_rect(VecF.new(20, 30), .custom_threshold(1), .least_waste(), .do_not_allow_rotation()).?;
+    const b = packer.claim_rect(VecF.new(20, 30), .custom_threshold(1.0, 1), .least_waste(), .do_not_allow_rotation()).?;
     try expectRectF(b.rect, RectF.new_xywh(0, 10, 20, 30));
-    const d = packer.claim_rect(VecF.new(20, 20), .custom_threshold(1), .least_waste(), .do_not_allow_rotation()).?;
+    const d = packer.claim_rect(VecF.new(20, 20), .custom_threshold(1.0, 1), .least_waste(), .do_not_allow_rotation()).?;
     try expectRectF(d.rect, RectF.new_xywh(0, 40, 20, 20));
     try std.testing.expectEqual(@as(u16, 2), packer.constrained_rows.get_len());
 
@@ -288,7 +288,7 @@ test "RowPacker -> final-pass threshold doubling saturates for small ints" {
     const alloc = std.testing.allocator;
     // A default threshold above half of `u8`'s range used to overflow when the
     // final-pass heuristic doubled it.
-    var packer = PackerU8.init(2, RectU8.new_xywh(0, 0, 100, 100), 200, alloc);
+    var packer = PackerU8.init(2, RectU8.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 200), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecU8.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -320,13 +320,13 @@ test "RowPacker -> randomized invariants across modes" {
     const thresholds = [_]PackerF32.Threshold{
         .ignore_threshold(),
         .default_threshold(),
-        .custom_threshold(4),
+        .custom_threshold(1.0, 4),
     };
 
     for (rotations) |rotation| {
         for (wastes) |waste| {
             for (thresholds) |threshold| {
-                var packer = PackerF32.init(0, region, 6, alloc);
+                var packer = PackerF32.init(0, region, .threshold_val(1.0, 6), alloc);
                 defer packer.free();
 
                 var claimed: [40]RectF = undefined;
@@ -358,7 +358,7 @@ test "RowPacker -> randomized invariants across modes" {
 test "RowPacker -> claimed rects stay in bounds and do not overlap" {
     const alloc = std.testing.allocator;
     const region = RectF.new_xywh(5, 7, 100, 100);
-    var packer = PackerF32.init(16, region, 1000, alloc);
+    var packer = PackerF32.init(16, region, .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const sizes = [_]VecF{
@@ -396,7 +396,7 @@ test "RowPacker -> claimed rects stay in bounds and do not overlap" {
 
 test "RowPacker -> released rect is reused from its hole in the open row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -417,7 +417,7 @@ test "RowPacker -> released rect is reused from its hole in the open row" {
 
 test "RowPacker -> claiming a smaller rect splits a hole into reusable remainders" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -446,7 +446,7 @@ test "RowPacker -> claiming a smaller rect splits a hole into reusable remainder
 
 test "RowPacker -> holes survive when the open row becomes a constrained row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -467,7 +467,7 @@ test "RowPacker -> holes survive when the open row becomes a constrained row" {
 
 test "RowPacker -> releasing every rect in a constrained row makes the shelf reusable" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -486,7 +486,7 @@ test "RowPacker -> releasing every rect in a constrained row makes the shelf reu
 
 test "RowPacker -> release_aabb fills its hole" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -504,7 +504,7 @@ test "RowPacker -> release_aabb fills its hole" {
 
 test "RowPacker -> release works with unsigned coordinates" {
     const alloc = std.testing.allocator;
-    var packer = PackerU32Release.init(2, RectU.new_xywh(0, 0, 100, 100), 1000, alloc);
+    var packer = PackerU32Release.init(2, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
     defer packer.free();
 
     const a = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation()).?;
@@ -535,13 +535,13 @@ test "RowPacker -> randomized release and reclaim invariants" {
     const thresholds = [_]PackerF32Release.Threshold{
         .ignore_threshold(),
         .default_threshold(),
-        .custom_threshold(4),
+        .custom_threshold(1.0, 4),
     };
 
     for (rotations) |rotation| {
         for (wastes) |waste| {
             for (thresholds) |threshold| {
-                var packer = PackerF32Release.init(0, region, 6, alloc);
+                var packer = PackerF32Release.init(0, region, .threshold_val(1.0, 6), alloc);
                 defer packer.free();
 
                 var live: [64]PackerF32Release.RectResult = undefined;
