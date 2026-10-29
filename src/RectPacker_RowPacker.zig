@@ -56,7 +56,7 @@ pub const ReleaseMode = enum {
 
 /// Packs rectangles into horizontal rows (shelves), filling each row from left to
 /// right and starting a new row after the previous one (with a larger y position).
-///s
+///
 /// `full_region.pos` is treated as the top-left corner, so rows grow downwards and
 /// every returned position is inside `[full_region.pos, full_region.pos + full_region.size]`.
 ///
