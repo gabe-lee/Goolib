@@ -33,7 +33,7 @@ const TestPool = GlobalMappedKeyPool(.{
 });
 
 test "GlobalMappedKeyPool -> claim, get, set, and release" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const a = TestPool.claim_key();
@@ -58,7 +58,7 @@ test "GlobalMappedKeyPool -> claim, get, set, and release" {
 }
 
 test "GlobalMappedKeyPool -> fresh mappings start in a clean state" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const first = TestPool.claim_key();
@@ -75,7 +75,7 @@ test "GlobalMappedKeyPool -> fresh mappings start in a clean state" {
 }
 
 test "GlobalMappedKeyPool -> releasing a key keeps swap-removed values reachable" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     var keys: [5]TestPool.Key = undefined;
@@ -109,7 +109,7 @@ test "GlobalMappedKeyPool -> every release order keeps surviving keys correct" {
     var permutation = [_]usize{ 0, 1, 2, 3 };
 
     while (true) {
-        TestPool.init(0, testing.allocator);
+        TestPool.init(0, testing.allocator, {});
         defer TestPool.uninit();
 
         var keys: [N]TestPool.Key = undefined;
@@ -138,7 +138,7 @@ test "GlobalMappedKeyPool -> every release order keeps surviving keys correct" {
 }
 
 test "GlobalMappedKeyPool -> released mappings are reused with a new generation" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const old = TestPool.claim_key();
@@ -159,7 +159,7 @@ test "GlobalMappedKeyPool -> released mappings are reused with a new generation"
 }
 
 test "GlobalMappedKeyPool -> grows from zero capacity and retains live keys" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const N = 2000;
@@ -191,7 +191,7 @@ test "GlobalMappedKeyPool -> grows from zero capacity and retains live keys" {
 }
 
 test "GlobalMappedKeyPool -> init capacity, uninit, and re-init" {
-    TestPool.init(8, testing.allocator);
+    TestPool.init(8, testing.allocator, {});
     const old = TestPool.claim_key();
     old.set(7);
     try testing.expectEqual(@as(u32, 7), old.get());
@@ -199,7 +199,7 @@ test "GlobalMappedKeyPool -> init capacity, uninit, and re-init" {
 
     try testing.expect(!old.is_valid());
 
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const new = TestPool.claim_key();
@@ -209,7 +209,7 @@ test "GlobalMappedKeyPool -> init capacity, uninit, and re-init" {
 }
 
 test "GlobalMappedKeyPool -> randomized claims and releases match a model" {
-    TestPool.init(0, testing.allocator);
+    TestPool.init(0, testing.allocator, {});
     defer TestPool.uninit();
 
     const MAX_LIVE = 64;
@@ -251,6 +251,49 @@ test "GlobalMappedKeyPool -> randomized claims and releases match a model" {
     }
 
     for (keys[0..live]) |key| key.release();
+}
+
+test "GlobalMappedKeyPool -> mutex modes support claim, get, set, release, and growth" {
+    // Without at least one instantiation per mutex mode the threaded code paths are never
+    // compiled, which hides both compile errors and locking mistakes.
+    inline for (.{ .MASTER_MUTEX, .MASTER_AND_BLOCK_MUTEX }) |mutex_mode| {
+        const ThreadedPool = GlobalMappedKeyPool(.{
+            .ELEM = u32,
+            .IDX = u32,
+            .MUTEX_MODE = mutex_mode,
+            .MUTEX_BLOCK_COVERAGE = 64,
+        });
+
+        var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+        defer threaded.deinit();
+
+        ThreadedPool.init(0, testing.allocator, threaded.io());
+        defer ThreadedPool.uninit();
+
+        var keys: [300]ThreadedPool.Key = undefined;
+        for (&keys, 0..) |*key, i| {
+            key.* = ThreadedPool.claim_key();
+            key.set(@intCast(i));
+        }
+        for (keys, 0..) |key, i| {
+            try testing.expect(key.is_valid());
+            try testing.expectEqual(@as(u32, @intCast(i)), key.get());
+        }
+        for (keys, 0..) |key, i| {
+            if (i % 2 == 0) key.release();
+        }
+        for (keys, 0..) |key, i| {
+            if (i % 2 == 0) {
+                try testing.expect(!key.is_valid());
+            } else {
+                try testing.expect(key.is_valid());
+                try testing.expectEqual(@as(u32, @intCast(i)), key.get());
+            }
+        }
+        for (keys, 0..) |key, i| {
+            if (i % 2 != 0) key.release();
+        }
+    }
 }
 
 fn nextPermutation(items: []usize) bool {

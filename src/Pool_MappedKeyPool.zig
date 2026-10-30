@@ -31,7 +31,6 @@ const Utils = Root.Utils;
 const DummyAlloc = Root.DummyAllocator;
 const Growth = Root.CommonTypes.GrowthModel;
 const RwLock = std.Io.RwLock;
-const Mutex = std.Io.Mutex;
 const Io = std.Io;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -53,7 +52,7 @@ pub const PoolDef = struct {
 
 pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
     assert_with_reason(Types.type_is_unsigned_int(DEF.IDX), @src(), "type `IDX` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.IDX)});
-    assert_with_reason(DEF.MUTEX_MODE == .NO_MUTEXES or DEF.MUTEX_BLOCK_LEN > 0, @src(), "MUTEX_BLOCK_COVERAGE must be larger than 0", .{});
+    assert_with_reason(DEF.MUTEX_MODE == .NO_MUTEXES or DEF.MUTEX_BLOCK_COVERAGE > 0, @src(), "MUTEX_BLOCK_COVERAGE must be larger than 0", .{});
     return struct {
         const Self = @This();
 
@@ -87,17 +86,17 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         const USED_STATE: IDX = 0b1;
 
         inline fn mutex_block_idx(idx: IDX) IDX {
-            return @divCeil(idx, MUTEX_BLOCK_LEN);
+            return idx / MUTEX_BLOCK_LEN;
         }
 
         fn lock_pool_and_index_for_read(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
-                master_lock.lockShared(io);
+                master_lock.lockSharedUncancelable(io);
                 if (comptime BLOCK_LOCK) {
                     const block_lock_idx = mutex_block_idx(idx);
                     mapping_lock = &block_locks[block_lock_idx];
-                    mapping_lock.lockShared(io);
+                    mapping_lock.lockSharedUncancelable(io);
                 }
             }
             return mapping_lock;
@@ -113,11 +112,11 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         fn lock_pool_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
-                master_lock.lock(io);
+                master_lock.lockUncancelable(io);
                 if (comptime BLOCK_LOCK) {
                     const block_lock_idx = mutex_block_idx(idx);
                     mapping_lock = &block_locks[block_lock_idx];
-                    mapping_lock.lock(io);
+                    mapping_lock.lockUncancelable(io);
                 }
             }
             return mapping_lock;
@@ -133,11 +132,13 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         fn lock_pool_for_read_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
-                master_lock.lockShared(io);
                 if (comptime BLOCK_LOCK) {
+                    master_lock.lockSharedUncancelable(io);
                     const block_lock_idx = mutex_block_idx(idx);
                     mapping_lock = &block_locks[block_lock_idx];
-                    mapping_lock.lock(io);
+                    mapping_lock.lockUncancelable(io);
+                } else {
+                    master_lock.lockUncancelable(io);
                 }
             }
             return mapping_lock;
@@ -146,13 +147,15 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             if (comptime MASTER_LOCK) {
                 if (comptime BLOCK_LOCK) {
                     mapping_lock.unlock(io);
+                    master_lock.unlockShared(io);
+                } else {
+                    master_lock.unlock(io);
                 }
-                master_lock.unlockShared(io);
             }
         }
         fn lock_pool_for_write() void {
             if (comptime MASTER_LOCK) {
-                master_lock.lock(io);
+                master_lock.lockUncancelable(io);
             }
         }
         fn unlock_pool_for_write() void {
@@ -161,11 +164,11 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             }
         }
         fn lock_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
-            const mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
+            var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime BLOCK_LOCK) {
                 const block_lock_idx = mutex_block_idx(idx);
                 mapping_lock = &block_locks[block_lock_idx];
-                mapping_lock.lock(io);
+                mapping_lock.lockUncancelable(io);
             }
             return mapping_lock;
         }
@@ -173,7 +176,6 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             if (comptime BLOCK_LOCK) {
                 mapping_lock.unlock(io);
             }
-            return mapping_lock;
         }
 
         pub const Mapping = struct {
@@ -185,7 +187,11 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             idx: IDX = INVALID_IDX,
             gen: IDX = 0,
 
+            inline fn assert_lockable_idx(self: Key, comptime src: ?std.builtin.SourceLocation) void {
+                assert_with_reason(self.idx < capacity, src, "key index ({d}) is outside the pool capacity ({d})", .{ self.idx, capacity });
+            }
             pub fn get(self: Key) ELEM {
+                self.assert_lockable_idx(@src());
                 const mapping_lock = lock_pool_and_index_for_read(self.idx);
                 self.assert_valid_internal(@src());
                 const val = vals[maps[self.idx].idx];
@@ -193,6 +199,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 return val;
             }
             pub fn set(self: Key, val: ELEM) void {
+                self.assert_lockable_idx(@src());
                 const mapping_lock = lock_pool_for_read_and_index_for_write(self.idx);
                 self.assert_valid_internal(@src());
                 vals[maps[self.idx].idx] = val;
@@ -202,6 +209,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 release_key(self);
             }
             pub fn is_valid(self: Key) bool {
+                if (self.idx >= capacity) return false;
                 const mapping_lock = lock_pool_and_index_for_read(self.idx);
                 const result = self.idx < maps_len and maps[self.idx].gen == self.gen and maps[self.idx].gen & FREE_USED_BIT == USED_STATE and maps[self.idx].idx < vals_len;
                 unlock_pool_and_index_for_read(mapping_lock);
@@ -214,6 +222,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 assert_with_reason(maps[self.idx].idx < vals_len, src, "key points to mapping that points to value index beyond values len ({d} >= len {d})", .{ maps[self.idx].idx, vals_len });
             }
             pub inline fn assert_valid(self: Key, comptime src: ?std.builtin.SourceLocation) void {
+                self.assert_lockable_idx(src);
                 const mapping_lock = lock_pool_and_index_for_read(self.idx);
                 assert_with_reason(self.idx < maps_len, src, "key points to mapping beyond mapping len ({d} >= len {d})", .{ self.idx, maps_len });
                 assert_with_reason(maps[self.idx].gen == self.gen, src, "key generation does not match mapping generation ({d} != {d})", .{ maps[self.idx].gen, self.gen });
@@ -266,6 +275,9 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         }
 
         pub fn init(init_capacity: IDX, allocator: Allocator, init_io: if (NEED_IO) Io else void) void {
+            if (comptime NEED_IO) {
+                io = init_io;
+            }
             lock_pool_for_write();
             assert_with_reason(capacity == 0, @src(), "cannot be initialized when capacity is not 0", .{});
             vals_len = 0;
@@ -273,9 +285,6 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             alloc = allocator;
             num_free_in_list = 0;
             first_free_mapping = INVALID_IDX;
-            if (comptime NEED_IO) {
-                io = init_io;
-            }
             ensure_capacity_internal(init_capacity);
             unlock_pool_for_write();
         }
@@ -286,10 +295,16 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 alloc.free(vals[0..capacity]);
                 alloc.free(vals_to_maps[0..capacity]);
                 alloc.free(maps[0..capacity]);
+                if (comptime BLOCK_LOCK) {
+                    alloc.free(block_locks[0..@divCeil(capacity, MUTEX_BLOCK_LEN)]);
+                }
             }
             vals = Utils.invalid_ptr_many(ELEM);
             vals_to_maps = Utils.invalid_ptr_many(IDX);
             maps = Utils.invalid_ptr_many(Mapping);
+            if (comptime BLOCK_LOCK) {
+                block_locks = Utils.invalid_ptr_many(RwLock);
+            }
             vals_len = 0;
             maps_len = 0;
             capacity = 0;
@@ -300,7 +315,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
 
         pub fn claim_key() Key {
             lock_pool_for_write();
-            ensure_free_space(1);
+            ensure_free_space_internal(1);
             var map_idx: IDX = INVALID_IDX;
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (num_free_in_list > 0) {
@@ -331,8 +346,9 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             };
         }
         pub fn release_key(key: Key) void {
-            lock_pool_and_index_for_write(key.idx);
-            key.assert_valid(@src());
+            key.assert_lockable_idx(@src());
+            const mapping_lock = lock_pool_and_index_for_write(key.idx);
+            key.assert_valid_internal(@src());
             const val_idx = maps[key.idx].idx;
             const last_val_idx = vals_len - 1;
             if (val_idx < last_val_idx) {
@@ -347,7 +363,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             maps[key.idx].idx = first_free_mapping;
             first_free_mapping = key.idx;
             num_free_in_list += 1;
-            unlock_pool_and_index_for_write(key.idx);
+            unlock_pool_and_index_for_write(mapping_lock);
         }
     };
 }
