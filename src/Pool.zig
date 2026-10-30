@@ -36,6 +36,8 @@ const num_cast = Root.Cast.num_cast;
 
 const List = Root.ListSlice.ListAllocated;
 pub const Simple = @import("./Pool_Simple.zig");
+pub const MappedKeyPoolModule = @import("./Pool_MappedKeyPool.zig");
+pub const GlobalMappedKeyPool = MappedKeyPoolModule.GlobalMappedKeyPool;
 
 pub const PoolDef = struct {
     LIST_DEF: Root.ListSlice.ListDef,
