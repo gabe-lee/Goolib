@@ -21,6 +21,7 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 const std = @import("std");
+const build = @import("builtin");
 const math = std.math;
 const Root = @import("./_root.zig");
 const Types = Root.Types;
@@ -38,6 +39,14 @@ const List = Root.ListSlice.ListAllocated;
 pub const Simple = @import("./Pool_Simple.zig");
 pub const MappedKeyPoolModule = @import("./Pool_MappedKeyPool.zig");
 pub const GlobalMappedKeyPool = MappedKeyPoolModule.GlobalMappedKeyPool;
+
+comptime {
+    if (build.is_test) {
+        _ = @import("./Pool_Simple.zig");
+        _ = @import("./Pool_MappedKeyPool.zig");
+        _ = @import("./Pool_Tests.zig");
+    }
+}
 
 pub const PoolDef = struct {
     LIST_DEF: Root.ListSlice.ListDef,
