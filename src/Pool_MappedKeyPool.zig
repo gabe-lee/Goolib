@@ -38,16 +38,16 @@ const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
 pub const MutexMode = enum {
-    NO_MUTEXES,
-    MASTER_MUTEX,
-    MASTER_AND_BLOCK_MUTEX,
+    NO_LOCKS,
+    MASTER_LOCK,
+    MASTER_AND_BLOCK_LOCK,
 };
 
 pub const PoolDef = struct {
     ELEM: type,
     IDX: type,
-    MUTEX_MODE: MutexMode,
-    MUTEX_BLOCK_COVERAGE: comptime_int = 64,
+    LOCK_MODE: MutexMode,
+    LOCK_BLOCK_COVERAGE: comptime_int = 64,
 };
 
 const FieldAccessMode = enum {
@@ -66,7 +66,7 @@ fn FieldIntType(comptime num_fields: usize) type {
 
 pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
     assert_with_reason(Types.type_is_unsigned_int(DEF.IDX), @src(), "type `IDX` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.IDX)});
-    assert_with_reason(DEF.MUTEX_MODE == .NO_MUTEXES or DEF.MUTEX_BLOCK_COVERAGE > 0, @src(), "MUTEX_BLOCK_COVERAGE must be larger than 0", .{});
+    assert_with_reason(DEF.LOCK_MODE == .NO_LOCKS or DEF.LOCK_BLOCK_COVERAGE > 0, @src(), "MUTEX_BLOCK_COVERAGE must be larger than 0", .{});
     const FA_MODE_, const FIELDS_ENUM_, const FIELDS_TYPES_ = make: {
         const INFO = @typeInfo(DEF.ELEM);
         switch (INFO) {
@@ -120,10 +120,10 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         pub const POOL_DEF = DEF;
         pub const ELEM = DEF.ELEM;
         pub const IDX = DEF.IDX;
-        const MUTEX = DEF.MUTEX_MODE;
-        const MUTEX_BLOCK_LEN = DEF.MUTEX_BLOCK_COVERAGE;
-        const MASTER_LOCK = MUTEX == .MASTER_MUTEX or MUTEX == .MASTER_AND_BLOCK_MUTEX;
-        const BLOCK_LOCK = MUTEX == .MASTER_AND_BLOCK_MUTEX;
+        const MUTEX = DEF.LOCK_MODE;
+        const MUTEX_BLOCK_LEN = DEF.LOCK_BLOCK_COVERAGE;
+        const MASTER_LOCK = MUTEX == .MASTER_LOCK or MUTEX == .MASTER_AND_BLOCK_LOCK;
+        const BLOCK_LOCK = MUTEX == .MASTER_AND_BLOCK_LOCK;
         const NEED_IO = MASTER_LOCK;
         const FA_MODE = FA_MODE_;
         pub const FieldEnum = FIELDS_ENUM_;
@@ -146,7 +146,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         inline fn FieldType(comptime field: FieldEnum) type {
             return FIELDS_TYPES[@backingInt(field)];
         }
-        fn lock_pool_and_index_for_read(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
+        pub fn lock_pool_and_index_for_read(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
                 master_lock.lockSharedUncancelable(io);
@@ -158,7 +158,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             }
             return mapping_lock;
         }
-        fn unlock_pool_and_index_for_read(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
+        pub fn unlock_pool_and_index_for_read(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
             if (comptime MASTER_LOCK) {
                 if (comptime BLOCK_LOCK) {
                     mapping_lock.unlockShared(io);
@@ -166,7 +166,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 master_lock.unlockShared(io);
             }
         }
-        fn lock_pool_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
+        pub fn lock_pool_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
                 master_lock.lockUncancelable(io);
@@ -178,7 +178,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             }
             return mapping_lock;
         }
-        fn unlock_pool_and_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
+        pub fn unlock_pool_and_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
             if (comptime MASTER_LOCK) {
                 if (comptime BLOCK_LOCK) {
                     mapping_lock.unlock(io);
@@ -186,7 +186,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 master_lock.unlock(io);
             }
         }
-        fn lock_pool_for_read_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
+        pub fn lock_pool_for_read_and_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime MASTER_LOCK) {
                 if (comptime BLOCK_LOCK) {
@@ -200,7 +200,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             }
             return mapping_lock;
         }
-        fn unlock_pool_for_read_and_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
+        pub fn unlock_pool_for_read_and_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
             if (comptime MASTER_LOCK) {
                 if (comptime BLOCK_LOCK) {
                     mapping_lock.unlock(io);
@@ -210,17 +210,41 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 }
             }
         }
-        fn lock_pool_for_write() void {
+        pub fn lock_pool_for_write() void {
             if (comptime MASTER_LOCK) {
                 master_lock.lockUncancelable(io);
             }
         }
-        fn unlock_pool_for_write() void {
+        pub fn unlock_pool_for_write() void {
             if (comptime MASTER_LOCK) {
                 master_lock.unlock(io);
             }
         }
-        fn lock_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
+        pub fn lock_pool_for_read() void {
+            if (comptime MASTER_LOCK) {
+                master_lock.lockSharedUncancelable(io);
+            }
+        }
+        pub fn unlock_pool_for_read() void {
+            if (comptime MASTER_LOCK) {
+                master_lock.unlockShared(io);
+            }
+        }
+        pub fn lock_index_for_read(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
+            var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
+            if (comptime BLOCK_LOCK) {
+                const block_lock_idx = mutex_block_idx(idx);
+                mapping_lock = &block_locks[block_lock_idx];
+                mapping_lock.lockSharedUncancelable(io);
+            }
+            return mapping_lock;
+        }
+        pub fn unlock_index_for_read(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
+            if (comptime BLOCK_LOCK) {
+                mapping_lock.unlockShared(io);
+            }
+        }
+        pub fn lock_index_for_write(idx: IDX) if (BLOCK_LOCK) *RwLock else void {
             var mapping_lock: if (BLOCK_LOCK) *RwLock else void = if (comptime BLOCK_LOCK) undefined else {};
             if (comptime BLOCK_LOCK) {
                 const block_lock_idx = mutex_block_idx(idx);
@@ -229,10 +253,63 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             }
             return mapping_lock;
         }
-        fn unlock_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
+        pub fn unlock_index_for_write(mapping_lock: if (BLOCK_LOCK) *RwLock else void) void {
             if (comptime BLOCK_LOCK) {
                 mapping_lock.unlock(io);
             }
+        }
+        fn key_for_value_index_internal(val_idx: IDX) Key {
+            assert_with_reason(val_idx < vals_len, @src(), "val index beyond range of vals data ({d} >= len {d})", .{ val_idx, vals_len });
+            const map_idx = vals_to_maps[val_idx];
+            const key = Key{
+                .idx = map_idx,
+                .gen = maps[map_idx].gen,
+            };
+            return key;
+        }
+        pub fn key_for_value_index(val_idx: IDX) Key {
+            lock_pool_for_read();
+            assert_with_reason(val_idx < vals_len, @src(), "val index beyond range of vals data ({d} >= len {d})", .{ val_idx, vals_len });
+            const map_idx = vals_to_maps[val_idx];
+            const mapping_lock = lock_index_for_read(map_idx);
+            const key = Key{
+                .idx = map_idx,
+                .gen = maps[map_idx].gen,
+            };
+            unlock_index_for_read(mapping_lock);
+            unlock_pool_for_read();
+            return key;
+        }
+        pub fn const_key_for_value_index(val_idx: IDX) ConstKey {
+            lock_pool_for_read();
+            assert_with_reason(val_idx < vals_len, @src(), "val index beyond range of vals data ({d} >= len {d})", .{ val_idx, vals_len });
+            const map_idx = vals_to_maps[val_idx];
+            const mapping_lock = lock_index_for_read(map_idx);
+            const key = ConstKey{
+                .idx = map_idx,
+                .gen = maps[map_idx].gen,
+            };
+            unlock_index_for_read(mapping_lock);
+            unlock_pool_for_read();
+            return key;
+        }
+        pub fn key_for_value_index_ignore_lock(val_idx: IDX) Key {
+            assert_with_reason(val_idx < vals_len, @src(), "val index beyond range of vals data ({d} >= len {d})", .{ val_idx, vals_len });
+            const map_idx = vals_to_maps[val_idx];
+            const key = Key{
+                .idx = map_idx,
+                .gen = maps[map_idx].gen,
+            };
+            return key;
+        }
+        pub fn const_key_for_value_index_ignore_lock(val_idx: IDX) ConstKey {
+            assert_with_reason(val_idx < vals_len, @src(), "val index beyond range of vals data ({d} >= len {d})", .{ val_idx, vals_len });
+            const map_idx = vals_to_maps[val_idx];
+            const key = ConstKey{
+                .idx = map_idx,
+                .gen = maps[map_idx].gen,
+            };
+            return key;
         }
 
         pub const Mapping = struct {
@@ -246,6 +323,23 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
 
             inline fn assert_lockable_idx(self: Key, comptime src: ?std.builtin.SourceLocation) void {
                 assert_with_reason(self.idx < capacity, src, "key index ({d}) is outside the pool capacity ({d})", .{ self.idx, capacity });
+            }
+            inline fn to_const(self: Key) ConstKey {
+                return ConstKey{
+                    .idx = self.idx,
+                    .gen = self.gen,
+                };
+            }
+            pub fn val_index(self: Key) IDX {
+                self.assert_lockable_idx(@src());
+                const mapping_lock = lock_pool_and_index_for_read(self.idx);
+                const val_idx = maps[self.idx].idx;
+                unlock_pool_and_index_for_read(mapping_lock);
+                return val_idx;
+            }
+            pub fn val_index_ignore_lock(self: Key) IDX {
+                const val_idx = maps[self.idx].idx;
+                return val_idx;
             }
             pub fn get(self: Key) ELEM {
                 self.assert_lockable_idx(@src());
@@ -267,6 +361,20 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 unlock_pool_and_index_for_read(mapping_lock);
                 return val;
             }
+            pub fn get_ignore_lock(self: Key) ELEM {
+                self.assert_valid_internal(@src());
+                const val = vals[maps[self.idx].idx];
+                return val;
+            }
+            pub fn get_field_ignore_lock(self: Key, comptime field: FieldEnum) FieldType(field) {
+                assert_field_access(@src());
+                self.assert_valid_internal(@src());
+                if (comptime FA_MODE == .UNION_TAGGED) {
+                    assert_tagged_field_active(vals[maps[self.idx].idx], field, @src());
+                }
+                const val: FieldType(field) = @field(&vals[maps[self.idx].idx], @tagName(field));
+                return val;
+            }
             pub fn set(self: Key, val: ELEM) void {
                 self.assert_lockable_idx(@src());
                 const mapping_lock = lock_pool_for_read_and_index_for_write(self.idx);
@@ -285,6 +393,19 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                     @field(&vals[maps[self.idx].idx], @tagName(field)) = val;
                 }
                 unlock_pool_for_read_and_index_for_write(mapping_lock);
+            }
+            pub fn set_ignore_lock(self: Key, val: ELEM) void {
+                self.assert_valid_internal(@src());
+                vals[maps[self.idx].idx] = val;
+            }
+            pub fn set_field_ignore_lock(self: Key, comptime field: FieldEnum, val: FieldType(field)) void {
+                assert_field_access(@src());
+                self.assert_valid_internal(@src());
+                if (comptime FA_MODE == .UNION_TAGGED or FA_MODE == .UNION_UNTAGGED) {
+                    vals[maps[self.idx].idx] = @unionInit(ELEM, @tagName(field), val);
+                } else {
+                    @field(&vals[maps[self.idx].idx], @tagName(field)) = val;
+                }
             }
             pub fn release(self: Key) void {
                 release_key(self);
@@ -310,6 +431,47 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 assert_with_reason(maps[self.idx].gen & FREE_USED_BIT == USED_STATE, src, "key generation is not in a used state", .{});
                 assert_with_reason(maps[self.idx].idx < vals_len, src, "key points to mapping that points to value index beyond values len ({d} >= len {d})", .{ maps[self.idx].idx, vals_len });
                 unlock_pool_and_index_for_read(mapping_lock);
+            }
+        };
+        pub const ConstKey = struct {
+            idx: IDX = INVALID_IDX,
+            gen: IDX = 0,
+
+            inline fn to_key(self: ConstKey) Key {
+                return Key{
+                    .idx = self.idx,
+                    .gen = self.gen,
+                };
+            }
+            pub inline fn val_index(self: ConstKey) IDX {
+                return self.to_key().val_index();
+            }
+            pub inline fn val_index_ignore_lock(self: ConstKey) IDX {
+                return self.to_key().val_index_ignore_lock();
+            }
+            pub inline fn get(self: ConstKey) ELEM {
+                return self.to_key().get();
+            }
+            pub inline fn get_field(self: ConstKey, comptime field: FieldEnum) FieldType(field) {
+                return self.to_key().get_field(field);
+            }
+            pub inline fn get_ignore_lock(self: ConstKey) ELEM {
+                return self.to_key().get_ignore_lock();
+            }
+            pub inline fn get_field_ignore_lock(self: ConstKey, comptime field: FieldEnum) FieldType(field) {
+                return self.to_key().get_field_ignore_lock(field);
+            }
+            pub inline fn release(self: ConstKey) void {
+                return release_key(self);
+            }
+            pub inline fn is_valid(self: ConstKey) bool {
+                return self.to_key().is_valid();
+            }
+            inline fn assert_valid_internal(self: ConstKey, comptime src: ?std.builtin.SourceLocation) void {
+                return self.to_key().assert_valid_internal(src);
+            }
+            pub inline fn assert_valid(self: ConstKey, comptime src: ?std.builtin.SourceLocation) void {
+                return self.to_key().assert_valid(src);
             }
         };
 
@@ -445,6 +607,134 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             first_free_mapping = key.idx;
             num_free_in_list += 1;
             unlock_pool_and_index_for_write(mapping_lock);
+        }
+
+        pub const Iterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?Key {
+                lock_pool_for_read();
+                if (self.val_idx >= vals_len) {
+                    unlock_pool_for_read();
+                    return null;
+                }
+                const key = Key{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                unlock_pool_for_read();
+                self.val_idx += 1;
+                return key;
+            }
+        };
+        pub const ConstIterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?ConstKey {
+                lock_pool_for_read();
+                if (self.val_idx >= vals_len) {
+                    unlock_pool_for_read();
+                    return null;
+                }
+                const key = ConstKey{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                unlock_pool_for_read();
+                self.val_idx += 1;
+                return key;
+            }
+        };
+        pub const IgnoreLockIterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?Key {
+                if (self.val_idx >= vals_len) {
+                    return null;
+                }
+                const key = Key{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                self.val_idx += 1;
+                return key;
+            }
+        };
+        pub const IgnoreLockConstIterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?ConstKey {
+                if (self.val_idx >= vals_len) {
+                    return null;
+                }
+                const key = ConstKey{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                self.val_idx += 1;
+                return key;
+            }
+        };
+        pub const PreLockedIterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?Key {
+                if (self.val_idx >= vals_len) {
+                    return null;
+                }
+                const key = Key{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                self.val_idx += 1;
+                return key;
+            }
+
+            pub fn unlock_and_end(self: *Iterator) void {
+                self.val_idx = INVALID_IDX;
+                unlock_pool_for_write();
+            }
+        };
+        pub const PreLockedConstIterator = struct {
+            val_idx: IDX = 0,
+
+            pub fn next(self: *Iterator) ?ConstKey {
+                if (self.val_idx >= vals_len) {
+                    return null;
+                }
+                const key = ConstKey{
+                    .idx = vals_to_maps[self.val_idx],
+                    .gen = maps[vals_to_maps[self.val_idx]].gen,
+                };
+                self.val_idx += 1;
+                return key;
+            }
+
+            pub fn unlock_and_end(self: *Iterator) void {
+                self.val_idx = INVALID_IDX;
+                unlock_pool_for_read();
+            }
+        };
+
+        pub fn iterator() Iterator {
+            return Iterator{};
+        }
+        pub fn const_iterator() Iterator {
+            return ConstIterator{};
+        }
+        pub fn iterator_ignore_locks() IgnoreLockIterator {
+            return IgnoreLockIterator{};
+        }
+        pub fn const_iterator_ignore_locks() IgnoreLockConstIterator {
+            return IgnoreLockConstIterator{};
+        }
+        pub fn iterator_pre_locked() PreLockedIterator {
+            lock_pool_for_write();
+            return PreLockedIterator{};
+        }
+        pub fn const_iterator_pre_locked() PreLockedConstIterator {
+            lock_pool_for_read();
+            return PreLockedConstIterator{};
         }
     };
 }

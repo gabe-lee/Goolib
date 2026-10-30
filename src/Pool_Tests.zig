@@ -29,7 +29,7 @@ const GlobalMappedKeyPool = Root.Pool.GlobalMappedKeyPool;
 const TestPool = GlobalMappedKeyPool(.{
     .ELEM = u32,
     .IDX = u32,
-    .MUTEX_MODE = .NO_MUTEXES,
+    .LOCK_MODE = .NO_LOCKS,
 });
 
 test "GlobalMappedKeyPool -> claim, get, set, and release" {
@@ -256,12 +256,12 @@ test "GlobalMappedKeyPool -> randomized claims and releases match a model" {
 test "GlobalMappedKeyPool -> mutex modes support claim, get, set, release, and growth" {
     // Without at least one instantiation per mutex mode the threaded code paths are never
     // compiled, which hides both compile errors and locking mistakes.
-    inline for (.{ .MASTER_MUTEX, .MASTER_AND_BLOCK_MUTEX }) |mutex_mode| {
+    inline for (.{ .MASTER_LOCK, .MASTER_AND_BLOCK_LOCK }) |mutex_mode| {
         const ThreadedPool = GlobalMappedKeyPool(.{
             .ELEM = u32,
             .IDX = u32,
-            .MUTEX_MODE = mutex_mode,
-            .MUTEX_BLOCK_COVERAGE = 64,
+            .LOCK_MODE = mutex_mode,
+            .LOCK_BLOCK_COVERAGE = 64,
         });
 
         var threaded: std.Io.Threaded = .init(testing.allocator, .{});
@@ -318,7 +318,7 @@ const StructPool = GlobalMappedKeyPool(.{
         z: f32,
     },
     .IDX = u32,
-    .MUTEX_MODE = .NO_MUTEXES,
+    .LOCK_MODE = .NO_LOCKS,
 });
 
 const TaggedUnionPool = GlobalMappedKeyPool(.{
@@ -327,7 +327,7 @@ const TaggedUnionPool = GlobalMappedKeyPool(.{
         bytes: [4]u8,
     },
     .IDX = u32,
-    .MUTEX_MODE = .NO_MUTEXES,
+    .LOCK_MODE = .NO_LOCKS,
 });
 
 const UntaggedUnionPool = GlobalMappedKeyPool(.{
@@ -336,7 +336,7 @@ const UntaggedUnionPool = GlobalMappedKeyPool(.{
         bytes: [4]u8,
     },
     .IDX = u32,
-    .MUTEX_MODE = .NO_MUTEXES,
+    .LOCK_MODE = .NO_LOCKS,
 });
 
 test "GlobalMappedKeyPool -> struct field access" {
@@ -420,4 +420,20 @@ test "GlobalMappedKeyPool -> untagged union field access" {
     key.set_field(.int, 42);
     try testing.expectEqual(@as(i32, 42), key.get_field(.int));
     try testing.expectEqual(@as(i32, 42), key.get().int);
+}
+
+test "GlobalMappedKeyPool -> separate declarations with the same def have same memory" {
+    TestPool.init(5, testing.allocator, {});
+    defer TestPool.uninit();
+    const TestPoolClone = GlobalMappedKeyPool(.{
+        .ELEM = u32,
+        .IDX = u32,
+        .LOCK_MODE = .NO_LOCKS,
+    });
+
+    const key = TestPool.claim_key();
+    key.set(777);
+    const val_idx = key.val_index();
+    const key_clone = TestPoolClone.key_for_value_index(val_idx);
+    try testing.expectEqual(key_clone.get(), key.get());
 }
