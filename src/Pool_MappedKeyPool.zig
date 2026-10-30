@@ -52,9 +52,17 @@ pub const PoolDef = struct {
 
 const FieldAccessMode = enum {
     NOT_SUPPORTED,
-    UNION,
+    UNION_TAGGED,
+    UNION_UNTAGGED,
     STRUCT,
 };
+
+fn FieldIntType(comptime num_fields: usize) type {
+    if (num_fields <= math.maxInt(u8)) return u8;
+    if (num_fields <= math.maxInt(u16)) return u16;
+    if (num_fields <= math.maxInt(u32)) return u32;
+    return u64;
+}
 
 pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
     assert_with_reason(Types.type_is_unsigned_int(DEF.IDX), @src(), "type `IDX` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.IDX)});
@@ -65,13 +73,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             .@"struct" => |STRUCT_INFO| {
                 const num_fields = STRUCT_INFO.field_types.len;
                 assert_with_reason(num_fields > 0, @src(), "cannot store a struct with zero fields", .{});
-                const E_INT = switch (num_fields) {
-                    0...math.maxInt(u8) => u8,
-                    (math.maxInt(u8) + 1)...math.maxInt(u16) => u16,
-                    (math.maxInt(u16) + 1)...math.maxInt(u32) => u32,
-                    (math.maxInt(u32) + 1)...math.maxInt(u64) => u64,
-                    else => unreachable,
-                };
+                const E_INT = FieldIntType(num_fields);
                 comptime var e_vals: [num_fields]E_INT = undefined;
                 comptime var types: [num_fields]type = undefined;
                 for (0..num_fields) |f| {
@@ -83,20 +85,14 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             .@"union" => |UNION_INFO| {
                 const num_fields = UNION_INFO.field_types.len;
                 assert_with_reason(num_fields > 0, @src(), "cannot store a union with zero fields", .{});
-                const E_INT = switch (num_fields) {
-                    0...math.maxInt(u8) => u8,
-                    (math.maxInt(u8) + 1)...math.maxInt(u16) => u16,
-                    (math.maxInt(u16) + 1)...math.maxInt(u32) => u32,
-                    (math.maxInt(u32) + 1)...math.maxInt(u64) => u64,
-                    else => unreachable,
-                };
+                const E_INT = FieldIntType(num_fields);
                 comptime var e_vals: [num_fields]E_INT = undefined;
                 comptime var types: [num_fields]type = undefined;
                 for (0..num_fields) |f| {
                     e_vals[f] = @intCast(f);
                     types[f] = UNION_INFO.field_types[f];
                 }
-                break :make .{ FieldAccessMode.UNION, @Enum(E_INT, .exhaustive, UNION_INFO.field_names, &e_vals), types };
+                break :make .{ if (UNION_INFO.tag_type != null) FieldAccessMode.UNION_TAGGED else FieldAccessMode.UNION_UNTAGGED, @Enum(E_INT, .exhaustive, UNION_INFO.field_names, &e_vals), types };
             },
             else => {
                 break :make .{ FieldAccessMode.NOT_SUPPORTED, enum { @"!NOT_SUPPORTED" }, [1]type{DEF.ELEM} };
@@ -142,7 +138,10 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             return idx / MUTEX_BLOCK_LEN;
         }
         inline fn assert_field_access(comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(FA_MODE != .NOT_SUPPORTED, src, "field access not supported", .{});
+            comptime assert_with_reason(FA_MODE != .NOT_SUPPORTED, src, "field access not supported", .{});
+        }
+        inline fn assert_tagged_field_active(union_val: ELEM, comptime field: FieldEnum, comptime src: ?std.builtin.SourceLocation) void {
+            assert_with_reason(std.meta.activeTag(union_val) == std.meta.activeTag(@unionInit(ELEM, @tagName(field), undefined)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
         }
         inline fn FieldType(comptime field: FieldEnum) type {
             return FIELDS_TYPES[@backingInt(field)];
@@ -261,6 +260,9 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 self.assert_lockable_idx(@src());
                 const mapping_lock = lock_pool_and_index_for_read(self.idx);
                 self.assert_valid_internal(@src());
+                if (comptime FA_MODE == .UNION_TAGGED) {
+                    assert_tagged_field_active(vals[maps[self.idx].idx], field, @src());
+                }
                 const val: FieldType(field) = @field(&vals[maps[self.idx].idx], @tagName(field));
                 unlock_pool_and_index_for_read(mapping_lock);
                 return val;
@@ -277,7 +279,11 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 self.assert_lockable_idx(@src());
                 const mapping_lock = lock_pool_for_read_and_index_for_write(self.idx);
                 self.assert_valid_internal(@src());
-                @field(&vals[maps[self.idx].idx], @tagName(field)) = val;
+                if (comptime FA_MODE == .UNION_TAGGED or FA_MODE == .UNION_UNTAGGED) {
+                    vals[maps[self.idx].idx] = @unionInit(ELEM, @tagName(field), val);
+                } else {
+                    @field(&vals[maps[self.idx].idx], @tagName(field)) = val;
+                }
                 unlock_pool_for_read_and_index_for_write(mapping_lock);
             }
             pub fn release(self: Key) void {

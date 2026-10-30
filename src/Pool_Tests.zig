@@ -310,3 +310,114 @@ fn nextPermutation(items: []usize) bool {
     std.mem.reverse(usize, items[i..]);
     return true;
 }
+
+const StructPool = GlobalMappedKeyPool(.{
+    .ELEM = struct {
+        x: u32,
+        y: i32,
+        z: f32,
+    },
+    .IDX = u32,
+    .MUTEX_MODE = .NO_MUTEXES,
+});
+
+const TaggedUnionPool = GlobalMappedKeyPool(.{
+    .ELEM = union(enum) {
+        int: i32,
+        bytes: [4]u8,
+    },
+    .IDX = u32,
+    .MUTEX_MODE = .NO_MUTEXES,
+});
+
+const UntaggedUnionPool = GlobalMappedKeyPool(.{
+    .ELEM = union {
+        int: i32,
+        bytes: [4]u8,
+    },
+    .IDX = u32,
+    .MUTEX_MODE = .NO_MUTEXES,
+});
+
+test "GlobalMappedKeyPool -> struct field access" {
+    StructPool.init(0, testing.allocator, {});
+    defer StructPool.uninit();
+
+    const key = StructPool.claim_key();
+    key.set(.{ .x = 1, .y = -2, .z = 3.5 });
+
+    try testing.expectEqual(@as(u32, 1), key.get_field(.x));
+    try testing.expectEqual(@as(i32, -2), key.get_field(.y));
+    try testing.expectEqual(@as(f32, 3.5), key.get_field(.z));
+
+    key.set_field(.x, 10);
+    key.set_field(.y, 20);
+    key.set_field(.z, 30.5);
+
+    try testing.expectEqual(@as(u32, 10), key.get_field(.x));
+    try testing.expectEqual(@as(i32, 20), key.get_field(.y));
+    try testing.expectEqual(@as(f32, 30.5), key.get_field(.z));
+
+    const whole = key.get();
+    try testing.expectEqual(@as(u32, 10), whole.x);
+    try testing.expectEqual(@as(i32, 20), whole.y);
+    try testing.expectEqual(@as(f32, 30.5), whole.z);
+}
+
+test "GlobalMappedKeyPool -> struct field access survives swap-remove" {
+    StructPool.init(0, testing.allocator, {});
+    defer StructPool.uninit();
+
+    var keys: [3]StructPool.Key = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = StructPool.claim_key();
+        key.set(.{ .x = @intCast(i), .y = @intCast(i), .z = @floatFromInt(i) });
+    }
+
+    // Releasing the first key moves the last value into its slot and updates
+    // the mapping of the last key.
+    keys[0].release();
+    try testing.expect(!keys[0].is_valid());
+
+    try testing.expectEqual(@as(u32, 1), keys[1].get_field(.x));
+    try testing.expectEqual(@as(i32, 1), keys[1].get_field(.y));
+    try testing.expectEqual(@as(f32, 1.0), keys[1].get_field(.z));
+
+    try testing.expectEqual(@as(u32, 2), keys[2].get_field(.x));
+    try testing.expectEqual(@as(i32, 2), keys[2].get_field(.y));
+    try testing.expectEqual(@as(f32, 2.0), keys[2].get_field(.z));
+}
+
+test "GlobalMappedKeyPool -> tagged union field access checks and updates the tag" {
+    TaggedUnionPool.init(0, testing.allocator, {});
+    defer TaggedUnionPool.uninit();
+
+    const key = TaggedUnionPool.claim_key();
+    key.set(.{ .int = -7 });
+    try testing.expectEqual(@as(i32, -7), key.get_field(.int));
+    try testing.expect(std.meta.activeTag(key.get()) == .int);
+
+    // Setting a different field switches the tag, just like assigning
+    // `key.set(.{ .bytes = ... })` would.
+    key.set_field(.bytes, .{ 1, 2, 3, 4 });
+    try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get_field(.bytes));
+    try testing.expect(std.meta.activeTag(key.get()) == .bytes);
+
+    // Setting the original field back switches the tag again.
+    key.set_field(.int, 42);
+    try testing.expectEqual(@as(i32, 42), key.get_field(.int));
+    try testing.expect(std.meta.activeTag(key.get()) == .int);
+}
+
+test "GlobalMappedKeyPool -> untagged union field access" {
+    UntaggedUnionPool.init(0, testing.allocator, {});
+    defer UntaggedUnionPool.uninit();
+
+    const key = UntaggedUnionPool.claim_key();
+    key.set(.{ .int = -7 });
+    try testing.expectEqual(@as(i32, -7), key.get_field(.int));
+
+    key.set_field(.int, 42);
+    try testing.expectEqual(@as(i32, 42), key.get_field(.int));
+    try testing.expectEqual(@as(i32, 42), key.get().int);
+}
