@@ -50,6 +50,7 @@ pub const SecondaryListSettings = struct {
     clear_released: ?*const anyopaque = null,
 };
 
+//DEPRECATE
 pub fn SimplePool(comptime T: type, comptime IDX: type, comptime MEMSET_CLAIMED: ?T, comptime CLEAR_RELEASED: ?T, comptime SECONDARY_LIST: ?SecondaryListSettings) type {
     assert_with_reason(Types.type_is_unsigned_int(IDX), @src(), "type `IDX` must be an unsigned int type, got type `{s}`", .{@typeName(IDX)});
     const HAS_SECONDARY = SECONDARY_LIST != null;
