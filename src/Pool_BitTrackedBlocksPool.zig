@@ -88,38 +88,6 @@ const BLOCK_LIST_MIN_GROWTH = 32;
 pub fn BitTrackedPool(comptime DEF: PoolDef) type {
     assert_with_reason(Types.type_is_unsigned_int(DEF.IDX), @src(), "type `IDX` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.IDX)});
     assert_with_reason(@sizeOf(DEF.ELEM) > 0, @src(), "type `ELEM` must have a non-zero size so that every slot has a distinct address", .{});
-    const FA_MODE_, const FIELDS_ENUM_, const FIELDS_TYPES_ = make: {
-        const INFO = @typeInfo(DEF.ELEM);
-        switch (INFO) {
-            .@"struct" => |STRUCT_INFO| {
-                const num_fields = STRUCT_INFO.field_types.len;
-                assert_with_reason(num_fields > 0, @src(), "cannot store a struct with zero fields", .{});
-                const E_INT = FieldIntType(num_fields);
-                comptime var e_vals: [num_fields]E_INT = undefined;
-                comptime var types: [num_fields]type = undefined;
-                for (0..num_fields) |f| {
-                    e_vals[f] = @intCast(f);
-                    types[f] = STRUCT_INFO.field_types[f];
-                }
-                break :make .{ FieldAccessMode.STRUCT, @Enum(E_INT, .exhaustive, STRUCT_INFO.field_names, &e_vals), types };
-            },
-            .@"union" => |UNION_INFO| {
-                const num_fields = UNION_INFO.field_types.len;
-                assert_with_reason(num_fields > 0, @src(), "cannot store a union with zero fields", .{});
-                const E_INT = FieldIntType(num_fields);
-                comptime var e_vals: [num_fields]E_INT = undefined;
-                comptime var types: [num_fields]type = undefined;
-                for (0..num_fields) |f| {
-                    e_vals[f] = @intCast(f);
-                    types[f] = UNION_INFO.field_types[f];
-                }
-                break :make .{ if (UNION_INFO.tag_type != null) FieldAccessMode.UNION_TAGGED else FieldAccessMode.UNION_UNTAGGED, @Enum(E_INT, .exhaustive, UNION_INFO.field_names, &e_vals), types };
-            },
-            else => {
-                break :make .{ FieldAccessMode.NOT_SUPPORTED, enum { @"!NOT_SUPPORTED" }, [1]type{DEF.ELEM} };
-            },
-        }
-    };
     assert_with_reason(DEF.DATA_BLOCK_SIZE.value() >= @bitSizeOf(usize), @src(), "`DATA_BLOCK_SIZE` ({d}) must be AT LEAST {d} large (num bits in `usize`)", .{ DEF.DATA_BLOCK_SIZE.value(), @bitSizeOf(usize) });
     assert_with_reason(DEF.DATA_BLOCK_SIZE.value() <= math.maxInt(DEF.IDX), @src(), "`DATA_BLOCK_SIZE` ({d}) must be <= `math.maxInt(IDX)` ({d})", .{ DEF.DATA_BLOCK_SIZE.value(), math.maxInt(DEF.IDX) });
     return struct {
@@ -130,13 +98,10 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         const LOCK_MODE = DEF.LOCK_MODE;
         const MASTER_LOCK = LOCK_MODE == .MASTER_LOCK or LOCK_MODE == .MASTER_AND_BLOCK_LOCK;
         const NEED_IO = MASTER_LOCK;
-        const FA_MODE = FA_MODE_;
         const DATA_BLOCK_SIZE_POWER = DEF.DATA_BLOCK_SIZE;
         const DATA_BLOCK_SLOT_LENGTH = DATA_BLOCK_SIZE_POWER.value_as_type(IDX);
         const DATA_BLOCK_STATE_GROUP_LENGTH = DATA_BLOCK_SLOT_LENGTH >> @intCast(USIZE_SHIFT);
         const DATA_BLOCK_STATE_VEC_SIZE = DATA_BLOCK_STATE_GROUP_LENGTH / STATE_SIMD_WIDTH;
-        pub const FieldEnum = FIELDS_ENUM_;
-        const FIELDS_TYPES = FIELDS_TYPES_;
         const INVALID_IDX = math.maxInt(IDX);
         const FREE_STATE: usize = 0b1;
         const USED_STATE: usize = 0b0;
@@ -177,16 +142,6 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         cached_alloc: CachedAlloc = CACHED_ALLOC_DEFAULT,
         master_lock: if (MASTER_LOCK) RwLock else void = if (MASTER_LOCK) RwLock.init else {},
         io: if (NEED_IO) Io else void = if (NEED_IO) undefined else {},
-
-        inline fn assert_field_access(comptime src: ?std.builtin.SourceLocation) void {
-            comptime assert_with_reason(FA_MODE != .NOT_SUPPORTED, src, "field access not supported", .{});
-        }
-        inline fn assert_tagged_field_active(union_val: ELEM, comptime field: FieldEnum, comptime src: ?std.builtin.SourceLocation) void {
-            assert_with_reason(std.meta.activeTag(union_val) == std.meta.activeTag(@unionInit(ELEM, @tagName(field), undefined)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
-        }
-        inline fn FieldType(comptime field: FieldEnum) type {
-            return FIELDS_TYPES[@backingInt(field)];
-        }
 
         fn data_block_contains_slot_addr(slice: DataBlockSlice, idx_in_list: IDX, _: *DataBlock, slot_addr: usize, comptime _: void) bool {
             const block_addr = @intFromPtr(slice.get(idx_in_list));
