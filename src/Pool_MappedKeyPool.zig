@@ -45,8 +45,8 @@ pub const MutexMode = enum {
 
 pub const PoolDef = struct {
     ELEM: type,
-    IDX: type,
-    LOCK_MODE: MutexMode,
+    IDX: type = u32,
+    LOCK_MODE: MutexMode = .NO_LOCKS,
     LOCK_BLOCK_COVERAGE: comptime_int = 64,
 };
 
