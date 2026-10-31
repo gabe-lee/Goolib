@@ -75,7 +75,7 @@ pub const ErrorBehavior = enum {
     /// Errors only panic in 'safe' modes, otherwise they are 'unreachable'
     ERRORS_ARE_UNREACHABLE,
 
-    pub inline fn handle(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anyerror) if (self.does_error()) @TypeOf(err) else noreturn {
+    pub inline fn handle(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anytype) if (self.does_error()) @TypeOf(err) else noreturn {
         return switch (self) {
             .RETURN_ERRORS => err,
             .RETURN_ERRORS_AND_WARN => warn: {

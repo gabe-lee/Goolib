@@ -223,20 +223,20 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub inline fn from_slice_keep_data(data_slice: []ELEM) List {
             return List{
-                .root_ptr = data_slice.ptr,
+                .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
             };
         }
         pub fn from_slice_set_empty(data_slice: []ELEM) List {
             return List{
-                .root_ptr = data_slice.ptr,
+                .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
             };
         }
         pub fn from_slice_const_keep_data(data_slice: []const ELEM) SliceConst {
             return SliceConst{
-                .root_ptr = data_slice.ptr,
+                .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
             };
@@ -262,7 +262,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub fn from_allocated_slice_keep_data(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
             return ListAlloc{
-                .root_ptr = data_slice.ptr,
+                .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
                 .cached_alloc = alloc,
@@ -270,7 +270,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub fn from_allocated_slice_set_empty(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
             return ListAlloc{
-                .root_ptr = data_slice.ptr,
+                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_cap = @intCast(data_slice.len),
                 .cached_alloc = alloc,
             };
         }
@@ -560,11 +561,14 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             const V = @TypeOf(val_);
             return switch (@typeInfo(V)) {
                 .pointer => |p| if (p.attrs.@"const") .{ coerce_anytype_to_list_ptr_const_with_same_elem_type(val_), V } else .{ coerce_anytype_to_list_ptr_with_same_elem_type(val_), V },
-                .@"struct" => .{coerce_anytype_to_list_with_same_elem_type(val_).V},
+                .@"struct" => .{ coerce_anytype_to_list_with_same_elem_type(val_), V },
                 else => assert_unreachable(@src(), "type `{s}` cannot be coerced to a Goolib List with elem type `{s}`", .{ @typeName(@TypeOf(val_)), @typeName(ELEM) }),
             };
         }
 
+        inline fn list_value_or_ptr_deref(v: anytype) Type.child_type_or_type(@TypeOf(v)) {
+            return if (comptime @typeInfo(@TypeOf(v)) == .pointer) v.* else v;
+        }
         pub inline fn FilterFnRT(comptime KIND: FuncParamType, comptime RT_CTX: type, comptime CT_CTX: type, comptime ERROR: ?type) type {
             return if (comptime ERROR) |E| switch (comptime KIND) {
                 .RUNTIME_FN_PTR => *const fn (List, IDX, RT_CTX, CT_CTX) E!bool,
@@ -775,7 +779,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .WHOLE_STRUCTS => {
                     switch (comptime INDEX_LAYOUT) {
                         .SERIAL_INDEXES => {
-                            @memset(zig_slice_entire(self), val);
+                            @memset(zig_slice(self, start, end_exclusive), val);
                         },
                     }
                 },
@@ -806,7 +810,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .WHOLE_STRUCTS => {
                     var i = start;
                     while (i < end_exclusive) : (i += 1) {
-                        self.set_field(field, i, val);
+                        set_field_true_idx(self, field, true_idx(self, i), val);
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -822,10 +826,10 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 },
             }
         }
-        pub fn memset_field_len(self: List, comptime field: Field, val: ELEM) void {
+        pub fn memset_field_len(self: List, comptime field: Field, val: FieldType(field)) void {
             self.memset_field_range(field, val, 0, get_len(self));
         }
-        pub fn memset_field_cap(self: List, comptime field: Field, val: ELEM) void {
+        pub fn memset_field_cap(self: List, comptime field: Field, val: FieldType(field)) void {
             self.memset_field_range(field, val, 0, get_cap(self));
         }
         //****************
@@ -1135,9 +1139,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn move_many_item_pointer_const(ptr: ElemPtrManyConst, delta_: isize) ElemPtrManyConst {
             if (delta_ < 0) {
                 const delta: IDX = @intCast(@abs(delta_));
-                return decr_many_item_pointer(ptr, delta);
+                return decr_many_item_pointer_const(ptr, delta);
             } else {
-                return incr_many_item_pointer(ptr, @intCast(delta_));
+                return incr_many_item_pointer_const(ptr, @intCast(delta_));
             }
         }
         pub fn cast_ptr_to_many_item_ptr(ptr: ElemPtr) ElemPtrMany {
@@ -1226,21 +1230,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             self.data_len += count;
         }
         pub inline fn incr_len_to_cap(self: *List) void {
-            self.data_len = get_cap(
-                self,
-            );
+            self.data_len = get_cap(self.*);
         }
         pub inline fn set_len_clamped(self: *List, new_len: IDX) void {
-            self.data_len = @min(new_len, get_cap(
-                self,
-            ));
+            self.data_len = @min(new_len, get_cap(self.*));
         }
         pub inline fn incr_len_clamped(self: *List, count: IDX) void {
             self.data_len +|= count;
-            self.data_len = @min(self.data_len, get_cap(
-                self,
-            ));
+            self.data_len = @min(self.data_len, get_cap(self.*));
         }
+
         pub inline fn decr_len(self: *List, count: IDX) void {
             assert_len_greater_equal_count(self.*, count, @src());
             self.data_len -= count;
@@ -1434,7 +1433,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
-                .slice_offset = get_slice_offset(self),
+                .slice_offset = get_slice_offset(self.*),
             };
             incr_slice_start_unchecked(self, count);
             self.decr_len_unchecked(count);
@@ -1448,7 +1447,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
-                .slice_offset = get_slice_offset(self),
+                .slice_offset = get_slice_offset(self.*),
             };
             incr_slice_start_unchecked(self, count);
             self.decr_len_unchecked(count);
@@ -1462,9 +1461,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
-                .slice_offset = get_slice_offset(self) + (get_len(
-                    self,
-                ) - count),
+                .slice_offset = get_slice_offset(self.*) + (get_len(self.*) - count),
             };
             self.decr_len_unchecked(count);
             return new_slice;
@@ -1476,9 +1473,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
-                .slice_offset = get_slice_offset(self) + (get_len(
-                    self,
-                ) - count),
+                .slice_offset = get_slice_offset(self.*) + (get_len(self.*) - count),
             };
             self.decr_len_unchecked(count);
             return new_slice;
@@ -2066,23 +2061,24 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             if (remaining_count == 0) return;
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const DEST = Type.child_type_or_type(@TypeOf(dest));
+            const dest_val: DEST = if (comptime @typeInfo(@TypeOf(dest)) == .pointer) dest.* else dest;
             DEST.IMPL.assert_mutable(@src());
             const DEST_IDX = DEST.LIST_DEF.IDX;
             const dest_start = num_cast(dest_start_, DEST_IDX);
-            DEST.IMPL.assert_idx_plus_count_less_equal_len(dest, @intCast(dest_start), @intCast(remaining_count), @src());
+            DEST.IMPL.assert_idx_plus_count_less_equal_len(dest_val, @intCast(dest_start), @intCast(remaining_count), @src());
             const dest_end_exclusive: DEST_IDX = dest_start + num_cast(remaining_count, DEST_IDX);
-            DEST.IMPL.assert_valid_idx_or_len(dest, @intCast(dest_end_exclusive), @src());
+            DEST.IMPL.assert_valid_idx_or_len(dest_val, @intCast(dest_end_exclusive), @src());
             if (comptime (FIELD_LAYOUT == .WHOLE_STRUCTS and DEST.LIST_DEF.FIELD_LAYOUT == .WHOLE_STRUCTS) or (FIELD_LAYOUT == .SPLIT_FIELDS and DEST.LIST_DEF.FIELD_LAYOUT == .SPLIT_FIELDS)) {
                 var remaining_self = self.slice_const(self_start, self_end_exclusive);
                 var remaining_dest = dest.slice(dest_start, dest_end_exclusive);
                 while (remaining_count > 0) {
                     const contiguous_self = SliceConst.IMPL.contiguous_indexes_after_index_inclusive_max(remaining_self, 0, remaining_count);
-                    const contiguous_dest: IDX = @intCast(DEST.IMPL.contiguous_indexes_after_index_inclusive_max(remaining_dest, 0, remaining_count));
+                    const contiguous_dest: IDX = @intCast(@TypeOf(remaining_dest).IMPL.contiguous_indexes_after_index_inclusive_max(remaining_dest, 0, remaining_count));
                     const copy_len = @min(contiguous_self, contiguous_dest);
                     switch (comptime FIELD_LAYOUT) {
                         .WHOLE_STRUCTS => {
                             const copy_src = SliceConst.IMPL.split_off_zig_slice_from_start_const(&remaining_self, copy_len);
-                            const copy_dst = DEST.IMPL.split_off_zig_slice_from_start(&remaining_dest, copy_len);
+                            const copy_dst = @TypeOf(remaining_dest).IMPL.split_off_zig_slice_from_start(&remaining_dest, copy_len);
                             if (memory_overlaps(ELEM, copy_src, copy_dst)) {
                                 @memmove(copy_dst, copy_src);
                             } else {
@@ -2139,7 +2135,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             assert_valid_range(self, self_start, self_end_exclusive, @src());
             const count = num_cast(self_end_exclusive - self_start, @TypeOf(dest.data_len));
-            dest.assert_count_less_equal_len(count, @src());
+            Type.child_type_or_type(@TypeOf(dest)).IMPL.assert_count_less_equal_len(list_value_or_ptr_deref(dest), count, @src());
             self.copy_self_range_to_dest_range(self_start, self_end_exclusive, dest, dest.data_len - count);
         }
         pub fn copy_self_start_to_dest_range(self: List, count: IDX, dest_: anytype, dest_start: anytype) void {
@@ -2153,7 +2149,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn copy_self_start_to_dest_end(self: List, count: IDX, dest_: anytype) void {
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const cast_count = num_cast(count, @TypeOf(dest.data_len));
-            dest.assert_count_less_equal_len(cast_count, @src());
+            Type.child_type_or_type(@TypeOf(dest)).IMPL.assert_count_less_equal_len(list_value_or_ptr_deref(dest), cast_count, @src());
             self.copy_self_range_to_dest_range(0, count, dest, dest.data_len - cast_count);
         }
         pub fn copy_self_end_to_dest_range(self: List, count: IDX, dest_: anytype, dest_start: anytype) void {
@@ -2169,7 +2165,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn copy_self_end_to_dest_end(self: List, count: IDX, dest_: anytype) void {
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const cast_count = num_cast(count, @TypeOf(dest.data_len));
-            dest.assert_count_less_equal_len(cast_count, @src());
+            Type.child_type_or_type(@TypeOf(dest)).IMPL.assert_count_less_equal_len(list_value_or_ptr_deref(dest), cast_count, @src());
             assert_count_less_equal_len(self, count, @src());
             self.copy_self_range_to_dest_range(self.data_len - count, self.data_len, dest, dest.data_len - cast_count);
         }
@@ -2184,7 +2180,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn copy_entire_self_to_dest_end(self: List, dest_: anytype) void {
             const dest = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(dest_);
             const cast_len = num_cast(self.data_len, @TypeOf(dest.data_len));
-            dest.assert_count_less_equal_len(cast_len, @src());
+            Type.child_type_or_type(@TypeOf(dest)).IMPL.assert_count_less_equal_len(list_value_or_ptr_deref(dest), cast_len, @src());
             self.copy_self_range_to_dest_range(0, self.data_len, dest, dest.data_len - cast_len);
         }
         //************s
@@ -2217,7 +2213,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(first_new_idx) else undefined, first_new_idx);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr(self: *List) ElemPtr {
-            return append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: FuncAlloc) ElemPtr {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2226,7 +2222,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr_idx(self: *List) struct { ElemPtr, IDX } {
-            return append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_one_slot_with_growth_get_ptr_idx(self: *List, growth: Growth, alloc: FuncAlloc) struct { ElemPtr, IDX } {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
@@ -2235,7 +2231,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_one_slot_assume_cap_get_idx(self: *List) IDX {
-            return append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
         pub inline fn append_one_slot_with_growth_get_idx(self: *List, growth: Growth, alloc: FuncAlloc) IDX {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
@@ -2244,7 +2240,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_one_slot_assume_cap(self: *List) void {
-            return append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn append_one_slot_with_growth(self: *List, growth: Growth, alloc: FuncAlloc) void {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2253,7 +2249,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn append_one_assume_cap_get_ptr(self: *List, val: ELEM) ElemPtr {
-            const elem_ptr = append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
@@ -2268,7 +2264,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return elem_ptr;
         }
         pub fn append_one_assume_cap_get_ptr_idx(self: *List, val: ELEM) struct { ElemPtr, IDX } {
-            const elem_ptr, const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            const elem_ptr, const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
             assign_val_to_elem_ptr(elem_ptr, val);
             return .{ elem_ptr, slot_idx };
         }
@@ -2326,7 +2322,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(first_new_idx, self.data_len) else undefined, first_new_idx);
         }
         pub inline fn append_many_slots_assume_cap_get_slice(self: *List, count: IDX) Slice {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2335,7 +2331,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_slots_assume_cap_get_slice_idx(self: *List, count: IDX) struct { Slice, IDX } {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_slots_with_growth_get_slice_idx(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
@@ -2344,7 +2340,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_slots_assume_cap_get_idx(self: *List, count: IDX) IDX {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
         pub inline fn append_many_slots_with_growth_get_idx(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) IDX {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
@@ -2353,7 +2349,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_many_slots_assume_cap(self: *List, count: IDX) void {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn append_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) void {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2374,7 +2370,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) appended_slice else undefined, first_new_idx);
         }
         pub inline fn append_many_assume_cap_get_slice(self: *List, vals_: anytype) Slice {
-            return append_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2383,7 +2379,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_assume_cap_get_ptr_idx(self: *List, vals_: anytype) struct { Slice, IDX } {
-            return append_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_with_growth_get_ptr_idx(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
@@ -2392,7 +2388,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_assume_cap_get_idx(self: *List, vals_: anytype) IDX {
-            return append_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
         pub inline fn append_many_with_growth_get_idx(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) IDX {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
@@ -2401,7 +2397,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_many_assume_cap(self: *List, vals_: anytype) void {
-            return append_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn append_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2427,7 +2423,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(0) else undefined, 0);
         }
         pub inline fn prepend_one_slot_assume_cap_get_ptr(self: *List) ElemPtr {
-            return prepend_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: FuncAlloc) ElemPtr {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2436,7 +2432,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_one_slot_assume_cap(self: *List) void {
-            return prepend_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn prepend_one_slot_with_growth(self: *List, growth: Growth, alloc: FuncAlloc) void {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2445,7 +2441,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn prepend_one_assume_cap_get_ptr(self: *List, val: ELEM) ElemPtr {
-            const elem_ptr = prepend_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
@@ -2460,16 +2456,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return elem_ptr;
         }
         pub fn prepend_one_assume_cap(self: *List, val: ELEM) void {
-            prepend_one_slot_internal(self, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
-            set_true_idx(self, true_idx(self, 0), val);
+            prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            set_true_idx(self.*, true_idx(self.*, 0), val);
         }
         pub fn prepend_one_with_growth(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
             prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
-            set_true_idx(self, true_idx(self, 0), val);
+            set_true_idx(self.*, true_idx(self.*, 0), val);
         }
         pub fn prepend_one(self: *List, val: ELEM, alloc: FuncAlloc) void {
             prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
-            set_true_idx(self, true_idx(self, 0), val);
+            set_true_idx(self.*, true_idx(self.*, 0), val);
         }
         //**************
         // PREPEND MANY
@@ -2490,7 +2486,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(0, count) else undefined, 0);
         }
         pub inline fn prepend_many_slots_assume_cap_get_slice(self: *List, count: IDX) Slice {
-            return prepend_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2499,7 +2495,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_slots_assume_cap(self: *List, count: IDX) void {
-            return prepend_many_slots_internal(self, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn prepend_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) void {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2520,7 +2516,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) prepended_slice else undefined, 0);
         }
         pub inline fn prepend_many_assume_cap_get_slice(self: *List, vals_: anytype) Slice {
-            return prepend_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2529,7 +2525,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_assume_cap(self: *List, vals_: anytype) void {
-            return prepend_many_internal(self, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn prepend_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2564,7 +2560,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             }
         }
         pub inline fn insert_one_slot_assume_cap_get_ptr(self: *List, idx: IDX) ElemPtr {
-            return insert_one_slot_internal(self, idx, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_one_slot_with_growth_get_ptr(self: *List, idx: IDX, growth: Growth, alloc: FuncAlloc) ElemPtr {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2573,7 +2569,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_one_slot_assume_cap(self: *List, idx: IDX) void {
-            return insert_one_slot_internal(self, idx, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn insert_one_slot_with_growth(self: *List, idx: IDX, growth: Growth, alloc: FuncAlloc) void {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2582,7 +2578,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn insert_one_assume_cap_get_ptr(self: *List, idx: IDX, val: ELEM) ElemPtr {
-            const elem_ptr = insert_one_slot_internal(self, idx, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
@@ -2597,16 +2593,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return elem_ptr;
         }
         pub fn insert_one_assume_cap(self: *List, idx: IDX, val: ELEM) void {
-            const slot_idx = insert_one_slot_internal(self, idx, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
-            set_true_idx(self, true_idx(self, slot_idx), val);
+            const slot_idx = insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
         pub fn insert_one_with_growth(self: *List, idx: IDX, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
             const slot_idx = insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
-            set_true_idx(self, true_idx(self, slot_idx), val);
+            set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
         pub fn insert_one(self: *List, idx: IDX, val: ELEM, alloc: FuncAlloc) void {
             const slot_idx = insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
-            set_true_idx(self, true_idx(self, slot_idx), val);
+            set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
         //**************
         // INSERT MANY
@@ -2629,14 +2625,14 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 }
                 switch (comptime INDEX_LAYOUT) {
                     .SERIAL_INDEXES => {
-                        move_block_overwrite_internal(self, idx, first_appended_idx, end_idx_exclusive);
+                        move_block_overwrite_internal(self.*, idx, first_appended_idx, end_idx_exclusive);
                     },
                 }
                 return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(idx, end_idx_exclusive) else undefined, idx);
             }
         }
         pub inline fn insert_many_slots_assume_cap_get_slice(self: *List, idx: IDX, count: IDX) Slice {
-            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_slots_with_growth_get_slice(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2645,7 +2641,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_slots_assume_cap(self: *List, idx: IDX, count: IDX) void {
-            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, dummy_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn insert_many_slots_with_growth(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) void {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2666,7 +2662,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, inserted_slice, idx);
         }
         pub inline fn insert_many_assume_cap_get_ptr(self: *List, idx: IDX, vals_: anytype) Slice {
-            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_with_growth_get_ptr(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
@@ -2675,7 +2671,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_assume_cap(self: *List, idx: IDX, vals_: anytype) void {
-            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, dummy_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
         pub inline fn insert_many_with_growth(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
@@ -2810,13 +2806,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn delete_range(self: *List, start_idx: IDX, end_idx_exclusive: IDX) void {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {});
+            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {}, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         pub fn delete_count(self: *List, start_idx: IDX, count: IDX) void {
             const end_idx_exclusive = start_idx + count;
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {});
+            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, {}, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2824,7 +2820,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn remove_range(self: *List, start_idx: IDX, end_idx_exclusive: IDX, dest: anytype) void {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, dest);
+            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, dest, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2833,18 +2829,18 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             const end_idx_exclusive = start_idx + count;
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, dest);
+            delete_many_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, dest, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         pub fn swap_delete_range(self: *List, start_idx: IDX, end_idx_exclusive: IDX) void {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {});
+            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {}, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         pub fn swap_delete_count(self: *List, start_idx: IDX, count: IDX) void {
             const end_idx_exclusive = start_idx + count;
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {});
+            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, {}, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2852,7 +2848,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn swap_remove_range(self: *List, start_idx: IDX, end_idx_exclusive: IDX, dest: anytype) void {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (start_idx == end_idx_exclusive) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, dest);
+            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, dest, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         /// Remove range of elements from this list into destination list
         ///
@@ -2861,7 +2857,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             const end_idx_exclusive = start_idx + count;
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
             if (count == 0) return;
-            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, dest);
+            delete_many_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, dest, .ASSUME_CAP, dummy_alloc, .GROW_EXACT_NEEDED);
         }
         //*****************
         // DELETE FILTERED
@@ -2882,7 +2878,10 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            const dest = coerce_anytype_to_list_ptr_with_same_elem_type(dest_);
+            const dest = switch (comptime RETURN) {
+                .RETURN_VAL => coerce_anytype_to_list_ptr_with_same_elem_type(dest_),
+                .IGNORE_VAL => {},
+            };
             if (start_idx == end_idx_exclusive) return 0;
             switch (comptime STRATEGY) {
                 .ORDERED => {
@@ -2890,7 +2889,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     var idx_to_place_kept_elem = start_idx;
                     var num_deleted: IDX = 0;
                     while (idx_to_check < end_idx_exclusive) {
-                        const should_delete = eval_filter(self, idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        const should_delete = eval_filter(self.*, idx_to_check, null, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
                         if (should_delete) {
                             switch (comptime RETURN) {
                                 .RETURN_VAL => {
@@ -2914,7 +2913,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         }
                     }
                     while (idx_to_check < end_idx_exclusive) {
-                        const should_delete = eval_filter(self, idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        const should_delete = eval_filter(self.*, idx_to_check, null, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
                         if (should_delete) {
                             switch (comptime RETURN) {
                                 .RETURN_VAL => {
@@ -2939,7 +2938,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     }
                     if (num_deleted > 0) {
                         self.move_block_left_overwrite(idx_to_check, get_len(
-                            self,
+                            self.*,
                         ), idx_to_place_kept_elem);
                     }
                     self.decr_len_unchecked(num_deleted);
@@ -2947,12 +2946,12 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 },
                 .SWAP => {
                     var last_idx_in_list = get_len(
-                        self,
+                        self.*,
                     ) - 1;
                     var idx_to_check = start_idx;
                     var num_deleted: IDX = 0;
                     while (idx_to_check < end_idx_exclusive and last_idx_in_list >= end_idx_exclusive) {
-                        const should_delete = eval_filter(self, idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                        const should_delete = eval_filter(self.*, idx_to_check, null, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
                         if (should_delete) {
                             switch (comptime RETURN) {
                                 .RETURN_VAL => {
@@ -2977,7 +2976,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     }
                     if (idx_to_check < end_idx_exclusive) {
                         while (idx_to_check <= last_idx_in_list) {
-                            const should_delete = eval_filter(self, idx_to_check, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
+                            const should_delete = eval_filter(self.*, idx_to_check, null, FILTER_FUNC_KIND, filter_ctx, FILTER_CTX, filter, FILTER);
                             if (should_delete) {
                                 switch (comptime RETURN) {
                                     .RETURN_VAL => {
@@ -3100,9 +3099,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_delete_filtered(
             self: *List,
@@ -3112,9 +3109,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_filtered_assume_dest_cap(
             self: *List,
@@ -3125,9 +3120,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_filtered_assume_dest_cap(
             self: *List,
@@ -3138,9 +3131,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_filtered(
             self: *List,
@@ -3153,9 +3144,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_filtered(
             self: *List,
@@ -3168,9 +3157,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(
-                self,
-            ), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         //*****************
         // ROOT FLAT TREE
@@ -3249,8 +3236,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //*****************
         /// Elements MUST be laid out in a 'n-ary flat array tree',
         /// starting at the start of the slice
-        pub fn local_tree__parent_idx_unchecked(self: List, idx: IDX, max_num_children_per_element: IDX) IDX {
-            return root_idx_to_slice_idx(self, @divFloor(idx - 1, max_num_children_per_element));
+        pub fn local_tree__parent_idx_unchecked(_: List, idx: IDX, max_num_children_per_element: IDX) IDX {
+            return @divFloor(idx - 1, max_num_children_per_element);
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
         /// starting at the start of the slice
@@ -3261,15 +3248,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
         /// starting at the start of the slice
-        pub fn local_tree__nth_child_idx_unchecked(self: List, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
-            return root_idx_to_slice_idx(self, (idx * max_num_children_per_element) + nth_child + 1);
+        pub fn local_tree__nth_child_idx_unchecked(_: List, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) IDX {
+            return (idx * max_num_children_per_element) + nth_child + 1;
         }
         /// Elements MUST be laid out in a 'n-ary flat array tree'
         /// starting at the start of the slice
         pub fn local_tree__nth_child_idx_if_exists(self: List, idx: IDX, max_num_children_per_element: IDX, nth_child: IDX) ?IDX {
             assert_valid_idx(self, idx, @src());
             assert_with_reason(nth_child < max_num_children_per_element, @src(), "nth_child ({d}) exceeds maximum children per element ({d})", .{ nth_child, max_num_children_per_element });
-            const new_idx = root_idx_to_slice_idx(self, (idx * max_num_children_per_element) + nth_child + 1);
+            const new_idx = (idx * max_num_children_per_element) + nth_child + 1;
             if (new_idx >= get_len(
                 self,
             )) return null;
@@ -3576,116 +3563,116 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return binary_insert_location_advanced_right_bias(self, val, 0, get_len(self), {}, {}, .COMPTIME_FN_BODY, {}, gt_idx_val_implicit);
         }
         pub fn binary_insert_advanced_right_bias(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
-            growth: GrowthMode,
+            growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime GREATER_FN_KIND: FuncParamType,
             greater_idx_val: CompareIdxValFnRT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime GREATER_IDX_VAL: CompareIdxValFnCT(GREATER_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) IDX {
-            const idx = binary_insert_location_advanced_right_bias(self, val, start, end_excluded, compare_ctx, COMPARE_CTX, GREATER_FN_KIND, greater_idx_val, GREATER_IDX_VAL);
+            const idx = binary_insert_location_advanced_right_bias(self.*, val, start, end_excluded, compare_ctx, COMPARE_CTX, GREATER_FN_KIND, greater_idx_val, GREATER_IDX_VAL);
             insert_one_with_growth(self, idx, val, growth, alloc);
             return idx;
         }
         pub fn binary_insert_advanced_left_bias(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
-            growth: GrowthMode,
+            growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESS_THAN_FN_KIND: FuncParamType,
             less_than_idx_val: CompareIdxValFnRT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
             comptime LESS_THAN_IDX_VAL: CompareIdxValFnCT(LESS_THAN_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) IDX {
-            const idx = binary_insert_location_advanced_left_bias(self, val, start, end_excluded, compare_ctx, COMPARE_CTX, LESS_THAN_FN_KIND, less_than_idx_val, LESS_THAN_IDX_VAL);
+            const idx = binary_insert_location_advanced_left_bias(self.*, val, start, end_excluded, compare_ctx, COMPARE_CTX, LESS_THAN_FN_KIND, less_than_idx_val, LESS_THAN_IDX_VAL);
             insert_one_with_growth(self, idx, val, growth, alloc);
             return idx;
         }
         pub fn binary_insert_in_range(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
-            const idx = binary_insert_location_in_range(self, val, start, end_excluded, greater_idx_val);
+            const idx = binary_insert_location_in_range(self.*, val, start, end_excluded, greater_idx_val);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
             return idx;
         }
         pub fn binary_insert(
-            self: List,
+            self: *List,
             val: ELEM,
             alloc: FuncAlloc,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
-            const idx = binary_insert_location(self, val, greater_idx_val);
+            const idx = binary_insert_location(self.*, val, greater_idx_val);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
             return idx;
         }
         pub fn binary_insert_in_range_implicit(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
         ) IDX {
-            const idx = binary_insert_location_in_range_implicit(self, val, start, end_excluded);
+            const idx = binary_insert_location_in_range_implicit(self.*, val, start, end_excluded);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
             return idx;
         }
         pub fn binary_insert_implicit(
-            self: List,
+            self: *List,
             val: ELEM,
             alloc: FuncAlloc,
         ) IDX {
-            const idx = binary_insert_location_implicit(self, val);
+            const idx = binary_insert_location_implicit(self.*, val);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
             return idx;
         }
         pub fn binary_insert_in_range_assume_cap(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
-            const idx = binary_insert_location_in_range(self, val, start, end_excluded, greater_idx_val);
+            const idx = binary_insert_location_in_range(self.*, val, start, end_excluded, greater_idx_val);
             insert_one_assume_cap(self, idx, val);
             return idx;
         }
         pub fn binary_insert_assume_cap(
-            self: List,
+            self: *List,
             val: ELEM,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
-            const idx = binary_insert_location(self, val, greater_idx_val);
+            const idx = binary_insert_location(self.*, val, greater_idx_val);
             insert_one_assume_cap(self, idx, val);
             return idx;
         }
         pub fn binary_insert_in_range_implicit_assume_cap(
-            self: List,
+            self: *List,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
         ) IDX {
-            const idx = binary_insert_location_in_range_implicit(self, val, start, end_excluded);
+            const idx = binary_insert_location_in_range_implicit(self.*, val, start, end_excluded);
             insert_one_assume_cap(self, idx, val);
             return idx;
         }
         pub fn binary_insert_implicit_assume_cap(
-            self: List,
+            self: *List,
             val: ELEM,
         ) IDX {
-            const idx = binary_insert_location_implicit(self, val);
+            const idx = binary_insert_location_implicit(self.*, val);
             insert_one_assume_cap(self, idx, val);
             return idx;
         }
@@ -4184,7 +4171,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .lo_idx = lo,
                         .hi_idx = hi,
                     };
-                    if (DEGENERATE_FALLBACK) {
+                    if (comptime DEGENERATE_FALLBACK) {
                         this.budget = budget;
                     }
                     return this;
@@ -4352,32 +4339,34 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             next_partition: while (stack_len > 0) {
                 stack_len -= 1;
                 const part = stack[stack_len];
-                if (SETTINGS.FALLBACK_WHEN_DEGENERATE and part.budget <= 0) {
-                    if (len <= SETTINGS.FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN) {
-                        return insertion_sort_range_advanced(
-                            self,
-                            start,
-                            end_excluded,
-                            compare_ctx,
-                            COMPARE_CTX,
-                            GREATER_IDX_VAL_FN_KIND,
-                            greater_than_idx_val,
-                            GREATER_THAN_IDX_VAL,
-                        );
-                    } else {
-                        return heapsort_range_advanced(
-                            self,
-                            start,
-                            end_excluded,
-                            compare_ctx,
-                            COMPARE_CTX,
-                            GREATER_IDX_IDX_FN_KIND,
-                            greater_than_idx_idx,
-                            GREATER_THAN_IDX_IDX,
-                            GREATER_IDX_VAL_FN_KIND,
-                            greater_than_idx_val,
-                            GREATER_THAN_IDX_VAL,
-                        );
+                if (comptime SETTINGS.FALLBACK_WHEN_DEGENERATE) {
+                    if (part.budget <= 0) {
+                        if (len <= SETTINGS.FALLBACK_WHEN_DEGENERATE_INSERTION_SORT_MAX_INPUT_LEN) {
+                            return insertion_sort_range_advanced(
+                                self,
+                                start,
+                                end_excluded,
+                                compare_ctx,
+                                COMPARE_CTX,
+                                GREATER_IDX_VAL_FN_KIND,
+                                greater_than_idx_val,
+                                GREATER_THAN_IDX_VAL,
+                            );
+                        } else {
+                            return heapsort_range_advanced(
+                                self,
+                                start,
+                                end_excluded,
+                                compare_ctx,
+                                COMPARE_CTX,
+                                GREATER_IDX_IDX_FN_KIND,
+                                greater_than_idx_idx,
+                                GREATER_THAN_IDX_IDX,
+                                GREATER_IDX_VAL_FN_KIND,
+                                greater_than_idx_val,
+                                GREATER_THAN_IDX_VAL,
+                            );
+                        }
                     }
                 }
                 assert_with_reason(!part.empty(), @src(), "it should be impossible to have an empty partition here", .{});
@@ -5405,7 +5394,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 {},
                 .COMPTIME_FN_BODY,
                 {},
-                simple_prev_idx(@TypeOf(context)),
+                simple_prev_idx(@TypeOf(context), void),
                 null,
                 .RUNTIME_FN_PTR,
                 action,

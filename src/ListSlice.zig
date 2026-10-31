@@ -524,10 +524,10 @@ pub fn ListFullDefinition(
         pub inline fn memset_field_range(self: ListSelf, comptime field: Field, val: FieldType(field), start: IDX, end_exclusive: IDX) void {
             return IMPL.memset_field_range(self, field, val, start, end_exclusive);
         }
-        pub inline fn memset_field_len(self: ListSelf, comptime field: Field, val: ELEM) void {
+        pub inline fn memset_field_len(self: ListSelf, comptime field: Field, val: FieldType(field)) void {
             return IMPL.memset_field_len(self, field, val);
         }
-        pub inline fn memset_field_cap(self: ListSelf, comptime field: Field, val: ELEM) void {
+        pub inline fn memset_field_cap(self: ListSelf, comptime field: Field, val: FieldType(field)) void {
             return IMPL.memset_field_cap(self, field, val);
         }
         //****************
@@ -1588,8 +1588,8 @@ pub fn ListFullDefinition(
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime COMPARE_FN_KIND: FuncParamType,
-            equal_idx_val: CompareIdxIdxFnRT(COMPARE_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
-            comptime EQUAL_IDX_VAL: CompareIdxIdxFnCT(COMPARE_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            equal_idx_val: CompareIdxValFnRT(COMPARE_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
+            comptime EQUAL_IDX_VAL: CompareIdxValFnCT(COMPARE_FN_KIND, @TypeOf(compare_ctx), @TypeOf(COMPARE_CTX)),
         ) ?IDX {
             return IMPL.find_advanced(self, val, start, end_excluded, MODE, compare_ctx, COMPARE_CTX, COMPARE_FN_KIND, equal_idx_val, EQUAL_IDX_VAL);
         }
@@ -1723,12 +1723,12 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_location_implicit(self, val);
         }
         pub inline fn binary_insert_advanced_right_bias(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
-            growth: GrowthMode,
+            growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime GREATER_FN_KIND: FuncParamType,
@@ -1738,12 +1738,12 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_advanced_right_bias(self, val, start, end_excluded, alloc, growth, compare_ctx, COMPARE_CTX, GREATER_FN_KIND, greater_idx_val, GREATER_IDX_VAL);
         }
         pub inline fn binary_insert_advanced_left_bias(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
             alloc: FuncAlloc,
-            growth: GrowthMode,
+            growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
             comptime LESS_THAN_FN_KIND: FuncParamType,
@@ -1753,7 +1753,7 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_advanced_left_bias(self, val, start, end_excluded, alloc, growth, compare_ctx, COMPARE_CTX, LESS_THAN_FN_KIND, less_than_idx_val, LESS_THAN_IDX_VAL);
         }
         pub inline fn binary_insert_in_range(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
@@ -1763,7 +1763,7 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_in_range(self, val, start, end_excluded, alloc, greater_idx_val);
         }
         pub inline fn binary_insert(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             alloc: FuncAlloc,
             greater_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
@@ -1771,7 +1771,7 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert(self, val, alloc, greater_idx_val);
         }
         pub inline fn binary_insert_in_range_implicit(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
@@ -1780,14 +1780,14 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_in_range_implicit(self, val, start, end_excluded, alloc);
         }
         pub inline fn binary_insert_implicit(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             alloc: FuncAlloc,
         ) IDX {
             return IMPL.binary_insert_implicit(self, val, alloc);
         }
         pub inline fn binary_insert_in_range_assume_cap(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
@@ -1796,14 +1796,14 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_in_range_assume_cap(self, val, start, end_excluded, greater_idx_val);
         }
         pub inline fn binary_insert_assume_cap(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             greater_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) IDX {
             return IMPL.binary_insert_assume_cap(self, val, greater_idx_val);
         }
         pub inline fn binary_insert_in_range_implicit_assume_cap(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
@@ -1811,7 +1811,7 @@ pub fn ListFullDefinition(
             return IMPL.binary_insert_in_range_implicit_assume_cap(self, val, start, end_excluded);
         }
         pub inline fn binary_insert_implicit_assume_cap(
-            self: ListSelf,
+            self: *ListSelf,
             val: ELEM,
         ) IDX {
             return IMPL.binary_insert_implicit_assume_cap(self, val);

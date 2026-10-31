@@ -2059,7 +2059,7 @@ pub fn StructInfo(comptime NUM_FIELDS: usize) type {
         field_attrs: [NUM_FIELDS]StructFieldAttr,
 
         pub fn build_struct_type(comptime self: *const @This()) type {
-            return @Struct(self.layout, self.backing_int, self.field_names[0..], self.field_types, self.field_attrs);
+            return @Struct(self.layout, self.backing_int, self.field_names[0..], &self.field_types, &self.field_attrs);
         }
 
         pub fn type_for_field(comptime self: @This(), comptime field: []const u8) type {
