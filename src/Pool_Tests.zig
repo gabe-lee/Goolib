@@ -25,6 +25,7 @@ const testing = std.testing;
 
 const Root = @import("./_root.zig");
 const GlobalMappedKeyPool = Root.Pool.GlobalMappedKeyPool;
+const BitTrackedPool = Root.Pool.BitTrackedPool;
 
 const TestPool = GlobalMappedKeyPool(.{
     .ELEM = u32,
@@ -436,4 +437,443 @@ test "GlobalMappedKeyPool -> separate declarations with the same def have same m
     const val_idx = key.val_index();
     const key_clone = TestPoolClone.key_for_value_index(val_idx);
     try testing.expectEqual(key_clone.get(), key.get());
+}
+
+const BitTrackedBasicPool = BitTrackedPool(.{
+    .ELEM = u32,
+    .IDX = u32,
+    .LOCK_MODE = .NO_LOCKS,
+    .DATA_BLOCK_SIZE = ._64,
+});
+
+const BitTrackedSimdPool = BitTrackedPool(.{
+    .ELEM = u32,
+    .IDX = u32,
+    .LOCK_MODE = .NO_LOCKS,
+    .DATA_BLOCK_SIZE = ._1_024,
+});
+
+const BitTrackedCachedPool = BitTrackedPool(.{
+    .ELEM = u32,
+    .IDX = u32,
+    .LOCK_MODE = .NO_LOCKS,
+    .DATA_BLOCK_SIZE = ._256,
+    .ALLOC_MODE = .CACHED_ALLOC,
+});
+
+test "BitTrackedPool -> claim, write, release, and reuse" {
+    var pool = BitTrackedBasicPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    try testing.expectEqual(@as(u32, 0), pool.get_num_free());
+
+    var slots: [10]*u32 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(i);
+    }
+
+    try testing.expectEqual(@as(u32, 64 - 10), pool.get_num_free());
+    for (slots, 0..) |slot, i| {
+        for (slots[0..i]) |other| {
+            try testing.expect(slot != other);
+        }
+        try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
+    }
+
+    for (slots[0..5]) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, 64 - 5), pool.get_num_free());
+    for (slots[5..], 5..) |slot, i| {
+        try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
+    }
+
+    var reused: [5]*u32 = undefined;
+    for (&reused, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(100 + i);
+        var was_released = false;
+        for (slots[0..5]) |old| {
+            if (slot.* == old) was_released = true;
+        }
+        try testing.expect(was_released);
+    }
+
+    try testing.expectEqual(@as(u32, 64 - 10), pool.get_num_free());
+    for (slots[5..], 5..) |slot, i| {
+        try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
+    }
+
+    for (reused) |slot| pool.release_slot(slot);
+    for (slots[5..]) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, 64), pool.get_num_free());
+}
+
+test "BitTrackedPool -> growth keeps values intact and release works across blocks" {
+    const N = 200;
+    const BLOCK = 64;
+    const EXPECTED_BLOCKS = (N + BLOCK - 1) / BLOCK;
+
+    var pool = BitTrackedBasicPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    var slots: [N]*u32 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(i + 1);
+    }
+
+    try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK) - N)), pool.get_num_free());
+
+    for (slots, 0..) |slot, i| {
+        if (i % 2 == 0) pool.release_slot(slot);
+    }
+    try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK) - (N / 2))), pool.get_num_free());
+
+    for (slots, 0..) |slot, i| {
+        if (i % 2 == 1) {
+            try testing.expectEqual(@as(u32, @intCast(i + 1)), slot.*);
+        }
+    }
+
+    var extra: [N / 2]*u32 = undefined;
+    for (&extra, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(1000 + i);
+    }
+    try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK) - N)), pool.get_num_free());
+
+    for (slots, 0..) |slot, i| {
+        if (i % 2 == 1) {
+            try testing.expectEqual(@as(u32, @intCast(i + 1)), slot.*);
+        }
+    }
+    for (extra, 0..) |slot, i| {
+        try testing.expectEqual(@as(u32, @intCast(1000 + i)), slot.*);
+    }
+
+    for (slots, 0..) |slot, i| {
+        if (i % 2 == 1) pool.release_slot(slot);
+    }
+    for (extra) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK)), pool.get_num_free());
+}
+
+test "BitTrackedPool -> small IDX and ELEM types" {
+    const Pool = BitTrackedPool(.{
+        .ELEM = u8,
+        .IDX = u16,
+        .LOCK_MODE = .NO_LOCKS,
+        .DATA_BLOCK_SIZE = ._64,
+    });
+
+    var pool = Pool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    const N = 1000;
+    var slots: [N]*u8 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @truncate(i);
+    }
+
+    for (slots, 0..) |slot, i| {
+        try testing.expectEqual(@as(u8, @truncate(i)), slot.*);
+        if (i % 2 == 0) pool.release_slot(slot);
+    }
+
+    for (slots, 0..) |slot, i| {
+        if (i % 2 == 1) {
+            try testing.expectEqual(@as(u8, @truncate(i)), slot.*);
+            pool.release_slot(slot);
+        }
+    }
+
+    try testing.expectEqual(@as(u16, 1024), pool.get_num_free());
+}
+
+test "BitTrackedPool -> ensure_free_slots grows without claiming" {
+    var pool = BitTrackedBasicPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    pool.ensure_free_slots(200, testing.allocator);
+    try testing.expectEqual(@as(u32, 256), pool.get_num_free());
+
+    var slots: [200]*u32 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(i);
+    }
+    try testing.expectEqual(@as(u32, 56), pool.get_num_free());
+
+    for (slots) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, 256), pool.get_num_free());
+}
+
+test "BitTrackedPool -> val, ptr, and const_ptr iterators visit exactly the used slots" {
+    inline for (.{ ._64, ._1_024 }) |block_size| {
+        const Pool = BitTrackedPool(.{
+            .ELEM = u32,
+            .IDX = u32,
+            .LOCK_MODE = .NO_LOCKS,
+            .DATA_BLOCK_SIZE = block_size,
+        });
+
+        var pool = Pool.init(0, testing.allocator, {});
+        defer pool.uninit(testing.allocator);
+
+        const N = 150;
+        var slots: [N]*u32 = undefined;
+        for (&slots, 0..) |*slot, i| {
+            slot.* = pool.claim_slot(testing.allocator);
+            slot.*.* = @intCast(i + 1);
+        }
+
+        var expected_used = @as([N]bool, @splat(false));
+        var expected_count: usize = 0;
+        for (slots, 0..) |slot, i| {
+            if (i % 3 == 0) {
+                pool.release_slot(slot);
+            } else {
+                expected_used[i] = true;
+                expected_count += 1;
+            }
+        }
+
+        var seen_val = @as([N]bool, @splat(false));
+        var val_count: usize = 0;
+        var val_iter = pool.val_iterator();
+        while (val_iter.next()) |val| {
+            try testing.expect(val > 0 and val <= N);
+            const i = val - 1;
+            try testing.expect(!seen_val[i]);
+            seen_val[i] = true;
+            val_count += 1;
+        }
+        val_iter.deinit_and_unlock();
+        try testing.expectEqual(expected_count, val_count);
+        try testing.expectEqualSlices(bool, &expected_used, &seen_val);
+
+        var seen_ptr = @as([N]bool, @splat(false));
+        var ptr_count: usize = 0;
+        var ptr_iter = pool.ptr_iterator();
+        while (ptr_iter.next()) |slot| {
+            try testing.expect(slot.* > 0 and slot.* <= N);
+            const i = slot.* - 1;
+            try testing.expect(!seen_ptr[i]);
+            seen_ptr[i] = true;
+            slot.* += 1000;
+            ptr_count += 1;
+        }
+        ptr_iter.deinit_and_unlock();
+        try testing.expectEqual(expected_count, ptr_count);
+        try testing.expectEqualSlices(bool, &expected_used, &seen_ptr);
+
+        var seen_const = @as([N]bool, @splat(false));
+        var const_count: usize = 0;
+        var const_iter = pool.const_ptr_iterator();
+        while (const_iter.next()) |slot| {
+            try testing.expect(slot.* > 1000 and slot.* <= N + 1000);
+            const i = slot.* - 1001;
+            try testing.expect(!seen_const[i]);
+            seen_const[i] = true;
+            const_count += 1;
+        }
+        const_iter.deinit_and_unlock();
+        try testing.expectEqual(expected_count, const_count);
+        try testing.expectEqualSlices(bool, &expected_used, &seen_const);
+
+        for (slots, 0..) |slot, i| {
+            if (i % 3 != 0) pool.release_slot(slot);
+        }
+    }
+}
+
+test "BitTrackedPool -> ignore-lock advanced claim, release, and iterators" {
+    var pool = BitTrackedBasicPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    var slots: [20]*u32 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot_advanced(testing.allocator, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
+        slot.*.* = @intCast(i + 1);
+    }
+
+    var seen = @as([20]bool, @splat(false));
+    var count: usize = 0;
+    var iter = pool.val_iterator_ignore_locks();
+    while (iter.next()) |val| {
+        try testing.expect(val > 0 and val <= slots.len);
+        const i = val - 1;
+        try testing.expect(!seen[i]);
+        seen[i] = true;
+        count += 1;
+    }
+    iter.deinit_and_unlock();
+    try testing.expectEqual(slots.len, count);
+
+    for (slots) |slot| {
+        pool.release_slot_advanced(slot, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
+    }
+    try testing.expectEqual(@as(u32, 64), pool.get_num_free());
+}
+
+test "BitTrackedPool -> CACHED_ALLOC mode works without passing an allocator" {
+    var pool = BitTrackedCachedPool.init(0, testing.allocator, {});
+    defer pool.uninit({});
+
+    var slots: [300]*u32 = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot({});
+        slot.*.* = @intCast(i);
+    }
+
+    for (slots, 0..) |slot, i| {
+        try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
+    }
+
+    for (slots) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, 512), pool.get_num_free());
+}
+
+test "BitTrackedPool -> mutex modes support claim, release, block locks, and iterators" {
+    inline for (.{ .MASTER_LOCK, .MASTER_AND_BLOCK_LOCK }) |mutex_mode| {
+        const Pool = BitTrackedPool(.{
+            .ELEM = u32,
+            .IDX = u32,
+            .LOCK_MODE = mutex_mode,
+            .DATA_BLOCK_SIZE = ._64,
+        });
+
+        var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+        defer threaded.deinit();
+
+        var pool = Pool.init(0, testing.allocator, threaded.io());
+        defer pool.uninit(testing.allocator);
+
+        var slots: [200]*u32 = undefined;
+        for (&slots, 0..) |*slot, i| {
+            slot.* = pool.claim_slot(testing.allocator);
+            slot.*.* = @intCast(i);
+        }
+
+        const write_lock = pool.lock_block_for_write_from_slot(slots[0]);
+        pool.unlock_block_for_write_from_slot(write_lock);
+        const read_lock = pool.lock_block_for_read_from_slot(slots[0]);
+        pool.unlock_block_for_read_from_slot(read_lock);
+
+        var iter_count: usize = 0;
+        var iter = pool.const_ptr_iterator();
+        while (iter.next()) |slot| {
+            try testing.expect(slot.* < slots.len);
+            iter_count += 1;
+        }
+        iter.deinit_and_unlock();
+        try testing.expectEqual(slots.len, iter_count);
+
+        var ignore_iter = pool.val_iterator_ignore_locks();
+        var ignore_count: usize = 0;
+        while (ignore_iter.next()) |_| ignore_count += 1;
+        ignore_iter.deinit_and_unlock();
+        try testing.expectEqual(slots.len, ignore_count);
+
+        for (slots, 0..) |slot, i| {
+            try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
+        }
+        for (slots) |slot| pool.release_slot(slot);
+    }
+}
+
+test "BitTrackedPool -> init, uninit, and re-init" {
+    var pool = BitTrackedBasicPool.init(16, testing.allocator, {});
+    const first = pool.claim_slot(testing.allocator);
+    first.* = 7;
+    try testing.expectEqual(@as(u32, 7), first.*);
+    pool.uninit(testing.allocator);
+    try testing.expectEqual(@as(u32, 0), pool.get_num_free());
+
+    pool = BitTrackedBasicPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    const second = pool.claim_slot(testing.allocator);
+    second.* = 9;
+    try testing.expectEqual(@as(u32, 9), second.*);
+}
+
+test "BitTrackedPool -> struct elements" {
+    const Struct = struct {
+        x: u32,
+        y: i32,
+        z: f32,
+    };
+    const Pool = BitTrackedPool(.{
+        .ELEM = Struct,
+        .IDX = u32,
+        .LOCK_MODE = .NO_LOCKS,
+        .DATA_BLOCK_SIZE = ._64,
+    });
+
+    var pool = Pool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    var slots: [20]*Struct = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = .{ .x = @intCast(i), .y = -@as(i32, @intCast(i)), .z = @floatFromInt(i) };
+    }
+
+    for (slots, 0..) |slot, i| {
+        try testing.expectEqual(@as(u32, @intCast(i)), slot.*.x);
+        try testing.expectEqual(-@as(i32, @intCast(i)), slot.*.y);
+        try testing.expectEqual(@as(f32, @floatFromInt(i)), slot.*.z);
+    }
+
+    for (slots) |slot| pool.release_slot(slot);
+}
+
+test "BitTrackedPool -> randomized claims and releases match a model" {
+    var pool = BitTrackedSimdPool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    const MAX_LIVE = 300;
+    var slots: [MAX_LIVE]*u32 = undefined;
+    var vals: [MAX_LIVE]u32 = undefined;
+    var live: usize = 0;
+
+    var prng = std.Random.DefaultPrng.init(0xB17_7AC);
+    const rand = prng.random();
+
+    var next_val: u32 = 1;
+    for (0..10000) |_| {
+        const can_claim = live < MAX_LIVE;
+        const do_claim = live == 0 or (can_claim and rand.intRangeAtMost(u8, 0, 2) != 0);
+
+        if (do_claim) {
+            const slot = pool.claim_slot(testing.allocator);
+            const val = next_val;
+            next_val +%= 1;
+            slot.* = val;
+            slots[live] = slot;
+            vals[live] = val;
+            live += 1;
+        } else {
+            const i = rand.intRangeLessThan(usize, 0, live);
+            try testing.expectEqual(vals[i], slots[i].*);
+            pool.release_slot(slots[i]);
+            live -= 1;
+            slots[i] = slots[live];
+            vals[i] = vals[live];
+        }
+
+        if (rand.intRangeAtMost(u8, 0, 63) == 0) {
+            for (slots[0..live], vals[0..live]) |slot, val| {
+                try testing.expectEqual(val, slot.*);
+            }
+        }
+    }
+
+    for (slots[0..live], vals[0..live]) |slot, val| {
+        try testing.expectEqual(val, slot.*);
+    }
+    for (slots[0..live]) |slot| pool.release_slot(slot);
+    try testing.expectEqual(@as(u32, 1024), pool.get_num_free());
 }
