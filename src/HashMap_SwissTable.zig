@@ -231,6 +231,23 @@ pub fn SwissHashMap(
             code: u64,
             state: CellState,
         };
+        pub fn init_capacity(cap: u64, alloc: Allocator) Self {
+            var self = Self{};
+            self.grow(cap, alloc);
+            return self;
+        }
+        pub fn init_empty() Self {
+            return Self{};
+        }
+        pub fn uninit(self: *Self, alloc: Allocator) void {
+            if (self.cap != 0) {
+                alloc.free(self.val_list[0..self.cap]);
+                alloc.free(self.keys_list[0..self.cap]);
+                alloc.free(self.state_list[0 .. self.cap + SIMD_SIZE]);
+            }
+            self.* = .{};
+        }
+
         inline fn h1(key_hash: u64) u64 {
             return key_hash >> 7;
         }
@@ -788,14 +805,205 @@ pub fn SwissHashMap(
         pub inline fn delete_key_report_existed(self: *Self, key: KEY) bool {
             return self.remove_key_if_exists(key) != null;
         }
+    };
+}
 
-        pub fn deinit(self: *Self, alloc: Allocator) void {
-            if (self.cap != 0) {
-                alloc.free(self.val_list[0..self.cap]);
-                alloc.free(self.keys_list[0..self.cap]);
-                alloc.free(self.state_list[0 .. self.cap + SIMD_SIZE]);
-            }
-            self.* = .{};
+pub fn GlobalSwissHashMap(
+    comptime KEY: type,
+    comptime VAL: type,
+    comptime HASH: fn (KEY) u64,
+    comptime KEYS_EQUAL: fn (KEY, KEY) bool,
+    comptime OVERRIDES: Overrides,
+) type {
+    return struct {
+        const Self = @This();
+        const Map = SwissHashMap(KEY, VAL, HASH, KEYS_EQUAL, OVERRIDES);
+
+        var map: Map = .{};
+
+        pub const SIMD_SIZE: comptime_int = Map.SIMD_SIZE;
+        pub const HashParts = Map.HashParts;
+
+        pub inline fn init_capacity(cap: u64, alloc: Allocator) Self {
+            map = Map.init_capacity(cap, alloc);
+        }
+        pub inline fn init_empty() Self {
+            map = Map.init_empty();
+        }
+        pub inline fn uninit(alloc: Allocator) void {
+            map.uninit(alloc);
+        }
+        pub inline fn hash(key: KEY) u64 {
+            return HASH(key);
+        }
+        pub inline fn hash_parts(key: KEY) HashParts {
+            return Map.hash_parts(key);
+        }
+        pub inline fn hash_to_parts(hash_: u64) HashParts {
+            return Map.hash_to_parts(hash_);
+        }
+        pub inline fn keys_equal(key_a: KEY, key_b: KEY) bool {
+            return KEYS_EQUAL(key_a, key_b);
+        }
+
+        pub inline fn contains_hash_parts(key: KEY, key_hash_parts: HashParts) bool {
+            return map.contains_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn contains_hash(key: KEY, key_hash: u64) bool {
+            return map.contains_hash(key, key_hash);
+        }
+        pub inline fn contains(key: KEY) bool {
+            return map.contains(key);
+        }
+        pub inline fn get_key_hash_parts(key: KEY, key_hash_parts: HashParts) VAL {
+            return map.get_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_key_hash(key: KEY, key_hash: u64) VAL {
+            return map.get_key_hash(key, key_hash);
+        }
+        pub inline fn get(key: KEY) VAL {
+            return map.get(key);
+        }
+        pub inline fn get_if_exists_key_hash_parts(key: KEY, key_hash_parts: HashParts) ?VAL {
+            return map.get_if_exists_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_if_exists_key_hash(key: KEY, key_hash: u64) ?VAL {
+            return map.get_if_exists_key_hash(key, key_hash);
+        }
+        pub inline fn get_if_exists(key: KEY) ?VAL {
+            return map.get_if_exists(key);
+        }
+        pub inline fn get_ptr_key_hash_parts(key: KEY, key_hash_parts: HashParts) *VAL {
+            return map.get_ptr_const_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_ptr_key_hash(key: KEY, key_hash: u64) *VAL {
+            return map.get_ptr_key_hash(key, key_hash);
+        }
+        pub inline fn get_ptr(key: KEY) *VAL {
+            return map.get_ptr(key);
+        }
+        pub inline fn get_ptr_if_exists_key_hash_parts(key: KEY, key_hash_parts: HashParts) ?*VAL {
+            return map.get_ptr_if_exists_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_ptr_if_exists_key_hash(key: KEY, key_hash: u64) ?*VAL {
+            return map.get_ptr_if_exists_key_hash(key, key_hash);
+        }
+        pub inline fn get_ptr_if_exists(key: KEY) ?*VAL {
+            return map.get_ptr_if_exists(key);
+        }
+        pub inline fn get_ptr_const_key_hash_parts(key: KEY, key_hash_parts: HashParts) *const VAL {
+            return map.get_ptr_const_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_ptr_const_key_hash(key: KEY, key_hash: u64) *const VAL {
+            return map.get_ptr_const_key_hash(key, key_hash);
+        }
+        pub inline fn get_ptr_const(key: KEY) *const VAL {
+            return map.get_ptr_const(key);
+        }
+        pub inline fn get_ptr_const_if_exists_key_hash_parts(key: KEY, key_hash_parts: HashParts) ?*const VAL {
+            return map.get_ptr_const_if_exists_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn get_ptr_const_if_exists_key_hash(key: KEY, key_hash: u64) ?*const VAL {
+            return map.get_ptr_const_if_exists_key_hash(key, key_hash);
+        }
+        pub inline fn get_ptr_const_if_exists(key: KEY) ?*const VAL {
+            return map.get_ptr_const_if_exists(key);
+        }
+
+        pub inline fn grow(min_capacity: u64, alloc: Allocator) void {
+            return map.grow(min_capacity, alloc);
+        }
+
+        pub inline fn insert_key_hash_parts_get_idx_assume_cap(key: KEY, key_hash_parts: HashParts) u64 {
+            return map.insert_key_hash_parts_get_idx_assume_cap(key, key_hash_parts);
+        }
+        pub inline fn insert_key_hash_parts_get_idx(key: KEY, key_hash_parts: HashParts, alloc: Allocator) u64 {
+            return map.insert_key_hash_parts_get_idx(key, key_hash_parts, alloc);
+        }
+        pub inline fn insert_key_hash_get_idx_assume_cap(key: KEY, key_hash: u64) u64 {
+            return map.insert_key_hash_get_idx_assume_cap(key, key_hash);
+        }
+        pub inline fn insert_key_hash_get_idx(key: KEY, key_hash: u64, alloc: Allocator) u64 {
+            return map.insert_key_hash_get_idx(key, key_hash, alloc);
+        }
+        pub inline fn insert_key_get_idx_assume_cap(key: KEY) u64 {
+            return map.insert_key_get_idx_assume_cap(key);
+        }
+        pub inline fn insert_key_get_idx(key: KEY, alloc: Allocator) u64 {
+            return map.insert_key_get_idx(key, alloc);
+        }
+        pub inline fn insert_key_hash_parts_get_ptr_assume_cap(key: KEY, key_hash_parts: HashParts) *VAL {
+            return map.insert_key_hash_parts_get_ptr_assume_cap(key, key_hash_parts);
+        }
+        pub inline fn insert_key_hash_parts_get_ptr(key: KEY, key_hash_parts: HashParts, alloc: Allocator) *VAL {
+            return map.insert_key_hash_parts_get_ptr(key, key_hash_parts, alloc);
+        }
+        pub inline fn insert_key_hash_get_ptr_assume_cap(key: KEY, key_hash: u64) *VAL {
+            return map.insert_key_hash_get_ptr_assume_cap(key, key_hash);
+        }
+        pub inline fn insert_key_hash_get_ptr(key: KEY, key_hash: u64, alloc: Allocator) *VAL {
+            return map.insert_key_hash_get_ptr(key, key_hash, alloc);
+        }
+        pub inline fn insert_key_get_ptr_assume_cap(key: KEY) *VAL {
+            return map.insert_key_get_ptr_assume_cap(key);
+        }
+        pub inline fn insert_key_get_ptr(key: KEY, alloc: Allocator) *VAL {
+            return map.insert_key_get_ptr(key, alloc);
+        }
+        pub inline fn insert_hash_parts_assume_cap(key: KEY, val: VAL, key_hash_parts: HashParts) void {
+            return map.insert_hash_parts_assume_cap(key, val, key_hash_parts);
+        }
+        pub inline fn insert_hash_parts(key: KEY, val: VAL, key_hash_parts: HashParts, alloc: Allocator) void {
+            return map.insert_hash_parts(key, val, key_hash_parts, alloc);
+        }
+        pub inline fn insert_hash_assume_cap(key: KEY, val: VAL, key_hash: u64) void {
+            return map.insert_hash_assume_cap(key, val, key_hash);
+        }
+        pub inline fn insert_hash(key: KEY, val: VAL, key_hash: u64, alloc: Allocator) void {
+            return map.insert_hash(key, val, key_hash, alloc);
+        }
+        pub inline fn insert_assume_cap(key: KEY, val: VAL) void {
+            return map.insert_assume_cap(key, val);
+        }
+        pub inline fn insert(key: KEY, val: VAL, alloc: Allocator) void {
+            return map.insert(key, val, alloc);
+        }
+
+        pub inline fn remove_key_hash_parts(key: KEY, key_hash_parts: HashParts) VAL {
+            return map.remove_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn remove_key_hash(key: KEY, key_hash: u64) VAL {
+            return map.remove_key_hash(key, key_hash);
+        }
+        pub inline fn remove_key(key: KEY) VAL {
+            return map.remove_key(key);
+        }
+        pub inline fn remove_key_hash_parts_if_exists(key: KEY, key_hash_parts: HashParts) ?VAL {
+            return map.remove_key_hash_parts_if_exists(key, key_hash_parts);
+        }
+        pub inline fn remove_key_hash_if_exists(key: KEY, key_hash: u64) ?VAL {
+            return map.remove_key_hash_if_exists(key, key_hash);
+        }
+        pub inline fn remove_key_if_exists(key: KEY) ?VAL {
+            return map.remove_key_if_exists(key);
+        }
+        pub inline fn delete_key_hash_parts(key: KEY, key_hash_parts: HashParts) void {
+            return map.delete_key_hash_parts(key, key_hash_parts);
+        }
+        pub inline fn delete_key_hash(key: KEY, key_hash: u64) void {
+            return map.delete_key_hash(key, key_hash);
+        }
+        pub inline fn delete_key(key: KEY) void {
+            return map.delete_key(key);
+        }
+        pub inline fn delete_key_hash_parts_report_existed(key: KEY, key_hash_parts: HashParts) bool {
+            return map.delete_key_hash_parts_report_existed(key, key_hash_parts);
+        }
+        pub inline fn delete_key_hash_report_existed(key: KEY, key_hash: u64) bool {
+            return map.delete_key_hash_report_existed(key, key_hash);
+        }
+        pub inline fn delete_key_report_existed(key: KEY) bool {
+            return map.delete_key_report_existed(key);
         }
     };
 }

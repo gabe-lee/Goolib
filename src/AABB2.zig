@@ -143,6 +143,10 @@ pub fn define_aabb2_type(comptime T: type) type {
             return T_Vec2.new(self.x_max, self.y_max);
         }
 
+        pub fn equals(self: T_AABB2, other: T_AABB2) bool {
+            return self.x_max == other.x_max and self.x_min == other.x_min and self.y_min == other.y_min and self.y_max == other.y_max;
+        }
+
         pub fn scale(self: T_AABB2, factor: anytype) T_AABB2 {
             return T_AABB2{
                 .x_min = MathX.upgrade_multiply_out(self.x_min, factor, T),

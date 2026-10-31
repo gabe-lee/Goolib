@@ -235,8 +235,8 @@ test "ListSlice -> Traverser" {
         buf: [15]u8 = undefined,
         idx: u8 = 0,
     };
-    const TravList = ListFullDefinition(Node, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED);
-    const TravListDual = ListFullDefinition(NodeDual, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED);
+    const TravList = ListFullDefinition(Node, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
+    const TravListDual = ListFullDefinition(NodeDual, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
     const Trav = TravList.ForwardLinkedTraverser(&.{TravList.Field.first_child}, TravList.Field.next_sibling, .MAX_STACK_LEN_NOT_IMPORTANT);
     const TravDual = TravListDual.ForwardLinkedTraverser(&.{ TravListDual.Field.first_child_lower, TravListDual.Field.first_child_upper }, TravListDual.Field.next_sibling, .MAX_STACK_LEN_NOT_IMPORTANT);
     const PROTO = struct {

@@ -27,9 +27,10 @@ const math = std.math;
 
 const Root = @import("./_root.zig");
 const Math = Root.Math;
-const FlexSlice = Root.FlexSlice.GooSlice;
 const Assert = Root.Assert;
 const SliceChild = Root.Types.SliceChild;
+const Allocator = std.mem.Allocator;
+const DummyAlloc = Root.DummyAllocator;
 
 const assert_unreachable = Assert.assert_unreachable;
 
@@ -418,20 +419,6 @@ pub fn ArrayLen(comptime N: comptime_int, comptime T: type) type {
         pub inline fn slice_const(self: *const Self) []const T {
             return self.arr[0..self.len];
         }
-
-        pub inline fn flex_slice(self: *Self) FlexSlice(T, math.IntFittingRange(0, N), .MUTABLE) {
-            return FlexSlice(T, math.IntFittingRange(0, N), .MUTABLE){
-                .ptr = &self.arr[0],
-                .len = self.len,
-            };
-        }
-
-        pub inline fn flex_slice_const(self: *const Self) FlexSlice(T, math.IntFittingRange(0, N), .IMMUTABLE) {
-            return FlexSlice(T, math.IntFittingRange(0, N), .IMMUTABLE){
-                .ptr = &self.arr[0],
-                .len = self.len,
-            };
-        }
     };
 }
 
@@ -590,6 +577,112 @@ pub const FillRule = enum {
             .POSITIVE => sum_of_intersection_slopes > 0,
             .NEGATIVE => sum_of_intersection_slopes < 0,
         };
+    }
+};
+
+pub const CachedAllocMode = enum {
+    MANUAL_ALLOC,
+    CACHED_ALLOC,
+
+    pub inline fn FuncParamAlloc(comptime mode: CachedAllocMode) type {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => Allocator,
+            .CACHED_ALLOC => void,
+        };
+    }
+    pub inline fn FuncParamAllocIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+        if (comptime CONDITION) {
+            return switch (comptime mode) {
+                .MANUAL_ALLOC => Allocator,
+                .CACHED_ALLOC => void,
+            };
+        } else {
+            return void;
+        }
+    }
+    pub inline fn Fn(comptime mode: CachedAllocMode) type {
+        return FuncParamAlloc(mode);
+    }
+    pub inline fn FnIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+        return FuncParamAllocIf(mode, CONDITION);
+    }
+    pub inline fn CachedAlloc(comptime mode: CachedAllocMode) type {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => void,
+            .CACHED_ALLOC => Allocator,
+        };
+    }
+    pub inline fn CachedAllocIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+        if (comptime CONDITION) {
+            return switch (comptime mode) {
+                .MANUAL_ALLOC => void,
+                .CACHED_ALLOC => Allocator,
+            };
+        } else {
+            return void;
+        }
+    }
+    pub inline fn Ch(comptime mode: CachedAllocMode) type {
+        return CachedAlloc(mode);
+    }
+    pub inline fn ChIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+        return CachedAllocIf(mode, CONDITION);
+    }
+    pub inline fn CACHED_ALLOC_DEFAULT_IF(comptime mode: CachedAllocMode, comptime CONDITION: bool) CachedAlloc(mode) {
+        if (comptime CONDITION) {
+            return switch (comptime mode) {
+                .MANUAL_ALLOC => @as(void, {}),
+                .CACHED_ALLOC => DummyAlloc.allocator_panic_free_noop,
+            };
+        } else {
+            return @as(void, {});
+        }
+    }
+    pub inline fn CACHED_ALLOC_DEFAULT(comptime mode: CachedAllocMode) CachedAlloc(mode) {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => @as(void, {}),
+            .CACHED_ALLOC => DummyAlloc.allocator_panic_free_noop,
+        };
+    }
+    pub inline fn get_alloc(comptime mode: CachedAllocMode, func_param: FuncParamAlloc(mode), cached: CachedAlloc(mode)) Allocator {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => func_param,
+            .CACHED_ALLOC => cached,
+        };
+    }
+    pub inline fn alloc_to_cached_alloc(comptime mode: CachedAllocMode, alloc: Allocator) CachedAlloc(mode) {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => @as(void, {}),
+            .CACHED_ALLOC => alloc,
+        };
+    }
+    pub inline fn alloc_to_func_alloc(comptime mode: CachedAllocMode, alloc: Allocator) FuncParamAlloc(mode) {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => alloc,
+            .CACHED_ALLOC => @as(void, {}),
+        };
+    }
+    pub inline fn no_cached_alloc(comptime mode: CachedAllocMode) CachedAlloc(mode) {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => @as(void, {}),
+            .CACHED_ALLOC => DummyAlloc.allocator_panic_free_noop,
+        };
+    }
+    pub inline fn no_func_alloc(comptime mode: CachedAllocMode) FuncParamAlloc(mode) {
+        return switch (comptime mode) {
+            .MANUAL_ALLOC => DummyAlloc.allocator_panic_free_noop,
+            .CACHED_ALLOC => @as(void, {}),
+        };
+    }
+    pub inline fn no_func_alloc_if(comptime mode: CachedAllocMode, comptime CONDITION: bool) FuncParamAllocIf(mode, CONDITION) {
+        if (comptime CONDITION) {
+            return switch (comptime mode) {
+                .MANUAL_ALLOC => DummyAlloc.allocator_panic_free_noop,
+                .CACHED_ALLOC => @as(void, {}),
+            };
+        } else {
+            return @as(void, {});
+        }
     }
 };
 

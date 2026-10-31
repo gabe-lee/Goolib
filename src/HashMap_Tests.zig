@@ -51,7 +51,7 @@ const MapHalfLoad = SwissTable.SwissHashMap(i32, i32, hash_i32, equal_i32, .{
 fn testInsertContainsGet(comptime M: type) !void {
     const alloc = std.testing.allocator;
     var map: M = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     try std.testing.expect(!map.contains(0));
     try std.testing.expectEqual(@as(?i32, null), map.remove_key_if_exists(0));
@@ -85,7 +85,7 @@ test "SwissHashMap -> insert, contains, get (scalar)" {
 test "SwissHashMap -> duplicate key overwrites value and does not grow len" {
     const alloc = std.testing.allocator;
     var map: Map = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     map.insert(7, 1, alloc);
     map.insert(7, 2, alloc);
@@ -103,7 +103,7 @@ test "SwissHashMap -> duplicate key overwrites value and does not grow len" {
 fn testRemoveLeavesTombstones(comptime M: type) !void {
     const alloc = std.testing.allocator;
     var map: M = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     for (0..256) |i| {
         const key: i32 = @intCast(i);
@@ -163,7 +163,7 @@ test "SwissHashMap -> remove keeps probe chains valid (scalar)" {
 test "SwissHashMap -> every key collides on the same h1/h2" {
     const alloc = std.testing.allocator;
     var map: MapColliding = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     for (0..200) |i| {
         const key: i32 = @intCast(i);
@@ -192,7 +192,7 @@ test "SwissHashMap -> every key collides on the same h1/h2" {
 test "SwissHashMap -> grow" {
     const alloc = std.testing.allocator;
     var map: Map = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     map.grow(1000, alloc);
     try std.testing.expect(map.cap >= 1000);
@@ -210,7 +210,7 @@ test "SwissHashMap -> grow" {
 test "SwissHashMap -> miscellaneous public API" {
     const alloc = std.testing.allocator;
     var map: Map = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     map.grow(64, alloc);
 
@@ -266,7 +266,7 @@ test "SwissHashMap -> miscellaneous public API" {
 fn testGetters(comptime M: type) !void {
     const alloc = std.testing.allocator;
     var map: M = .{};
-    defer map.deinit(alloc);
+    defer map.uninit(alloc);
 
     // Optional getters report absence on a completely empty map.
     try std.testing.expectEqual(@as(?i32, null), map.get_if_exists(0));

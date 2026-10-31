@@ -66,9 +66,9 @@ pub fn CellAccumulatorRasterizer(comptime COMPUTE_GRID_DEF_NO_LIST: GridDefiniti
             area: Float = 0,
         };
 
-        const CellList = List(Cell, Idx, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+        const CellList = List(Cell, Idx, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
         const CellGrid = COMPUTE_GRID_DEF.Grid();
-        const CoverList = List(Float, Idx, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED);
+        const CoverList = List(Float, Idx, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
         const Contour = ShapeModule.Contour(Float, void, {});
         const Shape = ShapeModule.Shape(Float, void, {});
 
