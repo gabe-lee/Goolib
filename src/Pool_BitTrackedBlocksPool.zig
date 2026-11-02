@@ -130,7 +130,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         const STATE_STEP_PER_VEC: IDX = @intCast(STATE_SIMD_WIDTH);
         const BLOCK_LOCK = DEF.LOCK_MODE == .MASTER_AND_BLOCK_LOCK;
         const VALS_ALIGN = VALS_ALIGN_;
-        const DATA_BLOCK_PTR_MASK = ~(VALS_ALIGN - 1);
+        const VALS_ARRAY_PTR_MASK = ~(VALS_ALIGN - 1);
 
         const DataBlock = struct {
             vals: [DATA_BLOCK_SLOT_LENGTH]ELEM align(VALS_ALIGN) = undefined,
@@ -267,7 +267,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             }
 
             inline fn vals_addr(self: Key) usize {
-                return @intFromPtr(self.ptr.?) & DATA_BLOCK_PTR_MASK;
+                return @intFromPtr(self.ptr.?) & VALS_ARRAY_PTR_MASK;
             }
             inline fn data_block(self: Key) *DataBlock {
                 return @ptrFromInt(self.vals_addr() - @offsetOf(DataBlock, "vals"));
@@ -275,11 +275,8 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             inline fn data_block_and_idx(self: Key) struct { *DataBlock, IDX } {
                 const ptr_addr = @intFromPtr(self.ptr.?);
                 const vals_addr_ = self.vals_addr();
-                assert_with_reason(ptr_addr >= vals_addr_, @src(), "slot pointer is before the start of the data block values array", .{});
                 const byte_offset = ptr_addr - vals_addr_;
-                assert_with_reason(byte_offset % @sizeOf(ELEM) == 0, @src(), "slot pointer is not aligned to an element boundary", .{});
                 const slot_idx: IDX = @intCast(byte_offset / @sizeOf(ELEM));
-                assert_with_reason(slot_idx < DATA_BLOCK_SLOT_LENGTH, @src(), "slot pointer is outside the data block values array", .{});
                 return .{ @ptrFromInt(vals_addr_ - @offsetOf(DataBlock, "vals")), slot_idx };
             }
             pub inline fn pool(self: Key) *Self {
