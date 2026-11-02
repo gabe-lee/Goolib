@@ -48,6 +48,7 @@ pub const PoolDef = struct {
     IDX: type = u32,
     LOCK_MODE: MutexMode = .NO_LOCKS,
     LOCK_BLOCK_COVERAGE: comptime_int = 64,
+    GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
 };
 
 const FieldAccessMode = enum {
@@ -117,6 +118,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         var master_lock: if (MASTER_LOCK) RwLock else void = if (MASTER_LOCK) RwLock.init else {};
         var io: if (NEED_IO) Io else void = if (NEED_IO) undefined else {};
 
+        pub const GLOBAL_POOL_NAME = DEF.GLOBAL_POOL_NAME;
         pub const POOL_DEF = DEF;
         pub const ELEM = DEF.ELEM;
         pub const IDX = DEF.IDX;
@@ -134,6 +136,12 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         const FREE_STATE: IDX = 0b0;
         const USED_STATE: IDX = 0b1;
 
+        pub inline fn total_item_len() IDX {
+            lock_pool_for_read();
+            const len = vals_len;
+            unlock_pool_for_read();
+            return len;
+        }
         inline fn mutex_block_idx(idx: IDX) IDX {
             return idx / MUTEX_BLOCK_LEN;
         }
