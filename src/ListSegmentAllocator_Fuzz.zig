@@ -31,7 +31,7 @@ const Random = std.Random;
 
 const IList = Root.IList;
 const Utils = Root.Utils;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 const List = Root.IList_List.List;
 const MSList = Root.IList.MultiSortList;
 const LSAlloc = Root.ListSegmentAllocator;

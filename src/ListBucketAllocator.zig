@@ -29,7 +29,7 @@ const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
 const IList = Root.IList;
 const Utils = Root.Utils;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 const testing = std.testing;
 const Test = Root.Testing;
 

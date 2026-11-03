@@ -36,7 +36,7 @@ const Assert = Root.Assert;
 const Sort = Root.Sort.InsertionSort;
 const Common = Root.CommonTypes;
 const List = Root.IList.List;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 const GetSetModule = Root.GetSetType;
 const MathX = Root.Math;
 

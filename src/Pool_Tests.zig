@@ -474,6 +474,13 @@ const BitTrackedSimdPool = BitTrackedPool(.{
     .LOCK_MODE = .NO_LOCKS,
     .SLOTS_PER_BLOCK = 192,
 });
+const BitTrackedSimdPoolU16 = BitTrackedPool(.{
+    .ELEM = u32,
+    .IDX = u32,
+    .STATE_UINT = u16,
+    .LOCK_MODE = .NO_LOCKS,
+    .SLOTS_PER_BLOCK = 192,
+});
 
 const BitTrackedCachedPool = BitTrackedPool(.{
     .ELEM = u32,
@@ -511,7 +518,7 @@ test "BitTrackedPool -> claim, write, release, and reuse" {
 
     var keys: [10]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(i));
     }
 
@@ -540,7 +547,7 @@ test "BitTrackedPool -> claim, write, release, and reuse" {
 
     var reused: [5]Key = undefined;
     for (&reused, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(100 + i));
         var was_released = false;
         for (released_ptrs) |old| {
@@ -571,7 +578,7 @@ test "BitTrackedPool -> growth keeps values intact and release works across bloc
 
     var keys: [N]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(i + 1));
     }
 
@@ -592,7 +599,7 @@ test "BitTrackedPool -> growth keeps values intact and release works across bloc
 
     var extra: [N / 2]Key = undefined;
     for (&extra, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(1000 + i));
     }
     try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK) - N)), pool.get_num_free());
@@ -628,7 +635,7 @@ test "BitTrackedPool -> small IDX and ELEM types" {
     const N = 1000;
     var keys: [N]Pool.Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@truncate(i));
     }
 
@@ -664,7 +671,7 @@ test "BitTrackedPool -> ensure_free_slots grows without claiming" {
 
     var keys: [NEEDED]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(i));
     }
     try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK_SLOTS) - NEEDED)), pool.get_num_free());
@@ -689,7 +696,7 @@ test "BitTrackedPool -> val, ptr, and const_ptr iterators visit exactly the used
         const N = 150;
         var keys: [N]Pool.Key = undefined;
         for (&keys, 0..) |*key, i| {
-            key.* = pool.claim_key(testing.allocator);
+            key.* = pool.claim_slot(testing.allocator);
             key.set(@intCast(i + 1));
         }
 
@@ -763,7 +770,7 @@ test "BitTrackedPool -> ignore-lock advanced claim, release, and iterators" {
 
     var keys: [20]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key_advanced(testing.allocator, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
+        key.* = pool.claim_slot_advanced(testing.allocator, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
         key.set(@intCast(i + 1));
     }
 
@@ -781,7 +788,7 @@ test "BitTrackedPool -> ignore-lock advanced claim, release, and iterators" {
     try testing.expectEqual(keys.len, count);
 
     for (&keys) |*key| {
-        pool.release_key_advanced(key, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
+        pool.release_slot_advanced(key, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
         try testing.expect(key.ptr == null);
     }
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS)), pool.get_num_free());
@@ -799,7 +806,7 @@ test "BitTrackedPool -> CACHED_ALLOC mode works without passing an allocator" {
 
     var keys: [N]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key({});
+        key.* = pool.claim_slot({});
         key.set(@intCast(i));
     }
 
@@ -821,7 +828,7 @@ test "BitTrackedPool -> cached block metadata and release variants" {
 
     var keys: [BLOCK_SLOTS + 1]Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
         key.set(@intCast(i + 1));
         try testing.expect(key.pool() == &pool);
     }
@@ -838,12 +845,12 @@ test "BitTrackedPool -> cached block metadata and release variants" {
     try testing.expectEqual(free_before + 1, pool.get_num_free());
 
     // Claiming again should pick the just-freed slot in the first block.
-    var reused = pool.claim_key(testing.allocator);
+    var reused = pool.claim_slot(testing.allocator);
     try testing.expectEqual(held_ptr, reused.ptr.?);
 
     // Value-key release must not write through the by-value key.
     const free_before_val_release = pool.get_num_free();
-    const val_key = pool.claim_key(testing.allocator);
+    const val_key = pool.claim_slot(testing.allocator);
     const val_key_ptr = val_key.ptr.?;
     pool.release_key_val(val_key);
     try testing.expectEqual(val_key_ptr, val_key.ptr.?);
@@ -877,7 +884,7 @@ test "BitTrackedPool -> mutex modes support claim, release, block locks, and ite
 
         var keys: [N]Key = undefined;
         for (&keys, 0..) |*key, i| {
-            key.* = pool.claim_key(testing.allocator);
+            key.* = pool.claim_slot(testing.allocator);
             key.set(@intCast(i));
         }
 
@@ -916,7 +923,7 @@ test "BitTrackedPool -> mutex modes support claim, release, block locks, and ite
 test "BitTrackedPool -> init, uninit, and re-init" {
     var pool: BitTrackedBasicPool = .{};
     pool.init(16, testing.allocator, {});
-    const first = pool.claim_key(testing.allocator);
+    const first = pool.claim_slot(testing.allocator);
     try testing.expect(first.pool() == &pool);
     first.set(7);
     try testing.expectEqual(@as(u32, 7), first.get());
@@ -926,7 +933,7 @@ test "BitTrackedPool -> init, uninit, and re-init" {
     pool.init(0, testing.allocator, {});
     defer pool.uninit(testing.allocator);
 
-    const second = pool.claim_key(testing.allocator);
+    const second = pool.claim_slot(testing.allocator);
     try testing.expect(second.pool() == &pool);
     second.set(9);
     try testing.expectEqual(@as(u32, 9), second.get());
@@ -952,7 +959,42 @@ test "BitTrackedPool -> struct elements" {
 
     var keys: [20]Pool.Key = undefined;
     for (&keys, 0..) |*key, i| {
-        key.* = pool.claim_key(testing.allocator);
+        key.* = pool.claim_slot(testing.allocator);
+        key.set(.{ .x = @intCast(i), .y = -@as(i32, @intCast(i)), .z = @floatFromInt(i) });
+    }
+
+    for (keys, 0..) |key, i| {
+        const val = key.get();
+        try testing.expectEqual(@as(u32, @intCast(i)), val.x);
+        try testing.expectEqual(-@as(i32, @intCast(i)), val.y);
+        try testing.expectEqual(@as(f32, @floatFromInt(i)), val.z);
+    }
+
+    for (&keys) |*key| key.release();
+}
+
+test "BitTrackedPool -> struct elements (u16 state int)" {
+    const Struct = struct {
+        x: u32,
+        y: i32,
+        z: f32,
+    };
+    const Pool = BitTrackedPool(.{
+        .ELEM = Struct,
+        .IDX = u32,
+        .STATE_UINT = u16,
+        .LOCK_MODE = .NO_LOCKS,
+        .SLOTS_PER_BLOCK = 320,
+        .ALLOC_MODE = .MANUAL_ALLOC,
+    });
+
+    var pool: Pool = .{};
+    pool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    var keys: [20]Pool.Key = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = pool.claim_slot(testing.allocator);
         key.set(.{ .x = @intCast(i), .y = -@as(i32, @intCast(i)), .z = @floatFromInt(i) });
     }
 
@@ -989,7 +1031,64 @@ test "BitTrackedPool -> randomized claims and releases match a model" {
         const do_claim = live == 0 or (can_claim and rand.intRangeAtMost(u8, 0, 2) != 0);
 
         if (do_claim) {
-            var key = pool.claim_key(testing.allocator);
+            var key = pool.claim_slot(testing.allocator);
+            const val = next_val;
+            next_val +%= 1;
+            key.set(val);
+            keys[live] = key;
+            vals[live] = val;
+            live += 1;
+            max_live = @max(max_live, live);
+        } else {
+            const i = rand.intRangeLessThan(usize, 0, live);
+            try testing.expectEqual(vals[i], keys[i].get());
+            try testing.expect(keys[i].is_valid());
+            keys[i].release();
+            try testing.expect(!keys[i].is_valid());
+            live -= 1;
+            keys[i] = keys[live];
+            vals[i] = vals[live];
+        }
+
+        if (rand.intRangeAtMost(u8, 0, 63) == 0) {
+            for (keys[0..live], vals[0..live]) |key, val| {
+                try testing.expectEqual(val, key.get());
+            }
+        }
+    }
+
+    for (keys[0..live], vals[0..live]) |key, val| {
+        try testing.expectEqual(val, key.get());
+    }
+    for (keys[0..live]) |*key| key.release();
+    const expected_blocks = (max_live + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+    try testing.expectEqual(@as(u32, @intCast(expected_blocks * BLOCK_SLOTS)), pool.get_num_free());
+}
+
+test "BitTrackedPool -> randomized claims and releases match a model (u16 state int)" {
+    const Key = BitTrackedSimdPoolU16.Key;
+    const BLOCK_SLOTS: usize = BitTrackedSimdPoolU16.DATA_BLOCK_SLOT_LENGTH;
+
+    var pool: BitTrackedSimdPoolU16 = .{};
+    pool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    const MAX_LIVE = 300;
+    var keys: [MAX_LIVE]Key = undefined;
+    var vals: [MAX_LIVE]u32 = undefined;
+    var live: usize = 0;
+    var max_live: usize = 0;
+
+    var prng = std.Random.DefaultPrng.init(0xB17_7AC);
+    const rand = prng.random();
+
+    var next_val: u32 = 1;
+    for (0..10000) |_| {
+        const can_claim = live < MAX_LIVE;
+        const do_claim = live == 0 or (can_claim and rand.intRangeAtMost(u8, 0, 2) != 0);
+
+        if (do_claim) {
+            var key = pool.claim_slot(testing.allocator);
             const val = next_val;
             next_val +%= 1;
             key.set(val);

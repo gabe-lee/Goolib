@@ -43,7 +43,7 @@ const AllocatorInfal = @This();
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const assert_with_reason = Assert.assert_with_reason;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 
 pub const Log2Align = math.Log2Int(usize);
 

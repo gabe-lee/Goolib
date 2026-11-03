@@ -30,7 +30,8 @@ pub const VERSION = "0.5.0";
 pub const NAME = "Goolib";
 
 pub const AABB2 = @import("./AABB2.zig");
-pub const AllocatorInfallible = @import("./AllocatorInfallible.zig");
+pub const Allocator = @import("./Allocator.zig");
+
 pub const ANSI = @import("./ANSI.zig");
 pub const Bezier = @import("./Bezier.zig");
 pub const Assert = @import("./Assert.zig");
@@ -49,7 +50,6 @@ pub const CompositeEnum = @import("./CompositeEnum.zig");
 // pub const Composition = @import("./Composition.zig");
 pub const DataGrid = @import("./DataGrid.zig");
 // pub const Compare = @import("./Compare.zig");
-pub const DummyAllocator = @import("./DummyAllocator.zig");
 pub const DummyIo = @import("./DummyIo.zig");
 pub const Enums = @import("./Enums.zig");
 pub const EnumMap = @import("./EnumMap.zig");
@@ -109,7 +109,7 @@ pub const Vec4 = @import("./Vec4.zig");
 comptime {
     if (build.is_test) {
         _ = @import("./AABB2.zig");
-        _ = @import("./AllocatorInfallible.zig");
+        _ = @import("./Allocator.zig");
         _ = @import("./ANSI.zig");
         _ = @import("./Assert.zig");
         _ = @import("./BinarySearch.zig");
@@ -125,7 +125,6 @@ comptime {
         _ = @import("./CompactCoupledAllocationSystem.zig");
         _ = @import("./CompositeEnum.zig");
         _ = @import("./DataGrid.zig");
-        _ = @import("./DummyAllocator.zig");
         _ = @import("./Enums.zig");
         _ = @import("./EnumMap.zig");
         _ = @import("./FileFormat.zig");

@@ -49,7 +49,7 @@ const Assert = Root.Assert;
 const Utils = Root.Utils;
 const CommonTypes = Root.CommonTypes;
 const Test = Root.Testing;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 const dummy_alloc = DummyAlloc.allocator_panic_free_noop;
 
 const assert_with_reason = Assert.assert_with_reason;

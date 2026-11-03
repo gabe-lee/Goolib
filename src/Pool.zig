@@ -29,7 +29,7 @@ const Assert = Root.Assert;
 const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
 const Utils = Root.Utils;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;

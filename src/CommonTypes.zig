@@ -30,7 +30,7 @@ const Math = Root.Math;
 const Assert = Root.Assert;
 const SliceChild = Root.Types.SliceChild;
 const Allocator = std.mem.Allocator;
-const DummyAlloc = Root.DummyAllocator;
+const DummyAlloc = Root.Allocator.Dummy;
 
 const assert_unreachable = Assert.assert_unreachable;
 
