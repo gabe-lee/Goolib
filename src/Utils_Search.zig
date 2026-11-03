@@ -206,7 +206,7 @@
 //             search_params: self.SEARCH_PARAM_CONTAINER,
 //             results_buffer: self.RESULT_CONTAINER,
 //             userdata: self.USERDATA_TYPE = if (self.USERDATA_TYPE == void) {} else undefined,
-//             results_alloc: Allocator = Root.DummyAllocator.allocator_panic_free_noop,
+//             results_alloc: Allocator = Root.Allocator.Dummy.allocator_panic_free_noop,
 
 //             pub fn data_only(inputs: @This()) SearchInputsDataOnly(self) {
 //                 return SearchInputsDataOnly(self){

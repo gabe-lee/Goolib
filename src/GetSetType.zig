@@ -28,7 +28,7 @@ const Cast = Root.Cast;
 const Assert = Root.Assert;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
-const DummyAllocator = Root.DummyAllocator;
+const DummyAllocator = Root.Allocator.Dummy;
 const Common = Root.CommonTypes;
 const Utils = Root.Utils;
 

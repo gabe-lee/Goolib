@@ -33,7 +33,7 @@ const Assert = Root.Assert;
 const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
 const AllocInfal = Root.AllocatorInfallible;
-const DummyAllocator = Root.DummyAllocator;
+const DummyAllocator = Root.Allocator.Dummy;
 const Flags = Root.Flags;
 const ListModule = Root.ListSlice;
 const List = ListModule.ListAllocated;
@@ -2777,7 +2777,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                     /// The shape to create a signed distance field from
                     shape: Shape,
                     /// The allocator to use to resize the shape (if needed) and/or free it when finished (if specified)
-                    shape_allocator: Allocator = Root.DummyAllocator.allocator_panic,
+                    shape_allocator: Allocator = Root.Allocator.Dummy.allocator_panic,
                     /// The pre-computed AABB for this shape in *native units* (with the given `border_width` and `miter_limit`, and assuming `needs_to_be_normalized == false` OR shape is already normalized)
                     ///
                     /// If provided, reduces the amount of computation needed.
@@ -2831,7 +2831,7 @@ pub fn BezierMultiSignedDistanceFieldGenerator(comptime Float: type, comptime ES
                 /// If provided, reduces the amount of computation needed.
                 pre_computed_aabb: ?AABB = null,
                 /// The allocator to use to resize the shape (if needed) and/or free it when finished (if specified)
-                shape_allocator: Allocator = Root.DummyAllocator.allocator_panic,
+                shape_allocator: Allocator = Root.Allocator.Dummy.allocator_panic,
                 /// Whether or not to automatically free the shape after its been generated
                 free_shape_after_generation: bool = false,
                 /// How to scale/translate the given shape for rendering

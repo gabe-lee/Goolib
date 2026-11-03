@@ -27,7 +27,7 @@
 // const Assert = Root.Assert;
 // const Allocator = std.mem.Allocator;
 // const AllocInfal = Root.AllocatorInfallible;
-// const DummyAllocator = Root.DummyAllocator;
+// const DummyAllocator = Root.Allocator.Dummy;
 // const Utils = Root.Utils;
 // const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
 

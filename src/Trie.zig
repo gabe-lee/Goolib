@@ -40,7 +40,7 @@
 // const CommonTypes = Root.CommonTypes;
 // const Test = Root.Testing;
 // const Sort = Root.Sort;
-// const DummyAlloc = Root.DummyAllocator.allocator_panic_free_noop;
+// const DummyAlloc = Root.Allocator.Dummy.allocator_panic_free_noop;
 
 // const assert_with_reason = Assert.assert_with_reason;
 // const assert_unreachable = Assert.assert_unreachable;
