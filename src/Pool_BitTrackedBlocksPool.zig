@@ -98,15 +98,15 @@ pub const BackPointStrategy = enum {
     /// which may cause some allocators to fail to find memory that meets the alignments and sizes,
     /// or may vastly over-allocate and waste space.
     SUPER_ALIGN_AND_MASK,
-    /// Every element slot also has a paired index field that stores the pointer's index WITHIN its DataBlock,
+    /// Every element slot also has a paired index field that stores the slot's index WITHIN its DataBlock,
     /// that can be reversed with some integer math to get the *DataBlock pointer from any *ELEM pointer.
     ///
     /// PROS:
     ///   - O(1) pointer reversal to get *DataBlock from any *ELEM
     ///
     /// CONS:
-    ///   - Every single element also requires an extra `@max(@alignOf(ELEM), @sizeOf(IDX))` bytes
-    /// as metadata.
+    ///   - Every slot also stores the smallest unsigned integer type that can hold its
+    /// within-block index, which may add padding and therefore extra bytes per slot.
     AUXILLIARY_INDEX_FIELD,
     /// DataBlocks are sorted by their starting address, and when releasing a slot, a binary search is performed
     /// to locate the DataBlock it belongs to.
@@ -145,16 +145,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
     assert_with_reason(@as(u128, DEF.SLOTS_PER_BLOCK) * ELEM_SIZE_ <= math.maxInt(usize), @src(), "`SLOTS_PER_BLOCK` * `@sizeOf(ELEM)` overflows `usize`", .{});
     const VALS_BYTE_SIZE_ = @as(usize, DEF.SLOTS_PER_BLOCK) * ELEM_SIZE_;
     const AUX_IDX_INT_ = calc: {
-        var max_val = DEF.SLOTS_PER_BLOCK;
-        max_val -= 1;
-        max_val |= max_val >> 1;
-        max_val |= max_val >> 2;
-        max_val |= max_val >> 4;
-        max_val |= max_val >> 8;
-        max_val |= max_val >> 16;
-        max_val |= max_val >> 32;
-        max_val += 1;
-        const bits_needed: u16 = @intCast(@ctz(max_val));
+        const bits_needed: u16 = @intCast(std.math.log2_int_ceil(usize, @as(usize, DEF.SLOTS_PER_BLOCK)));
         break :calc @Int(.unsigned, bits_needed);
     };
     const Slot_ = struct {
@@ -170,7 +161,6 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         pub const IDX = DEF.IDX;
         const SlotContainer = Slot_;
         const STATE_INT = DEF.STATE_UINT;
-        const AUX_IDX_INT = AUX_IDX_INT_;
         const LOCK_MODE = DEF.LOCK_MODE;
         const MASTER_LOCK = LOCK_MODE == .MASTER_LOCK or LOCK_MODE == .MASTER_AND_BLOCK_LOCK;
         pub const DATA_BLOCK_SLOT_LENGTH: IDX = DEF.SLOTS_PER_BLOCK;
@@ -198,8 +188,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         const VALS_ALIGN = VALS_ALIGN_;
         const VALS_ARRAY_PTR_MASK = ~(VALS_ALIGN - 1);
         const BACK_STRAT = DEF.BACK_POINT_STRATEGY;
-        const DataBlockSlice = ListSliceMoule.ListFullDefinition(DataBlock, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
-        const DataBlockSliceConst = ListSliceMoule.ListFullDefinition(DataBlock, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_IMMUTABLE, .MANUAL_ALLOC);
+        const DataBlockSlice = ListSliceMoule.ListFullDefinition(*DataBlock, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
 
         const DataBlock = struct {
             vals: [DATA_BLOCK_SLOT_LENGTH]SlotContainer align(VALS_ALIGN) = undefined,
@@ -234,8 +223,10 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         pub const DATA_BLOCK_BYTE_SIZE = @sizeOf(DataBlock);
         pub const DATA_BLOCK_ALIGNMENT = @alignOf(DataBlock);
         comptime {
-            assert_with_reason(VALS_ALIGN >= 2, null, "`vals` alignment must be at least 2 so pointer masking clears at least one bit", .{});
-            assert_with_reason(VALS_BYTE_SIZE_ <= VALS_ALIGN, null, "`vals` array ({d} bytes) must fit inside one {d}-byte aligned extent", .{ VALS_BYTE_SIZE_, VALS_ALIGN });
+            if (DEF.BACK_POINT_STRATEGY == .SUPER_ALIGN_AND_MASK) {
+                assert_with_reason(VALS_ALIGN >= 2, null, "`vals` alignment must be at least 2 so pointer masking clears at least one bit", .{});
+                assert_with_reason(VALS_BYTE_SIZE_ <= VALS_ALIGN, null, "`vals` array ({d} bytes) must fit inside one {d}-byte aligned extent", .{ VALS_BYTE_SIZE_, VALS_ALIGN });
+            }
             assert_with_reason(@offsetOf(DataBlock, "vals") % VALS_ALIGN == 0, null, "`vals` offset ({d}) must be a multiple of its alignment ({d})", .{ @offsetOf(DataBlock, "vals"), VALS_ALIGN });
             assert_with_reason(@alignOf(DataBlock) >= VALS_ALIGN, null, "`DataBlock` alignment ({d}) must be at least `VALS_ALIGN` ({d})", .{ @alignOf(DataBlock), VALS_ALIGN });
         }
@@ -323,15 +314,6 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             return @intFromPtr(slice.get(block_idx)) > @intFromPtr(block_to_compare);
         }
 
-        fn slot_within_data_block(slice: DataBlockSlice, block_idx: IDX, _: *DataBlock, slot_addr: usize, comptime _: void) bool {
-            const block_addr = @intFromPtr(slice.get(block_idx));
-            return block_addr >= slot_addr and slot_addr < block_addr + @sizeOf(DataBlock);
-        }
-        fn data_block_greater_addr_than_slot(slice: DataBlockSlice, block_idx: IDX, _: *DataBlock, slot_addr: usize, comptime _: void) bool {
-            const block_addr = @intFromPtr(slice.get(block_idx));
-            return slot_addr < block_addr;
-        }
-
         /// Initializes `self` in place. Call this on a fresh value or after
         /// `uninit`. The pool must not be moved or copied after this call,
         /// because its data blocks retain a pointer to it.
@@ -390,6 +372,9 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                             const first_emtpy_slot_in_block: IDX = @intCast(@ctz(state_block_ptr[0]));
                             const true_idx = ((state_idx + first_group_with_empty) * SLOT_STEP_PER_STATE_GROUP) + first_emtpy_slot_in_block;
                             assert_with_reason(true_idx < DATA_BLOCK_SLOT_LENGTH, @src(), "claim found a free state bit beyond the configured slots per block", .{});
+                            if (comptime BACK_STRAT == .AUXILLIARY_INDEX_FIELD) {
+                                block.vals[true_idx].idx = @intCast(true_idx);
+                            }
                             const slot_ptr: *ELEM = &block.vals[true_idx].elem;
                             state_block_ptr[0] &= state_block_ptr[0] - 1;
                             self.num_free -= 1;
@@ -405,6 +390,9 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                         const first_emtpy_slot_in_block: IDX = @intCast(@ctz(state));
                         const true_idx = (state_idx * SLOT_STEP_PER_STATE_GROUP) + first_emtpy_slot_in_block;
                         assert_with_reason(true_idx < DATA_BLOCK_SLOT_LENGTH, @src(), "claim found a free state bit beyond the configured slots per block", .{});
+                        if (comptime BACK_STRAT == .AUXILLIARY_INDEX_FIELD) {
+                            block.vals[true_idx].idx = @intCast(true_idx);
+                        }
                         const slot_ptr: *ELEM = &block.vals[true_idx].elem;
                         block.state[state_idx] &= block.state[state_idx] - 1;
                         self.num_free -= 1;
@@ -421,42 +409,55 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             return self.claim_slot_advanced(fn_alloc, .CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS);
         }
 
-        fn slot_data_block_and_idx(self: *const Self, slot: *const ELEM) struct { *DataBlock, IDX } {
+        fn slot_data_block_and_idx(self: *Self, slot: *const ELEM) struct { *DataBlock, IDX } {
             switch (comptime BACK_STRAT) {
                 .SUPER_ALIGN_AND_MASK => {
                     const ptr_addr = @intFromPtr(slot);
                     const vals_addr = @intFromPtr(slot) & VALS_ARRAY_PTR_MASK;
                     const byte_offset = ptr_addr - vals_addr;
-                    const slot_idx: IDX = @intCast(byte_offset / @sizeOf(ELEM));
+                    const slot_idx: IDX = @intCast(byte_offset / @sizeOf(SlotContainer));
                     return .{ @ptrFromInt(vals_addr - @offsetOf(DataBlock, "vals")), slot_idx };
                 },
                 .AUXILLIARY_INDEX_FIELD => {
                     const slot_holder_ptr: *const SlotContainer = @fieldParentPtr("elem", slot);
-                    const slot_idx: AUX_IDX_INT = slot_holder_ptr.idx;
-                    const offset_elem_to_vals = @as(usize, @intCast(slot_idx)) * @sizeOf(SlotContainer);
+                    const slot_idx: IDX = @intCast(slot_holder_ptr.idx);
+                    const offset_elem_to_vals = @as(usize, slot_idx) * @sizeOf(SlotContainer);
                     const offset_vals_to_block = @offsetOf(DataBlock, "vals");
                     const data_block_addr: usize = @intFromPtr(slot) - offset_elem_to_vals - offset_vals_to_block;
                     const block: *DataBlock = @ptrFromInt(data_block_addr);
-                    return .{ block, block.self_idx };
+                    return .{ block, slot_idx };
                 },
                 .SORTED_BLOCKS_BINARY_SEARCH => {
-                    const blocks = DataBlockSlice.from_slice_keep_data(self.blocks[0..self.blocks_cap]);
                     const slot_addr = @intFromPtr(slot);
-                    const possible_block_idx = blocks.binary_search_advanced(.{}, 0, self.blocks_cap, slot_addr, {}, .COMPTIME_FN_BODY, {}, slot_within_data_block, .COMPTIME_FN_BODY, {}, data_block_greater_addr_than_slot);
-                    if (possible_block_idx) |block_idx| {
-                        return .{ self.blocks[block_idx], block_idx };
-                    } else {
-                        assert_unreachable(@src(), "slot does not belong to any data block", .{});
-                        return .{ undefined, undefined };
+                    var lo: IDX = 0;
+                    var hi: IDX = self.blocks_cap;
+                    while (lo < hi) {
+                        const mid = lo + ((hi - lo) / 2);
+                        const block = self.blocks[mid];
+                        const block_addr = @intFromPtr(block);
+                        if (slot_addr < block_addr) {
+                            hi = mid;
+                        } else if (slot_addr - block_addr < @sizeOf(DataBlock)) {
+                            const vals_addr = @intFromPtr(&block.vals[0].elem);
+                            const slot_idx: IDX = @intCast((slot_addr - vals_addr) / @sizeOf(SlotContainer));
+                            return .{ block, slot_idx };
+                        } else {
+                            lo = mid + 1;
+                        }
                     }
+                    assert_unreachable(@src(), "slot does not belong to any data block", .{});
+                    return .{ undefined, undefined };
                 },
             }
         }
 
-        pub inline fn assert_slot_valid(self: *const Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation) void {
+        pub inline fn assert_slot_valid(self: *Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation) void {
             if (comptime Assert.SHOULD_ASSERT) {
                 _ = self.unwrap_slot_info(slot, src, .READ_POOL_TRANSIENT, .READ_BLOCK_TRANSIENT);
             }
+        }
+        pub inline fn slot_pool(self: *Self, slot: *const ELEM) *Self {
+            return self.unwrap_slot_info(slot, @src(), .READ_POOL_TRANSIENT, .READ_BLOCK_TRANSIENT).pool;
         }
         const SlotInfo = struct {
             block: *DataBlock,
@@ -466,21 +467,21 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             state_bit_idx: IDX,
             state_bit_empty: STATE_INT,
         };
-        fn unwrap_slot_info(self: *const Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation, comptime pool_lock: PoolLockModeAdv, comptime block_lock: BlockLockModeAdv) SlotInfo {
-            const block, const slot_idx = slot_data_block_and_idx(slot);
-            assert_with_reason(block.pool != null, src, "block.pool for slot was null, block is invalid -> slot is invalid", .{});
-            const pool = block.pool.?;
-            assert_with_reason(@intFromPtr(pool) == @intFromPtr(self), src, "block's `pool: *Pool` back-pointer does not match the known pool pointer", .{});
+        fn unwrap_slot_info(self: *Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation, comptime pool_lock: PoolLockModeAdv, comptime block_lock: BlockLockModeAdv) SlotInfo {
             switch (comptime pool_lock) {
                 .IGNORE_POOL_LOCK => {},
-                .READ_POOL_KEEP_LOCKED, .READ_POOL_TRANSIENT => pool.lock_for_read(),
-                .WRITE_POOL_KEEP_LOCKED, .WRITE_POOL_TRANSIENT => pool.lock_for_write(),
+                .READ_POOL_KEEP_LOCKED, .READ_POOL_TRANSIENT => self.lock_for_read(),
+                .WRITE_POOL_KEEP_LOCKED, .WRITE_POOL_TRANSIENT => self.lock_for_write(),
             }
             defer switch (comptime pool_lock) {
                 .IGNORE_POOL_LOCK, .READ_POOL_KEEP_LOCKED, .WRITE_POOL_KEEP_LOCKED => {},
-                .READ_POOL_TRANSIENT => pool.unlock_for_read(),
-                .WRITE_POOL_TRANSIENT => pool.unlock_for_write(),
+                .READ_POOL_TRANSIENT => self.unlock_for_read(),
+                .WRITE_POOL_TRANSIENT => self.unlock_for_write(),
             };
+            const block, const slot_idx = self.slot_data_block_and_idx(slot);
+            assert_with_reason(block.pool != null, src, "block.pool for slot was null, block is invalid -> slot is invalid", .{});
+            const pool = block.pool.?;
+            assert_with_reason(@intFromPtr(pool) == @intFromPtr(self), src, "block's `pool: *Pool` back-pointer does not match the known pool pointer", .{});
             switch (comptime block_lock) {
                 .IGNORE_BLOCK_LOCK => {},
                 .READ_BLOCK_KEEP_LOCKED, .READ_BLOCK_TRANSIENT => block.lock_for_read(),
@@ -517,7 +518,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                 .CHECK_BLOCK_LOCKS => BlockLockModeAdv.WRITE_BLOCK_KEEP_LOCKED,
                 .IGNORE_BLOCK_LOCKS => BlockLockModeAdv.IGNORE_BLOCK_LOCK,
             };
-            const slot_info = unwrap_slot_info(slot, self, @src(), pool_lock_adv, block_lock_adv);
+            const slot_info = self.unwrap_slot_info(slot, @src(), pool_lock_adv, block_lock_adv);
             defer switch (comptime pool_lock) {
                 .CHECK_POOL_LOCKS => self.unlock_for_write(),
                 .IGNORE_POOL_LOCKS => {},
@@ -586,8 +587,8 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                                 self.curr_state_inverted &= self.curr_state_inverted - 1;
                                 const first_used_slot_within_block = (self.state_idx * SLOT_STEP_PER_STATE_GROUP) + first_used_slot_bit_offset;
                                 const slot: SlotReturn = switch (comptime slot_mode) {
-                                    .VAL => self.block.vals[first_used_slot_within_block],
-                                    .PTR, .CONST_PTR => &self.block.vals[first_used_slot_within_block],
+                                    .VAL => self.block.vals[first_used_slot_within_block].elem,
+                                    .PTR, .CONST_PTR => &self.block.vals[first_used_slot_within_block].elem,
                                 };
                                 self.num_used_in_block -= 1;
                                 self.num_used_in_pool -= 1;

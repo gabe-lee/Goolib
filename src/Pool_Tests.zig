@@ -491,19 +491,93 @@ const BitTrackedCachedPool = BitTrackedPool(.{
 });
 
 test "BitTrackedPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
-    try testing.expectEqual(@as(u32, 64), BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH);
-    try testing.expectEqual(@as(usize, 256), BitTrackedBasicPool.DATA_BLOCK_ALIGNMENT);
-    try testing.expectEqual(@as(usize, 512), BitTrackedBasicPool.DATA_BLOCK_BYTE_SIZE);
+    const SuperPool = BitTrackedPool(.{
+        .ELEM = u32,
+        .IDX = u32,
+        .LOCK_MODE = .NO_LOCKS,
+        .SLOTS_PER_BLOCK = 64,
+        .BACK_POINT_STRATEGY = .SUPER_ALIGN_AND_MASK,
+    });
+    try testing.expectEqual(@as(u32, 64), SuperPool.DATA_BLOCK_SLOT_LENGTH);
+    try testing.expectEqual(@as(usize, 256), SuperPool.DATA_BLOCK_ALIGNMENT);
+    try testing.expectEqual(@as(usize, 512), SuperPool.DATA_BLOCK_BYTE_SIZE);
 
     const OddPool = BitTrackedPool(.{
         .ELEM = u8,
         .IDX = u16,
         .LOCK_MODE = .NO_LOCKS,
         .SLOTS_PER_BLOCK = 192,
+        .BACK_POINT_STRATEGY = .SUPER_ALIGN_AND_MASK,
     });
     try testing.expectEqual(@as(u16, 192), OddPool.DATA_BLOCK_SLOT_LENGTH);
     try testing.expectEqual(@as(usize, 256), OddPool.DATA_BLOCK_ALIGNMENT);
     try testing.expectEqual(@as(usize, 256), OddPool.DATA_BLOCK_BYTE_SIZE);
+}
+
+test "BitTrackedPool -> every back-pointer strategy reverses slots correctly" {
+    const N = 400;
+
+    inline for (.{ 64, 192 }) |slots_per_block| {
+        inline for (.{ .SUPER_ALIGN_AND_MASK, .AUXILLIARY_INDEX_FIELD, .SORTED_BLOCKS_BINARY_SEARCH }) |strategy| {
+            const Pool = BitTrackedPool(.{
+                .ELEM = u32,
+                .IDX = u32,
+                .LOCK_MODE = .NO_LOCKS,
+                .SLOTS_PER_BLOCK = slots_per_block,
+                .BACK_POINT_STRATEGY = strategy,
+            });
+            const Slot = *Pool.ELEM;
+            const BLOCK_SLOTS: usize = Pool.DATA_BLOCK_SLOT_LENGTH;
+            const EXPECTED_BLOCKS = (N + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+
+            var pool: Pool = .{};
+            pool.init(0, testing.allocator, {});
+            defer pool.uninit(testing.allocator);
+
+            var slots: [N]Slot = undefined;
+            for (&slots, 0..) |*slot, i| {
+                slot.* = pool.claim_slot(testing.allocator);
+                slot.*.* = @intCast(i + 1);
+            }
+
+            // Every claimed slot must reverse back to this pool and its own block.
+            for (slots, 0..) |slot, i| {
+                try testing.expect(pool.slot_pool(slot) == &pool);
+                pool.assert_slot_valid(slot, @src());
+                try testing.expectEqual(@as(u32, @intCast(i + 1)), slot.*);
+            }
+
+            // Release every other slot, then make sure the survivors are still valid
+            // and reachable through their back-pointers.
+            for (slots, 0..) |slot, i| {
+                if (i % 2 == 0) pool.release_slot(slot);
+            }
+            for (slots, 0..) |slot, i| {
+                if (i % 2 == 1) {
+                    try testing.expectEqual(@as(u32, @intCast(i + 1)), slot.*);
+                    pool.assert_slot_valid(slot, @src());
+                }
+            }
+
+            // Reuse the released slots and verify their metadata was refreshed.
+            var reused: [N / 2]Slot = undefined;
+            for (&reused, 0..) |*slot, i| {
+                slot.* = pool.claim_slot(testing.allocator);
+                slot.*.* = @intCast(1000 + i);
+            }
+            for (reused, 0..) |slot, i| {
+                try testing.expectEqual(@as(u32, @intCast(1000 + i)), slot.*);
+                try testing.expect(pool.slot_pool(slot) == &pool);
+                pool.assert_slot_valid(slot, @src());
+            }
+
+            for (reused) |slot| pool.release_slot(slot);
+            for (slots, 0..) |slot, i| {
+                if (i % 2 == 1) pool.release_slot(slot);
+            }
+            try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), pool.get_num_free());
+        }
+    }
 }
 
 test "BitTrackedPool -> claim, write, release, and reuse" {
@@ -527,8 +601,8 @@ test "BitTrackedPool -> claim, write, release, and reuse" {
         for (slots[0..i]) |other| {
             try testing.expect(slot != other);
         }
-        try testing.expect(BitTrackedBasicPool.slot_pool(slot) == &pool);
-        BitTrackedBasicPool.assert_slot_valid(slot, @src());
+        try testing.expect(pool.slot_pool(slot) == &pool);
+        pool.assert_slot_valid(slot, @src());
         try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
     }
 
@@ -540,7 +614,7 @@ test "BitTrackedPool -> claim, write, release, and reuse" {
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS - 5)), pool.get_num_free());
     for (slots[5..], 5..) |slot, i| {
         try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
-        BitTrackedBasicPool.assert_slot_valid(slot, @src());
+        pool.assert_slot_valid(slot, @src());
     }
 
     var reused: [5]Slot = undefined;
@@ -590,7 +664,7 @@ test "BitTrackedPool -> growth keeps values intact and release works across bloc
     for (slots, 0..) |slot, i| {
         if (i % 2 == 1) {
             try testing.expectEqual(@as(u32, @intCast(i + 1)), slot.*);
-            BitTrackedBasicPool.assert_slot_valid(slot, @src());
+            pool.assert_slot_valid(slot, @src());
         }
     }
 
@@ -828,8 +902,8 @@ test "BitTrackedPool -> slot lookup and release variants" {
     for (&slots, 0..) |*slot, i| {
         slot.* = pool.claim_slot(testing.allocator);
         slot.*.* = @intCast(i + 1);
-        try testing.expect(BitTrackedBasicPool.slot_pool(slot.*) == &pool);
-        BitTrackedBasicPool.assert_slot_valid(slot.*, @src());
+        try testing.expect(pool.slot_pool(slot.*) == &pool);
+        pool.assert_slot_valid(slot.*, @src());
     }
 
     // Releasing a slot makes it available to the next claim.
@@ -881,7 +955,7 @@ test "BitTrackedPool -> mutex modes support claim, release, block locks, and ite
 
         // Slot lookup routes through the data block's cached pool back-pointer.
         const first = slots[0];
-        try testing.expect(Pool.slot_pool(first) == &pool);
+        try testing.expect(pool.slot_pool(first) == &pool);
         try testing.expectEqual(@as(u32, 0), first.*);
         first.* = 1234;
         try testing.expectEqual(@as(u32, 1234), first.*);
@@ -914,7 +988,7 @@ test "BitTrackedPool -> init, uninit, and re-init" {
     var pool: BitTrackedBasicPool = .{};
     pool.init(16, testing.allocator, {});
     const first = pool.claim_slot(testing.allocator);
-    try testing.expect(BitTrackedBasicPool.slot_pool(first) == &pool);
+    try testing.expect(pool.slot_pool(first) == &pool);
     first.* = 7;
     try testing.expectEqual(@as(u32, 7), first.*);
     pool.uninit(testing.allocator);
@@ -924,7 +998,7 @@ test "BitTrackedPool -> init, uninit, and re-init" {
     defer pool.uninit(testing.allocator);
 
     const second = pool.claim_slot(testing.allocator);
-    try testing.expect(BitTrackedBasicPool.slot_pool(second) == &pool);
+    try testing.expect(pool.slot_pool(second) == &pool);
     second.* = 9;
     try testing.expectEqual(@as(u32, 9), second.*);
 }
@@ -1022,7 +1096,7 @@ test "BitTrackedPool -> u8 state int supports more slots than maxInt(u8)" {
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS - slots.len)), pool.get_num_free());
     for (slots, 0..) |slot, i| {
         try testing.expectEqual(@as(u32, @intCast(i)), slot.*);
-        Pool.assert_slot_valid(slot, @src());
+        pool.assert_slot_valid(slot, @src());
     }
 
     for (slots) |slot| pool.release_slot(slot);
@@ -1063,7 +1137,7 @@ test "BitTrackedPool -> randomized claims and releases match a model" {
         } else {
             const i = rand.intRangeLessThan(usize, 0, live);
             try testing.expectEqual(vals[i], slots[i].*);
-            try testing.expect(BitTrackedSimdPool.slot_pool(slots[i]) == &pool);
+            try testing.expect(pool.slot_pool(slots[i]) == &pool);
             pool.release_slot(slots[i]);
             live -= 1;
             slots[i] = slots[live];
@@ -1119,7 +1193,7 @@ test "BitTrackedPool -> randomized claims and releases match a model (u16 state 
         } else {
             const i = rand.intRangeLessThan(usize, 0, live);
             try testing.expectEqual(vals[i], slots[i].*);
-            try testing.expect(BitTrackedSimdPoolU16.slot_pool(slots[i]) == &pool);
+            try testing.expect(pool.slot_pool(slots[i]) == &pool);
             pool.release_slot(slots[i]);
             live -= 1;
             slots[i] = slots[live];
