@@ -1097,9 +1097,9 @@ pub fn RowPackedAtlas(
         pub fn lookup_rect(self: *Self, key: KEY) PackedRect {
             return self.hash_map.get(key);
         }
-        pub fn release_rect(self: *Self, key: KEY) void {
+        pub fn release_rect(self: *Self, key: KEY, alloc: ALLOC.Fn()) void {
             const packed_rect = self.hash_map.remove_key(key);
-            self.packer.release_rect(packed_rect);
+            self.packer.release_rect(packed_rect, ALLOC.get_alloc(alloc, self.cached_alloc));
         }
         pub fn claim_aabb(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.Fn()) ?PackedAABB {
             const hash_parts = Map.hash_parts(key);
@@ -1120,9 +1120,9 @@ pub fn RowPackedAtlas(
         pub fn lookup_aabb(self: *Self, key: KEY) PackedAABB {
             return self.hash_map.get(key).to_packed_aabb();
         }
-        pub fn release_aabb(self: *Self, key: KEY) void {
+        pub fn release_aabb(self: *Self, key: KEY, alloc: ALLOC.Fn()) void {
             const packed_rect = self.hash_map.remove_key(key);
-            self.packer.release_rect(packed_rect);
+            self.packer.release_rect(packed_rect, ALLOC.get_alloc(alloc, self.cached_alloc));
         }
     };
 }

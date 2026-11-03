@@ -25,6 +25,7 @@ const build = @import("builtin");
 
 pub const RowPackerModule = @import("./RectPacker_RowPacker.zig");
 pub const RowPacker = RowPackerModule.RowPacker;
+pub const RowPackedAtlas = RowPackerModule.RowPackedAtlas;
 
 comptime {
     if (build.is_test) {
