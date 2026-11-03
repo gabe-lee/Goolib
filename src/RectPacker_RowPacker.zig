@@ -64,15 +64,21 @@ pub const ReleaseMode = enum {
     CLAIM_AND_RELEASE,
 };
 
-pub const PackedDef = struct {
+pub const PackerDef = struct {
     SIZE_TYPE: type,
     IDX: type = u32,
     RELEASE_MODE: ReleaseMode = .CLAIM_AND_RELEASE,
     ALLOC: CachedAllocMode = .CACHED_ALLOC,
     LOCK_MODE: LockMode = .NO_LOCKS,
     HOLE_POOL_BACK_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
-    HOLE_POOL_SLOTS_PER_BLOCK: type = 64,
+    HOLE_POOL_SLOTS_PER_BLOCK: comptime_int = 64,
     HOLE_POOL_STATE_UINT: type = usize,
+
+    pub fn with_alloc(comptime self: PackerDef, comptime ALLOC: CachedAllocMode) PackerDef {
+        var out = self;
+        out.ALLOC = ALLOC;
+        return out;
+    }
 };
 
 /// Packs rectangles into horizontal rows (shelves), filling each row from smaller x values
@@ -88,7 +94,7 @@ pub const PackedDef = struct {
 /// When constructed with `.CLAIM_AND_RELEASE`, a released rect becomes a hole in its
 /// row and later claims will fill holes before extending the row's unused tail.
 /// Individual live rects cannot be moved or resized.
-pub fn RowPacker(comptime DEF: PackedDef) type {
+pub fn RowPacker(comptime DEF: PackerDef) type {
     return struct {
         const Self = @This();
         const SIZE_TYPE = DEF.SIZE_TYPE;
@@ -157,7 +163,30 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             assert_with_reason(CAN_RELEASE, src, "cannot release rects when packer defined as .CLAIM_ONLY", .{});
         }
 
+        pub fn lock_for_read(self: *Self) void {
+            if (comptime MASTER_LOCK) {
+                self.lock.lockSharedUncancelable(self.io);
+            }
+        }
+        pub fn unlock_for_read(self: *Self) void {
+            if (comptime MASTER_LOCK) {
+                self.lock.unlockShared(self.io);
+            }
+        }
+        pub fn lock_for_write(self: *Self) void {
+            if (comptime MASTER_LOCK) {
+                self.lock.lockUncancelable(self.io);
+            }
+        }
+        pub fn unlock_for_write(self: *Self) void {
+            if (comptime MASTER_LOCK) {
+                self.lock.unlock(self.io);
+            }
+        }
+
         pub fn init(self: *Self, row_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             self.cached_alloc = ALLOC.alloc_to_cached_alloc(alloc);
             self.constrained_rows = RowList.allocate_new(row_cap, alloc);
             self.unconstrained_row = UnconstrainedRow.init(region);
@@ -168,9 +197,10 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             if (comptime CAN_RELEASE) {
                 self.holes_pool.init(hole_cap, alloc, io);
             }
-            return self;
         }
         pub fn init_empty(self: *Self, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             self.cached_alloc = ALLOC.alloc_to_cached_alloc(alloc);
             self.constrained_rows = RowList{};
             self.unconstrained_row = UnconstrainedRow.init(region);
@@ -181,10 +211,11 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             if (comptime CAN_RELEASE) {
                 self.holes_pool.init(0, alloc, io);
             }
-            return self;
         }
 
         pub fn reset(self: *Self) void {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             self.constrained_rows.clear();
             self.unconstrained_row = UnconstrainedRow.init(self.full_region);
             self.total_wasted_area = 0;
@@ -194,7 +225,9 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             }
         }
 
-        pub fn free(self: *Self, alloc: ALLOC.FuncParamAlloc()) void {
+        pub fn uninit(self: *Self, alloc: ALLOC.FuncParamAlloc()) void {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             self.constrained_rows.free_if_non_zero(ALLOC.get_alloc(alloc, self.cached_alloc));
             if (comptime CAN_RELEASE) {
                 self.holes_pool.uninit(ALLOC.get_alloc(alloc, self.cached_alloc));
@@ -223,6 +256,8 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`rect.size.x == size.y` AND `rect.size.y == size.x`)
         pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.FuncParamAlloc()) ?PackedRect {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
                 return PackedRect{
                     .rect = if (pos_with_rot.is_rotated) Rect{
@@ -244,6 +279,8 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`(aabb.x_max - aabb.x_min) == size.y` AND `(aabb.y_max - aabb.y_min) == size.x`)
         pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.FuncParamAlloc()) ?PackedAABB {
+            self.lock_for_write();
+            defer self.unlock_for_write();
             if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
                 return PackedAABB{
                     .aabb = if (pos_with_rot.is_rotated) AABB{
@@ -292,13 +329,13 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             while (constrained_row_idx < constrained_row_count) : (constrained_row_idx += 1) {
                 evaluate_constrained_row(rows[constrained_row_idx], constrained_row_idx, size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
                 if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
-                    return self.claim_candidate(candidate, waste);
+                    return self.claim_candidate(candidate, waste, alloc);
                 }
             }
 
             evaluate_unconstrained_row(self.unconstrained_row, self.constrained_rows.get_len(), size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
             if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
-                return self.claim_candidate(candidate, waste);
+                return self.claim_candidate(candidate, waste, alloc);
             }
 
             const selected = if (best_threshold.kind != .NONE) best_threshold else best_any;
@@ -320,7 +357,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 }
             }
 
-            return self.claim_candidate(selected, waste);
+            return self.claim_candidate(selected, waste, alloc);
         }
 
         const RowKind = enum(u2) {
@@ -481,14 +518,14 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
             return if (best_threshold.kind == .NONE) null else best_threshold;
         }
 
-        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode) PackedPos {
+        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode, alloc: ALLOC.FuncParamAlloc()) PackedPos {
             self.claim_count +|= 1;
             switch (candidate.kind) {
                 .CONSTRAINED => {
                     const row = &self.constrained_rows.zig_slice_entire()[candidate.row_idx];
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool, ALLOC.get_alloc(alloc, self.cached_alloc)), candidate.rotated, candidate.row_idx);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
@@ -500,7 +537,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 .UNCONSTRAINED => {
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool, ALLOC.get_alloc(alloc, self.cached_alloc)), candidate.rotated, candidate.row_idx);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
@@ -527,7 +564,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
 
         /// Removes `hole` from `row` and replaces it with up to two smaller holes
         /// covering the area left over by `size`.
-        fn claim_from_hole(row: anytype, hole: *Hole, size: Vec, hole_pool: *HolePool) Vec {
+        fn claim_from_hole(row: anytype, hole: *Hole, size: Vec, hole_pool: *HolePool, alloc: Allocator) Vec {
             const hole_rect = hole.rect;
             remove_hole(row, hole);
 
@@ -541,7 +578,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 );
                 hole.next = existing_holes;
 
-                const bottom_hole = hole_pool.claim();
+                const bottom_hole = hole_pool.claim_slot(alloc);
                 bottom_hole.rect = Rect.new(
                     Vec.new(hole_rect.pos.x, hole_rect.pos.y + size.y),
                     Vec.new(size.x, remaining_height),
@@ -563,7 +600,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 hole.next = row.next_hole;
                 row.next_hole = hole;
             } else {
-                hole_pool.release(hole);
+                hole_pool.release_slot(hole);
             }
             row.num_claimed += 1;
             return hole_rect.pos;
@@ -762,9 +799,9 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                     var possible_next_hole = self.next_hole;
                     while (possible_next_hole) |next_hole| {
                         possible_next_hole = next_hole.next;
-                        hole_pool.release(next_hole);
+                        hole_pool.release_slot(next_hole);
                     }
-                    hole_pool.release(hole);
+                    hole_pool.release_slot(hole);
                     self.min_height = MAX_HEIGHT;
                     self.pos.x -= self.used_width;
                     self.width += self.used_width;
@@ -878,9 +915,9 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                     var possible_next_hole = self.next_hole;
                     while (possible_next_hole) |next_hole| {
                         possible_next_hole = next_hole.next;
-                        hole_pool.release(next_hole);
+                        hole_pool.release_slot(next_hole);
                     }
-                    hole_pool.release(hole);
+                    hole_pool.release_slot(hole);
                     self.min_height = MAX_HEIGHT;
                     self.max_height = 0;
                     self.pos.x -= self.used_width;
@@ -906,15 +943,17 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
 
         /// Releases a previously claimed rect so its area can be reused. Only valid
         /// when the packer was constructed with `.CLAIM_AND_RELEASE`.
-        pub fn release_rect(self: *Self, rect: PackedRect) void {
-            if (CAN_RELEASE) {
-                self.release_rect_internal(rect);
+        pub fn release_rect(self: *Self, rect: PackedRect, alloc: ALLOC.FuncParamAlloc()) void {
+            if (comptime CAN_RELEASE) {
+                self.lock_for_write();
+                defer self.unlock_for_write();
+                self.release_rect_internal(rect, alloc);
             } else {
                 assert_can_release(@src());
             }
         }
 
-        fn release_rect_internal(self: *Self, rect: PackedRect) void {
+        fn release_rect_internal(self: *Self, rect: PackedRect, alloc: ALLOC.FuncParamAlloc()) void {
             const released = rect.rect;
             assert_with_reason(released.to_aabb2().fully_within(self.full_region.to_aabb2()), @src(), "rect is not within packer region", .{});
             assert_with_reason(rect.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for rect is out of bounds for packer", .{});
@@ -924,7 +963,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 self.reset();
                 return;
             }
-            const new_hole = self.holes_pool.claim();
+            const new_hole = self.holes_pool.claim_slot(ALLOC.get_alloc(alloc, self.cached_alloc));
             if (rect.row_idx == self.constrained_rows.get_len()) {
                 self.unconstrained_row.release_position(released.pos, released.size, new_hole, &self.holes_pool);
                 return;
@@ -934,15 +973,17 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
         }
 
         /// Same as `release_rect`, but accepts the result of `claim_aabb`.
-        pub fn release_aabb(self: *Self, aabb: PackedAABB) void {
-            if (CAN_RELEASE) {
-                self.release_aabb_internal(aabb);
+        pub fn release_aabb(self: *Self, aabb: PackedAABB, alloc: ALLOC.FuncParamAlloc()) void {
+            if (comptime CAN_RELEASE) {
+                self.lock_for_write();
+                defer self.unlock_for_write();
+                self.release_aabb_internal(aabb, alloc);
             } else {
                 assert_can_release(@src());
             }
         }
 
-        fn release_aabb_internal(self: *Self, aabb: PackedAABB) void {
+        fn release_aabb_internal(self: *Self, aabb: PackedAABB, alloc: ALLOC.FuncParamAlloc()) void {
             const released = Rect.new(aabb.aabb.get_min_point(), aabb.aabb.get_size());
             assert_with_reason(aabb.aabb.fully_within(self.full_region.to_aabb2()), @src(), "aabb is not within packer region", .{});
             assert_with_reason(aabb.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for aabb is out of bounds for packer", .{});
@@ -952,7 +993,7 @@ pub fn RowPacker(comptime DEF: PackedDef) type {
                 self.reset();
                 return;
             }
-            const new_hole = self.holes_pool.claim();
+            const new_hole = self.holes_pool.claim_slot(ALLOC.get_alloc(alloc, self.cached_alloc));
             if (aabb.row_idx == self.constrained_rows.get_len()) {
                 self.unconstrained_row.release_position(released.pos, released.size, new_hole, &self.holes_pool);
                 return;
@@ -1002,14 +1043,11 @@ pub fn RowPackedAtlas(
     comptime HASH: fn (KEY) u64,
     comptime KEYS_EQUAL: fn (KEY, KEY) bool,
     comptime HASH_MAP_OVERRIDES: HashMapOverrides,
-    comptime T_SIZE: type,
-    comptime IDX: type,
-    comptime RELEASE_MODE: ReleaseMode,
-    comptime ALLOC: CachedAllocMode,
+    comptime PACKER_DEF: PackerDef,
 ) type {
     return struct {
         const Self = @This();
-        pub const Packer = RowPacker(T_SIZE, IDX, RELEASE_MODE, .MANUAL_ALLOC);
+        pub const Packer = RowPacker(PACKER_DEF.with_alloc(.MANUAL_ALLOC));
         pub const Rect = Packer.Rect;
         pub const PackedRect = Packer.PackedRect;
         pub const PackedAABB = Packer.PackedAABB;
@@ -1018,33 +1056,29 @@ pub fn RowPackedAtlas(
         pub const AABB = Packer.AABB;
         pub const Threshold = Packer.Threshold;
         pub const ThresholdVal = Packer.ThresholdVal;
+        const ALLOC = PACKER_DEF.ALLOC;
+        const IDX = PACKER_DEF.IDX;
+        const LOCK_MODE = PACKER_DEF.LOCK_MODE;
+        const MASTER_LOCK = LOCK_MODE != .NO_LOCKS;
 
         hash_map: Map = .{},
         packer: Packer = .{},
         cached_alloc: ALLOC.CachedAlloc() = ALLOC.CACHED_ALLOC_DEFAULT(),
 
-        pub fn init_capacity(cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator) Self {
-            const h = Map.init_capacity(@intCast(cap), alloc);
-            const p = Packer.init(@intCast(cap), region, default_height_fit_threshold, alloc);
-            return Self{
-                .hash_map = h,
-                .packer = p,
-                .cached_alloc = ALLOC.alloc_to_cached_alloc(alloc),
-            };
+        pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+            self.hash_map = Map.init_capacity(@intCast(hash_map_cap), alloc);
+            self.packer.init(@intCast(row_pack_cap), hole_cap, region, default_height_fit_threshold, alloc, io);
+            self.cached_alloc = ALLOC.alloc_to_cached_alloc(alloc);
         }
-        pub fn init_empty(region: Rect, default_height_fit_threshold: ThresholdVal, alloc: ALLOC.Ch()) Self {
-            const h = Map.init_empty();
-            const p = Packer.init_empty(region, default_height_fit_threshold, alloc);
-            return Self{
-                .hash_map = h,
-                .packer = p,
-                .cached_alloc = alloc,
-            };
+
+        pub fn clear_entire_atlas(self: *Self) void {
+            self.hash_map.clear();
+            self.packer.reset();
         }
 
         pub fn uninit(self: *Self, alloc: ALLOC.Fn()) void {
             self.hash_map.uninit(ALLOC.get_alloc(alloc, self.cached_alloc));
-            self.packer.free(ALLOC.get_alloc(alloc, self.cached_alloc));
+            self.packer.uninit(ALLOC.get_alloc(alloc, self.cached_alloc));
         }
 
         pub fn claim_rect(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.Fn()) ?PackedRect {
@@ -1056,6 +1090,12 @@ pub fn RowPackedAtlas(
                 return packed_rect;
             }
             return null;
+        }
+        pub fn lookup_rect_if_exists(self: *Self, key: KEY) ?PackedRect {
+            return self.hash_map.get_if_exists(key);
+        }
+        pub fn lookup_rect(self: *Self, key: KEY) PackedRect {
+            return self.hash_map.get(key);
         }
         pub fn release_rect(self: *Self, key: KEY) void {
             const packed_rect = self.hash_map.remove_key(key);
@@ -1070,6 +1110,15 @@ pub fn RowPackedAtlas(
                 return packed_rect.to_packed_aabb();
             }
             return null;
+        }
+        pub fn lookup_aabb_if_exists(self: *Self, key: KEY) ?PackedAABB {
+            if (self.hash_map.get_if_exists(key)) |r| {
+                return r.to_packed_aabb();
+            }
+            return null;
+        }
+        pub fn lookup_aabb(self: *Self, key: KEY) PackedAABB {
+            return self.hash_map.get(key).to_packed_aabb();
         }
         pub fn release_aabb(self: *Self, key: KEY) void {
             const packed_rect = self.hash_map.remove_key(key);

@@ -28,11 +28,11 @@ const RectPacker = Root.RectPacker;
 const Vec2 = Root.Vec2;
 const Rect2 = Root.Rect2;
 
-const PackerF32 = RectPacker.RowPacker(f32, u16, .CLAIM_ONLY, .CACHED_ALLOC);
-const PackerU32 = RectPacker.RowPacker(u32, u8, .CLAIM_ONLY, .CACHED_ALLOC);
-const PackerU8 = RectPacker.RowPacker(u8, u8, .CLAIM_ONLY, .CACHED_ALLOC);
-const PackerF32Release = RectPacker.RowPacker(f32, u16, .CLAIM_AND_RELEASE, .CACHED_ALLOC);
-const PackerU32Release = RectPacker.RowPacker(u32, u8, .CLAIM_AND_RELEASE, .CACHED_ALLOC);
+const PackerF32 = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
+const PackerU32 = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
+const PackerU8 = RectPacker.RowPacker(.{ .SIZE_TYPE = u8, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
+const PackerF32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC = .CACHED_ALLOC });
+const PackerU32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC = .CACHED_ALLOC });
 
 const VecF = Vec2.define_vec2_type(f32);
 const RectF = Rect2.define_rect2_type(f32);
@@ -67,8 +67,9 @@ fn strictlyOverlaps(a: RectF, b: RectF) bool {
 
 test "RowPacker -> shelf layout" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -89,8 +90,9 @@ test "RowPacker -> shelf layout" {
 
 test "RowPacker -> total_wasted_area accounts for exposed area" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(2, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     _ = packer.claim_rect(VecF.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(50, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -105,8 +107,9 @@ test "RowPacker -> total_wasted_area accounts for exposed area" {
 
 test "RowPacker -> forced rotation uses existing rows for square rects" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .ignore_waste(), .always_force_90_degree_rotation(), {}).?;
     try std.testing.expect(a.is_rotated);
@@ -126,8 +129,9 @@ test "RowPacker -> forced rotation uses existing rows for square rects" {
 
 test "RowPacker -> rotated sizes cannot overflow the region on a new row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(50, 60), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 50, 60));
@@ -144,8 +148,9 @@ test "RowPacker -> rotated sizes cannot overflow the region on a new row" {
 
 test "RowPacker -> threshold starts a new row, constrained rows are reused" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(8, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 10));
@@ -170,8 +175,9 @@ test "RowPacker -> threshold starts a new row, constrained rows are reused" {
 
 test "RowPacker -> final-pass heuristic opens a new row when ignoring thresholds" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 10));
@@ -186,8 +192,9 @@ test "RowPacker -> final-pass heuristic opens a new row when ignoring thresholds
 
 test "RowPacker -> zero initial capacity grows on demand" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(0, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
@@ -202,8 +209,9 @@ test "RowPacker -> zero initial capacity grows on demand" {
 
 test "RowPacker -> unsigned integer coordinates" {
     const alloc = std.testing.allocator;
-    var packer = PackerU32.init(4, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerU32 = undefined;
+    packer.init(4, 0, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     _ = packer.claim_rect(VecU.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecU.new(50, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -217,8 +225,9 @@ test "RowPacker -> unsigned integer coordinates" {
 
 test "RowPacker -> respects the region position" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(2, 0, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(10, 20, 60, 10));
@@ -229,8 +238,9 @@ test "RowPacker -> respects the region position" {
 
 test "RowPacker -> claim_aabb rotates with the rect" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(2, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_aabb(VecF.new(80, 40), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}).?;
     try std.testing.expect(a.is_rotated);
@@ -242,8 +252,9 @@ test "RowPacker -> claim_aabb rotates with the rect" {
 
 test "RowPacker -> reset clears all state" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(2, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(2, 0, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}).?;
     _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}).?;
@@ -261,8 +272,9 @@ test "RowPacker -> reset clears all state" {
 
 test "RowPacker -> least waste picks between constrained rows and the open row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32.init(8, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(8, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     // Build two constrained rows with different heights plus an open row.
     _ = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -288,8 +300,9 @@ test "RowPacker -> final-pass threshold doubling saturates for small ints" {
     const alloc = std.testing.allocator;
     // A default threshold above half of `u8`'s range used to overflow when the
     // final-pass heuristic doubled it.
-    var packer = PackerU8.init(2, RectU8.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 200), alloc);
-    defer packer.free({});
+    var packer: PackerU8 = undefined;
+    packer.init(2, 0, RectU8.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 200), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecU8.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try std.testing.expectEqual(@as(u8, 0), a.rect.pos.x);
@@ -326,8 +339,9 @@ test "RowPacker -> randomized invariants across modes" {
     for (rotations) |rotation| {
         for (wastes) |waste| {
             for (thresholds) |threshold| {
-                var packer = PackerF32.init(0, region, .threshold_val(1.0, 6), alloc);
-                defer packer.free({});
+                var packer: PackerF32 = undefined;
+                packer.init(0, 0, region, .threshold_val(1.0, 6), alloc, {});
+                defer packer.uninit({});
 
                 var claimed: [40]RectF = undefined;
                 var count: usize = 0;
@@ -358,8 +372,9 @@ test "RowPacker -> randomized invariants across modes" {
 test "RowPacker -> claimed rects stay in bounds and do not overlap" {
     const alloc = std.testing.allocator;
     const region = RectF.new_xywh(5, 7, 100, 100);
-    var packer = PackerF32.init(16, region, .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32 = undefined;
+    packer.init(16, 0, region, .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const sizes = [_]VecF{
         VecF.new(30, 10),
@@ -396,8 +411,9 @@ test "RowPacker -> claimed rects stay in bounds and do not overlap" {
 
 test "RowPacker -> released rect is reused from its hole in the open row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32Release = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -406,7 +422,7 @@ test "RowPacker -> released rect is reused from its hole in the open row" {
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 10));
 
-    packer.release_rect(b);
+    packer.release_rect(b, {});
     try std.testing.expectEqual(@as(u16, 2), packer.claim_count);
 
     // The row tail is full, so the only fitting space is the released hole.
@@ -417,8 +433,9 @@ test "RowPacker -> released rect is reused from its hole in the open row" {
 
 test "RowPacker -> claiming a smaller rect splits a hole into reusable remainders" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32Release = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -427,7 +444,7 @@ test "RowPacker -> claiming a smaller rect splits a hole into reusable remainder
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 20));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 20));
 
-    packer.release_rect(b);
+    packer.release_rect(b, {});
 
     const d = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 0, 10, 10));
@@ -446,14 +463,15 @@ test "RowPacker -> claiming a smaller rect splits a hole into reusable remainder
 
 test "RowPacker -> holes survive when the open row becomes a constrained row" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32Release = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
-    packer.release_rect(b);
+    packer.release_rect(b, {});
 
     // Force the open row to close; its hole must move to the constrained row.
     const c = packer.claim_rect(VecF.new(100, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -467,8 +485,9 @@ test "RowPacker -> holes survive when the open row becomes a constrained row" {
 
 test "RowPacker -> releasing every rect in a constrained row makes the shelf reusable" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32Release = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -476,8 +495,8 @@ test "RowPacker -> releasing every rect in a constrained row makes the shelf reu
     try expectRectF(c.rect, RectF.new_xywh(0, 10, 40, 20));
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 
-    packer.release_rect(a);
-    packer.release_rect(b);
+    packer.release_rect(a, {});
+    packer.release_rect(b, {});
     try std.testing.expectEqual(@as(u16, 1), packer.claim_count);
 
     const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
@@ -486,15 +505,16 @@ test "RowPacker -> releasing every rect in a constrained row makes the shelf reu
 
 test "RowPacker -> release_aabb fills its hole" {
     const alloc = std.testing.allocator;
-    var packer = PackerF32Release.init(4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerF32Release = undefined;
+    packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 40), b.aabb.x_min);
 
-    packer.release_aabb(b);
+    packer.release_aabb(b, {});
     const c = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try std.testing.expectEqual(@as(f32, 40), c.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 0), c.aabb.y_min);
@@ -504,15 +524,16 @@ test "RowPacker -> release_aabb fills its hole" {
 
 test "RowPacker -> release works with unsigned coordinates" {
     const alloc = std.testing.allocator;
-    var packer = PackerU32Release.init(2, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc);
-    defer packer.free({});
+    var packer: PackerU32Release = undefined;
+    packer.init(2, 0, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
 
     const a = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     const b = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectU(a.rect, RectU.new_xywh(0, 0, 40, 10));
     try expectRectU(b.rect, RectU.new_xywh(40, 0, 40, 10));
 
-    packer.release_rect(b);
+    packer.release_rect(b, {});
     const c = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}).?;
     try expectRectU(c.rect, RectU.new_xywh(40, 0, 40, 10));
 }
@@ -541,8 +562,9 @@ test "RowPacker -> randomized release and reclaim invariants" {
     for (rotations) |rotation| {
         for (wastes) |waste| {
             for (thresholds) |threshold| {
-                var packer = PackerF32Release.init(0, region, .threshold_val(1.0, 6), alloc);
-                defer packer.free({});
+                var packer: PackerF32Release = undefined;
+                packer.init(0, 0, region, .threshold_val(1.0, 6), alloc, {});
+                defer packer.uninit({});
 
                 var live: [64]PackerF32Release.PackedRect = undefined;
                 var live_count: usize = 0;
@@ -551,7 +573,7 @@ test "RowPacker -> randomized release and reclaim invariants" {
                     const should_release = live_count > 0 and random.intRangeAtMost(u8, 0, 1) == 0;
                     if (should_release) {
                         const release_idx = random.intRangeLessThan(usize, 0, live_count);
-                        packer.release_rect(live[release_idx]);
+                        packer.release_rect(live[release_idx], {});
                         live[release_idx] = live[live_count - 1];
                         live_count -= 1;
                         try std.testing.expectEqual(live_count, packer.claim_count);
@@ -573,7 +595,7 @@ test "RowPacker -> randomized release and reclaim invariants" {
                     }
 
                     if (live_count == live.len) {
-                        packer.release_rect(result);
+                        packer.release_rect(result, {});
                     } else {
                         live[live_count] = result;
                         live_count += 1;
@@ -583,7 +605,7 @@ test "RowPacker -> randomized release and reclaim invariants" {
 
                 while (live_count > 0) {
                     live_count -= 1;
-                    packer.release_rect(live[live_count]);
+                    packer.release_rect(live[live_count], {});
                 }
                 try std.testing.expectEqual(@as(u16, 0), packer.claim_count);
             }

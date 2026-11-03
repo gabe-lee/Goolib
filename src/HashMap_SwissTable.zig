@@ -239,6 +239,11 @@ pub fn SwissHashMap(
         pub fn init_empty() Self {
             return Self{};
         }
+        pub fn clear(self: *Self) void {
+            @memset(self.state_list[0..self.cap], CellState.EMPTY);
+            self.len = 0;
+            self.dead = 0;
+        }
         pub fn uninit(self: *Self, alloc: Allocator) void {
             if (self.cap != 0) {
                 alloc.free(self.val_list[0..self.cap]);
