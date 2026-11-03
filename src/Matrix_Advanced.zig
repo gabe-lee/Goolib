@@ -649,7 +649,7 @@ pub fn change_matrix_major_order(
     return out;
 }
 
-test "change_matrix_major_order" {
+test "Matrix -> change_matrix_major_order" {
     const DEF_IN = MatrixDef.def(u8, 3, 4, .ROW_MAJOR, 0);
     const DEF_OUT = MatrixDef.def(u8, 3, 4, .COLUMN_MAJOR, 0);
     const vec_in = [12]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
@@ -690,7 +690,7 @@ pub fn multiply_matrices(
     return out;
 }
 
-test "multiply_matrices" {
+test "Matrix -> multiply_matrices" {
     const DEF_A = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
     const DEF_B = MatrixDef.def(i32, 4, 3, .ROW_MAJOR, 0);
     const OUT_T = i32;
@@ -771,7 +771,7 @@ pub fn add_matrices(
     }
 }
 
-test "add_matrices" {
+test "Matrix -> add_matrices" {
     const DEF_A = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
     const DEF_B = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
     const OUT_T = i32;
@@ -919,7 +919,7 @@ pub fn transpose_matrix(comptime DEF: MatrixDef, mat: anytype) DEF.Transposed().
     return out;
 }
 
-test "transpose_matrix" {
+test "Matrix -> transpose_matrix" {
     const DEF_A = MatrixDef.def(u8, 3, 4, .ROW_MAJOR, 0);
     const MAT_A = DEF_A.Matrix();
     const mat_a = MAT_A{
@@ -1139,7 +1139,7 @@ pub fn determinant_of_matrix(comptime DEF: MatrixDef, mat: anytype, comptime DET
     }
 }
 
-test "determinant_of_matrix" {
+test "Matrix -> determinant_of_matrix" {
     const Test = Root.Testing;
     const DEF_2x2 = MatrixDef.def(f32, 2, 2, .ROW_MAJOR, 0);
     const MAT_2x2 = DEF_2x2.Matrix();
@@ -1419,7 +1419,7 @@ pub fn row_echelon_form_of_matrix(comptime DEF: MatrixDef, mat: anytype, mode: R
     return out;
 }
 
-test "row_echelon_form_of_matrix" {
+test "Matrix -> row_echelon_form_of_matrix" {
     const DEF_A = MatrixDef.def(f32, 4, 4, .ROW_MAJOR, 0);
     const MAT_A = DEF_A.Matrix();
     // {{ 1, 3, 5, 9 },{ 1, 2.8, 1, 7 },{ 4, 3, 9, 7 },{ 5, 2, 0, 9 }}
