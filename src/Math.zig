@@ -21,6 +21,12 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Math_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
@@ -50,7 +56,7 @@ pub const Std = std.math;
 pub const fsize = Types.fsize;
 
 pub const PI = math.pi;
-pub const HALF_PI = math.pi / 2;
+pub const HALF_PI = math.pi / 2.0;
 pub const TAU = math.tau;
 pub const DEG_TO_RAD = math.rad_per_deg;
 pub const RAD_TO_DEG = math.deg_per_rad;
@@ -162,7 +168,7 @@ pub fn sign_convert(val: anytype, comptime OUT: type) OUT {
 ///   - 1 if val >= 0
 pub fn sign_nonzero(val: anytype) @TypeOf(val) {
     const T = @TypeOf(val);
-    const raw = (2 * @as(i8, @intCast(@intFromBool(val > 0)))) - 1;
+    const raw = (2 * @as(i8, @intCast(@intFromBool(val >= 0)))) - 1;
     if (Types.type_is_float(T)) {
         return @floatFromInt(raw);
     } else {
@@ -173,7 +179,7 @@ pub fn sign_nonzero(val: anytype) @TypeOf(val) {
 ///   - -1 if val < 0
 ///   - 1 if val >= 0
 pub fn sign_nonzero_convert(val: anytype, comptime OUT: type) OUT {
-    const raw = (2 * @as(i8, @intCast(@intFromBool(val > 0)))) - 1;
+    const raw = (2 * @as(i8, @intCast(@intFromBool(val >= 0)))) - 1;
     return num_cast(raw, OUT);
 }
 
@@ -237,10 +243,7 @@ pub fn approx_equal_with_epsilon_vec(comptime T: type, a: T, b: T, epsilon: T) @
     const b_max: T = b + epsilon;
     const cond_1 = a_max >= b_min;
     const cond_2 = b_max >= a_min;
-    const cond_1_cast: @Vector(I.len, u8) = @bitCast(cond_1);
-    const cond_2_cast: @Vector(I.len, u8) = @bitCast(cond_2);
-    const final_cond_cast = cond_1_cast & cond_2_cast;
-    return @bitCast(final_cond_cast);
+    return @select(bool, cond_1, cond_2, @as(@Vector(I.len, bool), @splat(false)));
 }
 
 pub const NumberConversionMode = enum(u2) {
@@ -512,13 +515,26 @@ pub fn upgrade_power(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeO
 }
 pub fn upgrade_root_out(a: anytype, b: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(a, b);
-    const C = @FieldType(nums, "a");
-    const c = math.pow(C, nums.a, 1 / nums.b);
+    const C = @FieldType(@TypeOf(nums), "a");
+    const c = upgraded_root(C, nums.a, nums.b);
     return num_cast(c, OUT);
 }
 pub fn upgrade_root(a: anytype, b: anytype) Upgraded2Numbers(@TypeOf(a), @TypeOf(b)).T {
     const nums = upgrade_2_numbers_for_math(a, b);
-    return math.pow(@FieldType(nums, "a"), nums.a, 1 / nums.b);
+    return upgraded_root(@FieldType(@TypeOf(nums), "a"), nums.a, nums.b);
+}
+fn upgraded_root(comptime C: type, a: C, b: C) C {
+    if (comptime Types.type_is_float(C)) {
+        return math.pow(C, a, 1 / b);
+    } else {
+        const af: f64 = @floatFromInt(a);
+        const bf: f64 = @floatFromInt(b);
+        var cf = math.pow(f64, af, 1 / bf);
+        if (std.math.isNan(cf) and af < 0 and @mod(b, 2) != 0) {
+            cf = -math.pow(f64, -af, 1 / bf);
+        }
+        return num_cast(@round(cf), C);
+    }
 }
 pub fn upgrade_log_x_base_out(x: anytype, base: anytype, comptime OUT: type) OUT {
     const nums = upgrade_2_numbers_for_math(x, base);
@@ -1019,64 +1035,13 @@ pub fn solve_cubic_polynomial_for_zeros_advanced(a: anytype, b: @TypeOf(a), c: @
 /// will always equal 0. (It is symetrical, the number of `-1` results will always equal the number of `1` results)
 pub fn range_trichotomy(low: anytype, value: anytype, high: anytype, comptime OUT: type) OUT {
     const hi = high - low;
+    if (hi <= 1) return num_cast(-1, OUT);
     const val = value - low;
     const hi_minus_1 = upgrade_subtract(hi, @as(f32, 1.0));
     const ratio = upgrade_divide(val, hi_minus_1);
     const scaled_ratio = upgrade_multiply(@as(f32, 2.875), ratio);
     const result_unadjusted = @floor(3 + scaled_ratio - 1.4375 + 0.5);
     return num_cast(result_unadjusted, OUT) - 3;
-}
-
-test range_trichotomy {
-    const t = std.testing;
-    const EXTENDED_TEST = false;
-    try t.expectEqual(-1, range_trichotomy(0, 0, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 1, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 2, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 3, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 4, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 5, 10, i32));
-    try t.expectEqual(0, range_trichotomy(0, 6, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 7, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 8, 10, i32));
-    try t.expectEqual(1, range_trichotomy(0, 9, 10, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 0, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 1, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 2, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 3, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 4, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 5, 11, i32));
-    try t.expectEqual(0, range_trichotomy(0, 6, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 7, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 8, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 9, 11, i32));
-    try t.expectEqual(1, range_trichotomy(0, 10, 11, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 0, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 100000, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 200000, 1000000, i32));
-    try t.expectEqual(-1, range_trichotomy(0, 300000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 400000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 500000, 1000000, i32));
-    try t.expectEqual(0, range_trichotomy(0, 600000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 700000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 800000, 1000000, i32));
-    try t.expectEqual(1, range_trichotomy(0, 900000, 1000000, i32));
-    if (EXTENDED_TEST) {
-        var total: i32 = 0;
-        var v: u32 = 0;
-        while (v < 1000000) {
-            total += range_trichotomy(0, v, 1000000, i32);
-            v += 1;
-        }
-        try t.expectEqual(0, total); // symetric
-        total = 0;
-        v = 0;
-        while (v < 1000003) {
-            total += range_trichotomy(0, v, 1000003, i32);
-            v += 1;
-        }
-        try t.expectEqual(0, total); // symetric
-    }
 }
 
 pub fn extract_partial_rand_from_rand(rand: anytype, val_less_than: anytype, comptime OUT: type) OUT {
@@ -1105,6 +1070,7 @@ pub fn int_to_normalized_float(int: anytype, comptime FLOAT: type) FLOAT {
         return clamp_0_to_1(f / MAX_I);
     }
 }
+
 /// Performs a numeric cast with the following conventions:
 ///   - bools are treated as u1 integers (ether 0 or 1)
 ///   - int to float converts using `int_val / MAX_POSITIVE_INT_VAL` resulting in range 0.0 to 1.0 for unsigned integers, or -1.0 to 1.0 for signed integers
@@ -1172,8 +1138,8 @@ pub fn sin_bezier_rad(radians: anytype) @TypeOf(radians) {
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(radians / HALF_PI);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = radians - (sector_f * HALF_PI);
             const percent: f32 = rem / HALF_PI;
             const y: [4]f32 = BezierSineCos.F32.Y[sector];
@@ -1186,8 +1152,8 @@ pub fn sin_bezier_rad(radians: anytype) @TypeOf(radians) {
         },
         f64 => {
             const sector_f: f64 = @floor(radians / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1201,8 +1167,8 @@ pub fn sin_bezier_rad(radians: anytype) @TypeOf(radians) {
         else => {
             const radians_f = num_cast(radians, f64);
             const sector_f: f64 = @floor(radians_f / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians_f - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1221,8 +1187,8 @@ pub fn cos_bezier_rad(radians: anytype) @TypeOf(radians) {
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(radians / HALF_PI);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = radians - (sector_f * HALF_PI);
             const percent: f32 = rem / HALF_PI;
             const x: [4]f32 = BezierSineCos.F32.X[sector];
@@ -1235,8 +1201,8 @@ pub fn cos_bezier_rad(radians: anytype) @TypeOf(radians) {
         },
         f64 => {
             const sector_f: f64 = @floor(radians / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const x: [4]f64 = BezierSineCos.F64.X[sector];
@@ -1250,8 +1216,8 @@ pub fn cos_bezier_rad(radians: anytype) @TypeOf(radians) {
         else => {
             const radians_f = num_cast(radians, f64);
             const sector_f: f64 = @floor(radians_f / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians_f - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const x: [4]f64 = BezierSineCos.F64.X[sector];
@@ -1265,13 +1231,13 @@ pub fn cos_bezier_rad(radians: anytype) @TypeOf(radians) {
     }
 }
 
-pub fn sin_cos_bezier_rad(radians: anytype) .{ @TypeOf(radians), @TypeOf(radians) } {
+pub fn sin_cos_bezier_rad(radians: anytype) @Tuple(&.{ @TypeOf(radians), @TypeOf(radians) }) {
     const T = @TypeOf(radians);
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(radians / HALF_PI);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = radians - (sector_f * HALF_PI);
             const percent: f32 = rem / HALF_PI;
             const y: [4]f32 = BezierSineCos.F32.Y[sector];
@@ -1292,8 +1258,8 @@ pub fn sin_cos_bezier_rad(radians: anytype) .{ @TypeOf(radians), @TypeOf(radians
         },
         f64 => {
             const sector_f: f64 = @floor(radians / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1315,8 +1281,8 @@ pub fn sin_cos_bezier_rad(radians: anytype) .{ @TypeOf(radians), @TypeOf(radians
         else => {
             const radians_f = num_cast(radians, f64);
             const sector_f: f64 = @floor(radians_f / HALF_PI);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians_f - (sector_f * HALF_PI);
             const percent: f64 = rem / HALF_PI;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1343,8 +1309,8 @@ pub fn sin_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(degrees / 90);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = degrees - (sector_f * 90);
             const percent: f32 = rem / 90;
             const y: [4]f32 = BezierSineCos.F32.Y[sector];
@@ -1357,8 +1323,8 @@ pub fn sin_bezier_deg(degrees: anytype) @TypeOf(degrees) {
         },
         f64 => {
             const sector_f: f64 = @floor(degrees / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = degrees - (sector_f * 90);
             const percent: f64 = rem / 90;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1372,8 +1338,8 @@ pub fn sin_bezier_deg(degrees: anytype) @TypeOf(degrees) {
         else => {
             const radians_f = num_cast(degrees, f64);
             const sector_f: f64 = @floor(radians_f / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians_f - (sector_f * 90);
             const percent: f64 = rem / 90;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1392,8 +1358,8 @@ pub fn cos_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(degrees / 90);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = degrees - (sector_f * 90);
             const percent: f32 = rem / 90;
             const x: [4]f32 = BezierSineCos.F32.X[sector];
@@ -1406,8 +1372,8 @@ pub fn cos_bezier_deg(degrees: anytype) @TypeOf(degrees) {
         },
         f64 => {
             const sector_f: f64 = @floor(degrees / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = degrees - (sector_f * 90);
             const percent: f64 = rem / 90;
             const x: [4]f64 = BezierSineCos.F64.X[sector];
@@ -1421,8 +1387,8 @@ pub fn cos_bezier_deg(degrees: anytype) @TypeOf(degrees) {
         else => {
             const radians_f = num_cast(degrees, f64);
             const sector_f: f64 = @floor(radians_f / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = radians_f - (sector_f * 90);
             const percent: f64 = rem / 90;
             const x: [4]f64 = BezierSineCos.F64.X[sector];
@@ -1436,13 +1402,13 @@ pub fn cos_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     }
 }
 
-pub fn sin_cos_bezier_deg(degrees: anytype) .{ @TypeOf(degrees), @TypeOf(degrees) } {
+pub fn sin_cos_bezier_deg(degrees: anytype) @Tuple(&.{ @TypeOf(degrees), @TypeOf(degrees) }) {
     const T = @TypeOf(degrees);
     switch (T) {
         f32 => {
             const sector_f: f32 = @floor(degrees / 90);
-            const sector_i: u32 = @intFromFloat(sector_f);
-            const sector: u32 = sector_i & 0b11;
+            const sector_i: i32 = @intFromFloat(sector_f);
+            const sector: u32 = @as(u32, @bitCast(sector_i)) & 0b11;
             const rem: f32 = degrees - (sector_f * 90);
             const percent: f32 = rem / 90;
             const y: [4]f32 = BezierSineCos.F32.Y[sector];
@@ -1463,8 +1429,8 @@ pub fn sin_cos_bezier_deg(degrees: anytype) .{ @TypeOf(degrees), @TypeOf(degrees
         },
         f64 => {
             const sector_f: f64 = @floor(degrees / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = degrees - (sector_f * 90);
             const percent: f64 = rem / 90;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1486,8 +1452,8 @@ pub fn sin_cos_bezier_deg(degrees: anytype) .{ @TypeOf(degrees), @TypeOf(degrees
         else => {
             const degrees_f = num_cast(degrees, f64);
             const sector_f: f64 = @floor(degrees_f / 90);
-            const sector_i: u64 = @intFromFloat(sector_f);
-            const sector: u64 = sector_i & 0b11;
+            const sector_i: i64 = @intFromFloat(sector_f);
+            const sector: u64 = @as(u64, @bitCast(sector_i)) & 0b11;
             const rem: f64 = degrees_f - (sector_f * 90);
             const percent: f64 = rem / 90;
             const y: [4]f64 = BezierSineCos.F64.Y[sector];
@@ -1509,10 +1475,6 @@ pub fn sin_cos_bezier_deg(degrees: anytype) .{ @TypeOf(degrees), @TypeOf(degrees
     }
 }
 
-/// In the case of `cos == 0`, if the type of `sin` is a float type, returns infinity,
-/// if `sin` is an integer type, returns the maximum value of that int, which may
-/// not be a good mathematical representation of `tan`, but is better than throwing
-/// an error or panicing
 pub fn tan_from_sin_cos(sin: anytype, cos: anytype) @TypeOf(sin) {
     if (cos == 0) {
         switch (@typeInfo(@TypeOf(sin))) {
@@ -1528,18 +1490,11 @@ pub fn tan_from_sin_cos(sin: anytype, cos: anytype) @TypeOf(sin) {
     return upgrade_divide_out(sin_f, cos_f, @TypeOf(sin));
 }
 
-/// In the case of `cos(radians) == 0`, if the type of `radians` is a float type, returns infinity,
-/// if `sin` is an integer type, returns the maximum value of that int, which may
-/// not be a good mathematical representation of `tan`, but is better than throwing
-/// an error or panicing
 pub fn tan_bezier_rad(radians: anytype) @TypeOf(radians) {
     const sin, const cos = sin_cos_bezier_rad(radians);
     return tan_from_sin_cos(sin, cos);
 }
-/// In the case of `cos(degrees) == 0`, if the type of `degrees` is a float type, returns infinity,
-/// if `sin` is an integer type, returns the maximum value of that int, which may
-/// not be a good mathematical representation of `tan`, but is better than throwing
-/// an error or panicing
+
 pub fn tan_bezier_deg(degrees: anytype) @TypeOf(degrees) {
     const sin, const cos = sin_cos_bezier_deg(degrees);
     return tan_from_sin_cos(sin, cos);
@@ -1848,9 +1803,20 @@ pub const PowerOf2 = enum(u8) {
     }
 
     pub fn round_down_to_power_of_2(int_or_ptr: anytype) PowerOf2 {
-        const pow = round_up_to_power_of_2(int_or_ptr);
-        const lower = @backingInt(pow) - 1;
-        return @fromBackingInt(@intCast(lower));
+        const up = round_up_to_power_of_2(int_or_ptr);
+        const T = @TypeOf(int_or_ptr);
+        const val: u128 = switch (@typeInfo(T)) {
+            .int => @intCast(@abs(int_or_ptr)),
+            .comptime_int => if (comptime int_or_ptr < 0) @intCast(@abs(@as(i128, int_or_ptr))) else @intCast(int_or_ptr),
+            .@"enum" => @intCast(@abs(@backingInt(int_or_ptr))),
+            .pointer => @intFromPtr(int_or_ptr),
+            else => assert_unreachable(@src(), "type `{s}` not a valid input type", .{@typeName(T)}),
+        };
+        const up_val: u128 = @as(u128, 1) << @intCast(@backingInt(up));
+        // exact powers of two must round down to themselves rather than the
+        // next smaller power of two
+        if (val == up_val) return up;
+        return @fromBackingInt(@intCast(@backingInt(up) - 1));
     }
 
     pub fn round_down_to_power_of_2_value_type(int_or_ptr: anytype) @TypeOf(int_or_ptr) {
@@ -1905,25 +1871,4 @@ pub fn zig_zag_decode(comptime OUT: type, zig_zag: UnsignedIntegerWithSameSize(O
     const uint: UINT = @bitCast(zig_zag);
     const int: INT = (bit_cast(uint >> 1, INT)) ^ (-bit_cast(uint & 1, INT));
     return @bitCast(int);
-}
-
-test "zig_zag_encoding" {
-    const Test = Root.Testing;
-    const I_CASES = [_]i32{ 0, -1, -2, 1, 2 };
-    const U_CASES = [_]u32{ 0, 1, 3, 2, 4 };
-    var rand_core = Root.Rand.create_new_default_prng_seeded_from_time(std.testing.io);
-    const rand = rand_core.random();
-    const NUM_RAND = 100;
-    for (I_CASES[0..], U_CASES[0..]) |i, u| {
-        const uu = zig_zag_encode(i);
-        try Test.expect_equal(u, "expected_uint", uu, "zig_zag_encode(i)", "fail", .{});
-        const ii = zig_zag_decode(i32, uu);
-        try Test.expect_equal(i, "expected_int", ii, "zig_zag_decode(i32, zig_zag_encode(i))", "fail", .{});
-    }
-    for (0..NUM_RAND) |_| {
-        const i = rand.int(i32);
-        const u = zig_zag_encode(i);
-        const ii = zig_zag_decode(i32, u);
-        try Test.expect_equal(i, "original_int", ii, "zig_zag_decode(i32, zig_zag_encode(original_int))", "fail", .{});
-    }
 }

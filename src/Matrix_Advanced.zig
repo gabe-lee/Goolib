@@ -6,7 +6,6 @@
 //! operations, but conversely may cause bloat in the final binary size if
 //! many, many different matrix types are all used in the same source program.
 //!
-//! //TODO Documentation
 //! #### License: Zlib
 
 // zlib license
@@ -28,6 +27,12 @@
 // 2. Altered source versions must be plainly marked as such, and must not be
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
+
+comptime {
+    if (build.is_test) {
+        _ = @import("./Matrix_Tests.zig");
+    }
+}
 
 const std = @import("std");
 const math = std.math;
@@ -84,12 +89,14 @@ pub const MatrixDef = struct {
         inline for (0..DEF.COLS) |i| {
             out[i] = i;
         }
+        return out;
     }
     pub inline fn row_indices(comptime DEF: MatrixDef) [DEF.ROWS]usize {
         comptime var out: [DEF.ROWS]usize = undefined;
         inline for (0..DEF.ROWS) |i| {
             out[i] = i;
         }
+        return out;
     }
 
     pub inline fn def(comptime T: type, comptime ROWS: comptime_int, comptime COLS: comptime_int, comptime ORDER: RowColOrder, comptime MAJOR_PAD: comptime_int) MatrixDef {
@@ -117,6 +124,7 @@ pub const MatrixDef = struct {
                 OUT.set_cell_mm(&out, major, minor, num_cast(DEF.get_cell_mm(mat, major, minor), NEW_TYPE));
             }
         }
+        return out;
     }
 
     pub inline fn matrix_ref_from_slice(comptime DEF: MatrixDef, slice: []DEF.T) DEF.MatrixRef() {
@@ -454,7 +462,7 @@ pub const MatrixDef = struct {
         assert_with_reason(DEF.can_get_matrix_one_size_smaller(), src, "matrix must be at least 2x2 in size in order to get a matrix one size smaller, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
     }
     pub fn assert_can_get_determinant(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
-        assert_with_reason(DEF.can_get_matrix_one_size_smaller(), src, "matrix must be at least 2x2 in size in order to get a matrix one size smaller, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
+        assert_with_reason(DEF.is_square(), src, "matrix must be square in order to get a determinant, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
     }
     pub fn assert_same_size(comptime DEF: MatrixDef, comptime OTHER_DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
         assert_with_reason(DEF.is_same_size(OTHER_DEF), src, "matrices must be same size, got {d}x{d} != {d}x{d}", .{ DEF.ROWS, DEF.COLS, OTHER_DEF.ROWS, OTHER_DEF.COLS });
@@ -637,7 +645,7 @@ pub fn change_matrix_major_order(
     mat: anytype,
     comptime OUT_ORDER: RowColOrder,
 ) DEF.with_new_order(OUT_ORDER).Matrix() {
-    if (DEF.ORDER == OUT_ORDER) return mat;
+    if (DEF.ORDER == OUT_ORDER) return DEF.clone(mat);
     const OUT = DEF.with_new_order(OUT_ORDER);
     var out: OUT.Matrix() = undefined;
     for (0..OUT.major_len()) |major| {
@@ -647,19 +655,6 @@ pub fn change_matrix_major_order(
         }
     }
     return out;
-}
-
-test "Matrix -> change_matrix_major_order" {
-    const DEF_IN = MatrixDef.def(u8, 3, 4, .ROW_MAJOR, 0);
-    const DEF_OUT = MatrixDef.def(u8, 3, 4, .COLUMN_MAJOR, 0);
-    const vec_in = [12]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 };
-    const mat_in: DEF_IN.Matrix() = @bitCast(vec_in);
-    const mat_out: DEF_OUT.Matrix() = change_matrix_major_order(DEF_IN, mat_in, .COLUMN_MAJOR);
-    const vec_out: [12]u8 = @bitCast(mat_out);
-    const expect_vec_out = [12]u8{ 1, 5, 9, 2, 6, 10, 3, 7, 11, 4, 8, 12 };
-    const slice_out: []const u8 = vec_out[0..];
-    const expect_slice_out: []const u8 = expect_vec_out[0..];
-    try Root.Testing.expect_slices_equal(slice_out[0..], "slice_out", expect_slice_out[0..], "expect_slice_out", "resulting in-memory order not as expected", .{});
 }
 
 pub fn multiply_matrices(
@@ -690,43 +685,6 @@ pub fn multiply_matrices(
     return out;
 }
 
-test "Matrix -> multiply_matrices" {
-    const DEF_A = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
-    const DEF_B = MatrixDef.def(i32, 4, 3, .ROW_MAJOR, 0);
-    const OUT_T = i32;
-    const OUT_ORDER = RowColOrder.ROW_MAJOR;
-    const OUT_PADDING = 0;
-    const MAT_A = DEF_A.Matrix();
-    const MAT_B = DEF_B.Matrix();
-    const mat_a = MAT_A{
-        .{ 7, 2, 9, -1 },
-        .{ 3, 8, -6, 5 },
-        .{ -4, 6, 1, 8 },
-    };
-    const mat_b = MAT_B{
-        .{ 9, -3, 5 },
-        .{ 2, -2, 3 },
-        .{ 13, 6, 6 },
-        .{ -4, 5, 7 },
-    };
-    // For calculating via online calculators:
-    // {{ 7, 2, 9, -1 },{ 3, 8, -6, 5 },{ -4, 6, 1, 8 }}
-    // {{ 9, -3, 5 },{ 2, -2, 3 },{ 13, 6, 6 },{ -4, 5, 7 }}
-    // =
-    // {{188, 24, 88}, {-55, -36, 38}, {-43, 46, 60}}
-    const expected_mat_out = [3][3]i32{
-        .{ 188, 24, 88 },
-        .{ -55, -36, 38 },
-        .{ -43, 46, 60 },
-    };
-    const expected_out_flat: *const [9]i32 = @ptrCast(&expected_mat_out);
-    const expected_out_slice: []const i32 = expected_out_flat[0..9];
-    const real_out: [3][3]i32 = multiply_matrices(DEF_A, mat_a, DEF_B, mat_b, OUT_T, OUT_ORDER, OUT_PADDING);
-    const real_out_flat: *const [9]i32 = @ptrCast(&real_out);
-    const real_out_slice: []const i32 = real_out_flat[0..9];
-    try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
-}
-
 /// Exactly the same as just using `multiply_matrices(DEF_NUMER, mat_numer, DEF_DENOM_INV, mat_denom_inverse, ...)`,
 /// but this signature clearly describes what is being done
 pub fn divide_matrices_using_inverse_of_denominator_matrix(comptime DEF_NUMER: MatrixDef, mat_numer: anytype, comptime DEF_DENOM_INV: MatrixDef, mat_denom_inverse: anytype, comptime T_OUT: type, comptime OUT_ORDER: RowColOrder, comptime OUT_PADDING: comptime_int) MatrixDef.def(T_OUT, DEF_NUMER.ROWS, DEF_DENOM_INV.COLS, OUT_ORDER, OUT_PADDING).Matrix() {
@@ -738,8 +696,6 @@ pub fn divide_matrices(comptime DEF_NUMER: MatrixDef, mat_numer: anytype, compti
     const DEF_DENOM_INV = DEF_DENOM.with_new_type(T_OUT);
     return multiply_matrices(DEF_NUMER, mat_numer, DEF_DENOM_INV, inverse_denom, T_OUT, OUT_ORDER, OUT_PADDING);
 }
-
-//TODO test "divide_matrices" {}
 
 pub fn add_matrices(
     comptime DEF_A: MatrixDef,
@@ -769,42 +725,6 @@ pub fn add_matrices(
         }
         return out;
     }
-}
-
-test "Matrix -> add_matrices" {
-    const DEF_A = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
-    const DEF_B = MatrixDef.def(i32, 3, 4, .ROW_MAJOR, 0);
-    const OUT_T = i32;
-    const OUT_ORDER = RowColOrder.ROW_MAJOR;
-    const OUT_PADDING = 0;
-    const MAT_A = DEF_A.Matrix();
-    const MAT_B = DEF_B.Matrix();
-    const mat_a = MAT_A{
-        .{ 7, 2, 9, -1 },
-        .{ 3, 8, -6, 5 },
-        .{ -4, 6, 1, 8 },
-    };
-    const mat_b = MAT_B{
-        .{ 9, -3, 5, -4 },
-        .{ 2, -2, 3, 5 },
-        .{ 13, 6, 6, 7 },
-    };
-    // For calculating via online calculators:
-    // {{ 7, 2, 9, -1 },{ 3, 8, -6, 5 },{ -4, 6, 1, 8 }}
-    // {{ 9, -3, 5, -4 },{ 2, -2, 3, 5 },{ 13, 6, 6, 7 }}
-    // =
-    // {{16, -1, 14, -5}, {5, 6, -3, 10}, {9, 12, 7, 15}}
-    const expected_mat_out = [3][4]i32{
-        .{ 16, -1, 14, -5 },
-        .{ 5, 6, -3, 10 },
-        .{ 9, 12, 7, 15 },
-    };
-    const expected_out_flat: *const [12]i32 = @ptrCast(&expected_mat_out);
-    const expected_out_slice: []const i32 = expected_out_flat[0..12];
-    const real_out: [3][4]i32 = add_matrices(DEF_A, mat_a, DEF_B, mat_b, OUT_T, OUT_ORDER, OUT_PADDING);
-    const real_out_flat: *const [12]i32 = @ptrCast(&real_out);
-    const real_out_slice: []const i32 = real_out_flat[0..12];
-    try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
 }
 
 pub fn subtract_matrices(
@@ -870,8 +790,6 @@ pub fn non_algebraic_multiply_matrices(
     }
 }
 
-//TODO test "non_algebraic_multiply_matrices" {}
-
 /// This simply divides each cell in `mat_a` by the matching cell in `mat_b`
 ///
 /// This is NOT the same as a true matrix division (multiplication by inverse matrix)
@@ -891,21 +809,19 @@ pub fn non_algebraic_divide_matrices(
     if (comptime DEF_A.same_flat_memory_layout(DEF_B) and DEF_A.same_flat_memory_layout(DEF_OUT)) {
         const vec_a: DEF_A.FlatVec() = DEF_A.get_flat_vec(mat_a);
         const vec_b: DEF_B.FlatVec() = DEF_B.get_flat_vec(mat_b);
-        const vec_out: DEF_OUT.FlatVec() = MathX.upgrade_multiply_out(vec_a, vec_b, DEF_OUT.FlatVec());
+        const vec_out: DEF_OUT.FlatVec() = MathX.upgrade_divide_out(vec_a, vec_b, DEF_OUT.FlatVec());
         return @bitCast(vec_out);
     } else {
         var out: DEF_OUT.Matrix() = undefined;
         for (0..DEF_OUT.major_len()) |major| {
             for (0..DEF_OUT.minor_len()) |minor| {
                 const y, const x = DEF_OUT.major_minor_to_y_x(major, minor);
-                DEF_OUT.set_cell(&out, y, x, MathX.upgrade_multiply_out(DEF_A.get_cell(mat_a, y, x), DEF_B.get_cell(mat_b, y, x), DEF_OUT.T));
+                DEF_OUT.set_cell(&out, y, x, MathX.upgrade_divide_out(DEF_A.get_cell(mat_a, y, x), DEF_B.get_cell(mat_b, y, x), DEF_OUT.T));
             }
         }
         return out;
     }
 }
-
-//TODO test "non_algebraic_divide_matrices" {}
 
 pub fn transpose_matrix(comptime DEF: MatrixDef, mat: anytype) DEF.Transposed().Matrix() {
     const OUT = DEF.Transposed();
@@ -919,28 +835,6 @@ pub fn transpose_matrix(comptime DEF: MatrixDef, mat: anytype) DEF.Transposed().
     return out;
 }
 
-test "Matrix -> transpose_matrix" {
-    const DEF_A = MatrixDef.def(u8, 3, 4, .ROW_MAJOR, 0);
-    const MAT_A = DEF_A.Matrix();
-    const mat_a = MAT_A{
-        .{ 1, 2, 3, 4 },
-        .{ 5, 6, 7, 8 },
-        .{ 9, 10, 11, 12 },
-    };
-    const expected_mat_out = [4][3]u8{
-        .{ 1, 5, 9 },
-        .{ 2, 6, 10 },
-        .{ 3, 7, 11 },
-        .{ 4, 8, 12 },
-    };
-    const expected_out_flat: *const [12]u8 = @ptrCast(&expected_mat_out);
-    const expected_out_slice: []const u8 = expected_out_flat[0..12];
-    const real_out: DEF_A.Transposed().Matrix() = transpose_matrix(DEF_A, mat_a);
-    const real_out_flat: *const [12]u8 = @ptrCast(&real_out);
-    const real_out_slice: []const u8 = real_out_flat[0..12];
-    try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
-}
-
 pub const RowOrColKind = enum(u8) {
     ROW,
     COL,
@@ -950,7 +844,11 @@ pub const RowOrColKind = enum(u8) {
 /// if a row/col is found with no non-zero vals
 pub fn row_or_col_with_fewest_non_zeroes(comptime DEF: MatrixDef, mat: anytype) DEF.RowOrColNonZeroes() {
     DEF.assert_is_matrix(@src(), mat);
-    var result = DEF.RowOrColNonZeroes(){};
+    // use a sentinel larger than any possible row/column length so that even a
+    // completely dense first row/column is recorded (including its indices)
+    var result = DEF.RowOrColNonZeroes(){
+        .non_zero_count = DEF.larger_of_cols_or_rows() + 1,
+    };
     var current_non_zeroes: usize = undefined;
     var possible_non_zero_indices: [DEF.larger_of_cols_or_rows()]usize = undefined;
     for (0..DEF.ROWS) |y| {
@@ -987,15 +885,17 @@ pub fn row_or_col_with_fewest_non_zeroes(comptime DEF: MatrixDef, mat: anytype) 
     }
     return result;
 }
-
-//TODO test "row_or_col_with_fewest_non_zeroes" {}
 
 /// Useful for finding best row or column for determinant caclulation when the cofactors are pre-computed,
 /// or short-circuiting a determinant of 0 if a row/col is found with no non-zero vals
 pub fn row_or_col_with_fewest_non_zeroes_using_cofactors(comptime DEF: MatrixDef, mat: anytype, comptime CO_DEF: MatrixDef, cofactor_mat: anytype) DEF.RowOrColNonZeroes() {
     DEF.assert_is_matrix(@src(), mat);
     CO_DEF.assert_is_matrix(@src(), cofactor_mat);
-    var result = DEF.RowOrColNonZeroes(){};
+    // use a sentinel larger than any possible row/column length so that even a
+    // completely dense first row/column is recorded (including its indices)
+    var result = DEF.RowOrColNonZeroes(){
+        .non_zero_count = DEF.larger_of_cols_or_rows() + 1,
+    };
     var current_non_zeroes: usize = undefined;
     var possible_non_zero_indices: [DEF.larger_of_cols_or_rows()]usize = undefined;
     for (0..DEF.ROWS) |y| {
@@ -1032,8 +932,6 @@ pub fn row_or_col_with_fewest_non_zeroes_using_cofactors(comptime DEF: MatrixDef
     }
     return result;
 }
-
-//TODO test "row_or_col_with_fewest_non_zeroes_using_cofactors" {}
 
 pub fn cofactor_sign(comptime T: type, major: usize, minor: usize) T {
     const outs = [2]T{ @as(T, 1), @as(T, -1) };
@@ -1139,104 +1037,6 @@ pub fn determinant_of_matrix(comptime DEF: MatrixDef, mat: anytype, comptime DET
     }
 }
 
-test "Matrix -> determinant_of_matrix" {
-    const Test = Root.Testing;
-    const DEF_2x2 = MatrixDef.def(f32, 2, 2, .ROW_MAJOR, 0);
-    const MAT_2x2 = DEF_2x2.Matrix();
-    const DEF_3x3 = MatrixDef.def(f32, 3, 3, .ROW_MAJOR, 0);
-    const MAT_3x3 = DEF_3x3.Matrix();
-    const DEF_4x4 = MatrixDef.def(f32, 4, 4, .ROW_MAJOR, 0);
-    const MAT_4x4 = DEF_4x4.Matrix();
-    const DEF_5x5 = MatrixDef.def(f32, 5, 5, .ROW_MAJOR, 0);
-    const MAT_5x5 = DEF_5x5.Matrix();
-    // {{ 3.1415, 1.965 },{ 4.44, 123.456 }}
-    // determinant should be 379.112424
-    const mat_2x2 = MAT_2x2{
-        .{ 3.1415, 1.965 },
-        .{ 4.44, 123.456 },
-    };
-    const expect_2x2_a: f32 = 379.112424;
-    var result = determinant_of_matrix(DEF_2x2, mat_2x2, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_2x2_a, "expect_2x2_a", "wrong result", .{});
-    // {{ 2, 0, 1 },{ 4, 0, 1 },{ 2, -1, 2 }}
-    // determinant should be -2
-    var mat_3x3 = MAT_3x3{
-        .{ 2, 0, 1 },
-        .{ 4, 0, 1 },
-        .{ 2, -1, 2 },
-    };
-    const expect_3x3_a: f32 = -2;
-    result = determinant_of_matrix(DEF_3x3, mat_3x3, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_3x3_a, "expect_3x3_a", "wrong result", .{});
-    // {{ 7, -4, 2 },{ 3, 1, -5 },{ 2, 2, -5 }}
-    // determinant should be 23
-    mat_3x3 = MAT_3x3{
-        .{ 7, -4, 2 },
-        .{ 3, 1, -5 },
-        .{ 2, 2, -5 },
-    };
-    const expect_3x3_b: f32 = 23;
-    result = determinant_of_matrix(DEF_3x3, mat_3x3, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_3x3_b, "expect_3x3_b", "wrong result", .{});
-    // {{ 1, 3, 5, 9 },{ 1, 2.8, 1, 7 },{ 4, 3, 9, 7 },{ 5, 2, 0, 9 }}
-    // determinant should be -310.2
-    var mat_4x4 = MAT_4x4{
-        .{ 1, 3, 5, 9 },
-        .{ 1, 2.8, 1, 7 },
-        .{ 4, 3, 9, 7 },
-        .{ 5, 2, 0, 9 },
-    };
-    const expect_4x4_a = -310.2;
-    result = determinant_of_matrix(DEF_4x4, mat_4x4, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_4x4_a, "expect_4x4_a", "wrong result", .{});
-    // {{ 7.57, 7.00, 6.49, 7.11 },{ 3.60, 2.03, 6.85, 0.27 },{ 7.63, 7.21, 0.69, 2.98 },{ 5.19, 1.63, 4.37, 5.93 }}
-    // determinant should be 874.39659797
-    mat_4x4 = MAT_4x4{
-        .{ 7.57, 7.00, 6.49, 7.11 },
-        .{ 3.60, 2.03, 6.85, 0.27 },
-        .{ 7.63, 7.21, 0.69, 2.98 },
-        .{ 5.19, 1.63, 4.37, 5.93 },
-    };
-    const expect_4x4_b = 874.39659797;
-    result = determinant_of_matrix(DEF_4x4, mat_4x4, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_4x4_b, "expect_4x4_b", "wrong result", .{});
-    // {{ 7.57, 0, 6.49, 7.11 },{ 3.60, 0, 6.85, 0.27 },{ 7.63, 0, 0.69, 2.98 },{ 5.19, 0, 4.37, 5.93 }}
-    // determinant should be 0
-    mat_4x4 = MAT_4x4{
-        .{ 7.57, 0, 6.49, 7.11 },
-        .{ 3.60, 0, 6.85, 0.27 },
-        .{ 7.63, 0, 0.69, 2.98 },
-        .{ 5.19, 0, 4.37, 5.93 },
-    };
-    const expect_4x4_c = 0;
-    result = determinant_of_matrix(DEF_4x4, mat_4x4, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_4x4_c, "expect_4x4_c", "wrong result", .{});
-    // {{ 7.57, 7.00, 6.49, -7.11, 9.12 },{ 3.60, -2.03, 6.85, 0.27, 0.45 },{ 7.63, 7.21, 0.69, 2.98, 3.89 },{ -5.19, 1.63, 4.37, 5.93, 1.13 },{ 8.43, 7.23, 4.41, -5.82, 3.67 }}
-    // determinant should be -29986.9677224892
-    var mat_5x5 = MAT_5x5{
-        .{ 7.57, 7.00, 6.49, -7.11, 9.12 },
-        .{ 3.60, -2.03, 6.85, 0.27, 0.45 },
-        .{ 7.63, 7.21, 0.69, 2.98, 3.89 },
-        .{ -5.19, 1.63, 4.37, 5.93, 1.13 },
-        .{ 8.43, 7.23, 4.41, -5.82, 3.67 },
-    };
-    const expect_5x5_a = -29986.9677224892;
-    result = determinant_of_matrix(DEF_5x5, mat_5x5, f32);
-    try Test.expect_approx_equal(result, "result", 0.001, "0.001", expect_5x5_a, "expect_5x5_a", "wrong result", .{});
-    // {{ 7.57, 7.00, 6.49, -7.11, 9.12 },{ 0, 0, 0, 0, 0 },{ 7.63, 7.21, 0.69, 2.98, 3.89 },{ -5.19, 1.63, 4.37, 5.93, 1.13 },{ 8.43, 7.23, 4.41, -5.82, 3.67 }}
-    // determinant should be 0
-    mat_5x5 = MAT_5x5{
-        .{ 7.57, 7.00, 6.49, -7.11, 9.12 },
-        .{ 0, 0, 0, 0, 0 },
-        .{ 7.63, 7.21, 0.69, 2.98, 3.89 },
-        .{ -5.19, 1.63, 4.37, 5.93, 1.13 },
-        .{ 8.43, 7.23, 4.41, -5.82, 3.67 },
-    };
-    const expect_5x5_b = 0;
-    result = determinant_of_matrix(DEF_5x5, mat_5x5, f32);
-    try Test.expect_approx_equal(result, "result", 0.0001, "0.0001", expect_5x5_b, "expect_5x5_b", "wrong result", .{});
-}
-
 /// If you have already computed the matrix of cofactors for a matrix
 /// (for example in preparation for finding the inverse of an invertable matrix),
 /// you can use this method to find the determinant faster than without precomputed cofactors
@@ -1305,8 +1105,6 @@ pub fn determinant_of_matrix_precomputed_cofactors(comptime DEF: MatrixDef, mat:
     }
 }
 
-//TODO test "determinant_of_matrix_precomputed_cofactors" {}
-
 pub const RowEchelonMode = enum(u8) {
     ROW_ECHELON_LEADING_NON_ZERO,
     ROW_ECHELON_LEADING_1,
@@ -1347,6 +1145,7 @@ pub fn row_echelon_form_of_matrix(comptime DEF: MatrixDef, mat: anytype, mode: R
         for (pivot_y..OUT.ROWS) |test_y| {
             if (@abs(OUT.get_cell(out.mat, test_y, pivot_x)) > largest_pivot) {
                 largest_pivot_y = test_y;
+                largest_pivot = @abs(OUT.get_cell(out.mat, test_y, pivot_x));
             }
         }
         if (OUT.get_cell(out.mat, largest_pivot_y, pivot_x) == 0) {
@@ -1419,49 +1218,6 @@ pub fn row_echelon_form_of_matrix(comptime DEF: MatrixDef, mat: anytype, mode: R
     return out;
 }
 
-test "Matrix -> row_echelon_form_of_matrix" {
-    const DEF_A = MatrixDef.def(f32, 4, 4, .ROW_MAJOR, 0);
-    const MAT_A = DEF_A.Matrix();
-    // {{ 1, 3, 5, 9 },{ 1, 2.8, 1, 7 },{ 4, 3, 9, 7 },{ 5, 2, 0, 9 }}
-    // determinant should be -310.2
-    var mat_a = MAT_A{
-        .{ 1, 3, 5, 9 },
-        .{ 1, 2.8, 1, 7 },
-        .{ 4, 3, 9, 7 },
-        .{ 5, 2, 0, 9 },
-    };
-    // const expected_out_flat: *const [16]f32 = @ptrCast(&expected_mat_out);
-    // const expected_out_slice: []const f32 = expected_out_flat[0..16];
-    var result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
-    // const real_out_flat: *const [16]f32 = @ptrCast(&result.mat);
-    // const real_out_slice: []const f32 = real_out_flat[0..16];
-    // try Root.Testing.expect_slices_equal(real_out_slice, "real_out_slice", expected_out_slice, "expected_out_slice", "wrong result", .{});
-    try Root.Testing.expect_approx_equal(result.determinant_factor, "result.determinant_factor", 0.0001, "0.0001", -310.2, "-310.2", "wrong result", .{});
-    try Root.Testing.expect_equal(result.rank, "result.rank", 4, "4", "wrong result", .{});
-    // {{ 7.57, 7.00, 6.49, 7.11 },{ 3.60, 2.03, 6.85, 0.27 },{ 7.63, 7.21, 0.69, 2.98 },{ 5.19, 1.63, 4.37, 5.93 }}
-    mat_a = MAT_A{
-        .{ 7.57, 7.00, 6.49, 7.11 },
-        .{ 3.60, 2.03, 6.85, 0.27 },
-        .{ 7.63, 7.21, 0.69, 2.98 },
-        .{ 5.19, 1.63, 4.37, 5.93 },
-    };
-    // determinant should be 874.39659797
-    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
-    try Root.Testing.expect_approx_equal(result.determinant_factor, "result.determinant_factor", 0.0001, "0.0001", 874.39659797, "874.39659797", "wrong result", .{});
-    try Root.Testing.expect_equal(result.rank, "result.rank", 4, "4", "wrong result", .{});
-    // {{ 7.57, 0, 6.49, 7.11 },{ 3.60, 0, 6.85, 0.27 },{ 7.63, 0, 0.69, 2.98 },{ 5.19, 0, 4.37, 5.93 }}
-    mat_a = MAT_A{
-        .{ 7.57, 0, 6.49, 7.11 },
-        .{ 3.60, 0, 6.85, 0.27 },
-        .{ 7.63, 0, 0.69, 2.98 },
-        .{ 5.19, 0, 4.37, 5.93 },
-    };
-    // determinant should be 0
-    result = row_echelon_form_of_matrix(DEF_A, mat_a, .ROW_ECHELON_LEADING_1, .DO_NOT_STOP_IF_NOT_FULL_RANK, f32, f32, .CACHE_PIVOT_X_INDEXES);
-    try Root.Testing.expect_approx_equal(result.determinant_factor, "result.determinant_factor", 0.0001, "0.0001", 0, "0", "wrong result", .{});
-    try Root.Testing.expect_equal(result.rank, "result.rank", 3, "3", "wrong result", .{});
-}
-
 pub fn sub_matrix_excluding_row_and_column(comptime DEF: MatrixDef, mat: anytype, row: usize, col: usize) DEF.with_size_minus_one().Matrix() {
     DEF.assert_can_get_matrix_one_size_smaller(@src());
     const OUT = DEF.with_size_minus_one();
@@ -1523,10 +1279,8 @@ pub fn inverse_of_matrix(comptime DEF: MatrixDef, mat: anytype, comptime NEW_CEL
     const determinant = determinant_of_matrix(DEF, mat, NEW_CELL_TYPE);
     const ADJ_DEF = DEF.with_new_type(NEW_CELL_TYPE);
     const adjugate = adjugate_of_matrix(DEF, mat, NEW_CELL_TYPE);
-    return divide_matrix_by_scalar(ADJ_DEF, adjugate, determinant);
+    return divide_matrix_by_scalar(ADJ_DEF, adjugate, determinant, NEW_CELL_TYPE);
 }
-
-//TODO test "inverse_of_matrix" {}
 
 /// Mat * Scalar = NewMat
 pub fn multiply_matrix_by_scalar(comptime DEF: MatrixDef, mat: anytype, determinant: anytype, comptime NEW_CELL_TYPE: type) DEF.with_new_type(NEW_CELL_TYPE).Matrix() {
@@ -1592,5 +1346,3 @@ pub fn negate_matrix_elements(comptime DEF: MatrixDef, mat: anytype, comptime NE
     const OUT_FLAT = OUT.FlatVec();
     return @bitCast(-num_cast(in_flat, comptime OUT_FLAT));
 }
-
-//TODO test "negate_matrix_elements" {}

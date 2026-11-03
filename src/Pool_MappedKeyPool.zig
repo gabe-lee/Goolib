@@ -25,7 +25,6 @@ const math = std.math;
 const Root = @import("./_root.zig");
 const Types = Root.Types;
 const Assert = Root.Assert;
-const AllocatorInfallible = Root.AllocatorInfallible;
 const Allocator = std.mem.Allocator;
 const Utils = Root.Utils;
 const DummyAlloc = Root.Allocator.Dummy;
@@ -100,6 +99,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             },
         }
     };
+
     return struct {
         const Self = @This();
 

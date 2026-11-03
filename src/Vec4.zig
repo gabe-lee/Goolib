@@ -21,9 +21,16 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Vec4_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const math = std.math;
 const assert = std.debug.assert;
+const build = @import("builtin");
 
 const Root = @import("./_root.zig");
 const Common = Root.CommonTypes;
@@ -147,22 +154,43 @@ pub fn define_vec4_type(comptime T: type) type {
             return self.to_vec()[@backingInt(component)];
         }
         pub inline fn set(self: *Vec4, component: Component, val: T) void {
-            self.to_vec()[@backingInt(component)] = val;
+            var v = self.to_vec();
+            v[@backingInt(component)] = val;
+            self.* = .from_vec(v);
         }
         pub inline fn set_rgba(self: *Vec4, component: Component_RGBA, val: T) void {
-            self.to_vec()[@backingInt(component)] = val;
+            var v = self.to_vec();
+            v[@backingInt(component)] = val;
+            self.* = .from_vec(v);
         }
         pub inline fn set_bgra(self: *Vec4, component: Component_BGRA, val: T) void {
-            self.to_vec()[@backingInt(component)] = val;
+            var v = self.to_vec();
+            v[@backingInt(component)] = val;
+            self.* = .from_vec(v);
         }
         pub inline fn ptr(self: *Vec4, component: Component) *T {
-            return &self.vec_ptr()[@backingInt(component)];
+            return switch (component) {
+                .X => &self.x,
+                .Y => &self.y,
+                .Z => &self.z,
+                .W => &self.w,
+            };
         }
         pub inline fn ptr_rgba(self: *Vec4, component: Component_RGBA) *T {
-            return &self.vec_ptr()[@backingInt(component)];
+            return switch (component) {
+                .R => &self.x,
+                .G => &self.y,
+                .B => &self.z,
+                .A => &self.w,
+            };
         }
         pub inline fn ptr_bgra(self: *Vec4, component: Component_BGRA) *T {
-            return &self.vec_ptr()[@backingInt(component)];
+            return switch (component) {
+                .B => &self.x,
+                .G => &self.y,
+                .R => &self.z,
+                .A => &self.w,
+            };
         }
 
         pub fn downgrade_to_vec2(self: Vec4) Vec2 {
@@ -251,7 +279,7 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn subtract_scale(self: Vec4, subtract_vec: Vec4, scale_subtract_vec_by: anytype) Vec4 {
-            return self.add(subtract_vec.scale(scale_subtract_vec_by));
+            return self.subtract(subtract_vec.scale(scale_subtract_vec_by));
         }
 
         pub fn squared(self: Vec4) Vec4 {
@@ -269,7 +297,7 @@ pub fn define_vec4_type(comptime T: type) type {
                 break :get percent;
             } else get: {
                 assert_is_float(@TypeOf(percent), @src());
-                break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
+                break :get @as(@Vector(4, @TypeOf(percent)), @splat(percent));
             };
             const nums = MathX.upgrade_3_numbers_for_math(p1.to_vec(), p2.to_vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
@@ -339,10 +367,10 @@ pub fn define_vec4_type(comptime T: type) type {
         }
 
         pub fn approx_equal(self: Vec4, other: Vec4) bool {
-            return MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec());
+            return @reduce(.And, MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec()));
         }
         pub fn approx_equal_with_epsilon(self: Vec4, other: Vec4, epsilon: Vec4) bool {
-            return MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon);
+            return @reduce(.And, MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon.to_vec()));
         }
 
         pub fn is_zero(self: Vec4) bool {
@@ -370,13 +398,7 @@ pub fn define_vec4_type(comptime T: type) type {
                 return V.new_any(self.x, self.y, self.z, self.w);
             } else {
                 const px: f64, const py: f64, const pz: f64, const pw: f64 = calc: {
-                    if (comptime IS_INT and @bitSizeOf(T) > 50) {
-                        const px = @max(0.0, @min(1.0, num_cast(self.x / NORM_MAX, f64)));
-                        const py = @max(0.0, @min(1.0, num_cast(self.y / NORM_MAX, f64)));
-                        const pz = @max(0.0, @min(1.0, num_cast(self.z / NORM_MAX, f64)));
-                        const pw = @max(0.0, @min(1.0, num_cast(self.w / NORM_MAX, f64)));
-                        break :calc .{ px, py, pz, pw };
-                    } else if (comptime IS_INT) {
+                    if (comptime IS_INT) {
                         const px = @max(0.0, @min(1.0, num_cast(self.x, f64) / NORM_MAX_F));
                         const py = @max(0.0, @min(1.0, num_cast(self.y, f64) / NORM_MAX_F));
                         const pz = @max(0.0, @min(1.0, num_cast(self.z, f64) / NORM_MAX_F));

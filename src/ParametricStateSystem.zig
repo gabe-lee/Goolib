@@ -23,28 +23,22 @@
 // const std = @import("std");
 // const math = std.math;
 // const Root = @import("./_root.zig");
-// const SliceAdapter = Root.IList_SliceAdapter;
 // const Types = Root.Types;
 // const Assert = Root.Assert;
 // const Utils = Root.Utils;
 // const Allocator = std.mem.Allocator;
-// const AllocInfal = Root.AllocatorInfallible;
 // const DummyAllocator = Root.Allocator.Dummy;
 // const Flags = Root.Flags;
 // // const IList = Root.IList.IList;
 // // const List = Root.IList_List.List;
-// const Range = Root.IList.Range;
 // const MathX = Root.Math;
 // const PowerOf2 = MathX.PowerOf2;
 // const InterfaceSignature = Types.InterfaceSignature;
-// const NamedFuncDefinition = Types.NamedFuncDefinition;
 // const SimplePool = Root.Pool.Simple.SimplePool;
 // const SimplePoolOpaque = Root.Pool.Simple.SimplePoolOpaque;
 // const UniqueQueue = Root.UniqueQueue.UniqueQueue;
 // const UniqueQueueModule = Root.UniqueQueue;
-// const Mutex = std.Thread.Mutex;
 // const KeyedMutex = Root.KeyedMutex.KeyedMutex;
-// const EnumeratedDefinitions = Utils.EnumeratedDefs.EnumeratedDefinitions;
 
 // const ct_assert_with_reason = Assert.assert_with_reason;
 // const ct_assert_unreachable = Assert.assert_unreachable;
@@ -186,7 +180,7 @@
 //         const _Self = @This();
 
 //         ALLOCATED: AllocInit,
-//         STATIC_MEMORY: StaticMemWithSecondaryAndFreeAndMeta(MAIN_T, SECONDARY_T),
+//         STATIC_MEMORY:src/ParametricStateSystem_old.zig StaticMemWithSecondaryAndFreeAndMeta(MAIN_T, SECONDARY_T),
 
 //         pub fn allocated(init: AllocInit) _Self {
 //             return _Self{ .ALLOCATED = init };
@@ -419,7 +413,7 @@
 //     comptime var category_type_ids: [_NUM_CATEGORIES]cat_int = undefined;
 //     comptime var total_unique_types: cat_int = 0;
 //     inline for (PARAM_CATEGORY_DEFS[0..]) |def| {
-//         const cat_idx = @intFromEnum(def.category);
+//         const cat_idx = @backingInt(def.category);
 //         ct_assert_with_reason(categories_defined[cat_idx] == false, @src(), "category `{s}` was defined more than once", .{@tagName(def.category)});
 //         categories_defined[cat_idx] = true;
 //         comptime var found_unique_match: bool = false;
@@ -763,7 +757,7 @@
 //             pub fn initialize_function_internal(comptime func_name: FuncName, func: *const UpdateFunction, _mutex_key: MutexKey) void {
 //                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
 //                 defer mutex_key.unlock_if_needed(owns_key);
-//                 const _func_idx = @intFromEnum(func_name);
+//                 const _func_idx = @backingInt(func_name);
 //                 INTERNAL.assert_with_reason(INTERNAL.funcs_init[_func_idx] == false, @src(), "function `{s}` was already initialized. If you want to replace it (and replacement is enabled), use `replace_update_function` instead", .{@tagName(func_name)});
 //                 INTERNAL.funcs_init[_func_idx] = true;
 //                 INTERNAL.update_funcs[_func_idx] = func;
@@ -773,7 +767,7 @@
 //                 if (SETTINGS.ALLOW_FUNCTION_DELETION) {
 //                     var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
 //                     defer mutex_key.unlock_if_needed(owns_key);
-//                     const _func_idx = @intFromEnum(func_name);
+//                     const _func_idx = @backingInt(func_name);
 //                     assert_with_reason(INTERNAL.funcs_init[_func_idx] == true, @src(), "function `{s}` was not initialized (can't delete a non-existent update function)", .{@tagName(func_name)});
 //                     const func_deps: *FuncDependantList = &func_dependants[_func_idx];
 //                     for (func_deps.slice()) |package_no_func| {
@@ -801,7 +795,7 @@
 //                 if (SETTINGS.ALLOW_FUNCTION_REPLACEMENT) {
 //                     var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
 //                     defer mutex_key.unlock_if_needed(owns_key);
-//                     const _func_idx = @intFromEnum(func_name);
+//                     const _func_idx = @backingInt(func_name);
 //                     assert_with_reason(INTERNAL.funcs_init[_func_idx] == true, @src(), "function `{s}` was not initialized (can't replace a non-existent update function), if you wanted to initialize a function use `initialize_update_function` instead", .{@tagName(func_name)});
 //                     update_funcs[_func_idx] = new_func;
 //                     const func_deps: FuncDependantList = func_dependants[_func_idx];
@@ -1033,7 +1027,7 @@
 //             pub fn create_new_root_param_internal(comptime category: CategoryName, initial_val: CategoryType(category), settings: ParamReadWriteSettings, _mutex_key: MutexKey, comptime SKIP_CLAIM: bool) ParamReadWrite(CategoryType(category)) {
 //                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
 //                 defer mutex_key.unlock_if_needed(owns_key);
-//                 const cat_idx = @intFromEnum(category);
+//                 const cat_idx = @backingInt(category);
 //                 const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //                 var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
 //                 var cat_meta = &INTERNAL.categories[cat_idx].meta;
@@ -1071,7 +1065,7 @@
 //                 INTERNAL.assert_with_reason(Types.type_is_struct(OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` must be a struct type, got type `{s}`", .{@typeName(OUTPUT_STRUCT)});
 //                 INTERNAL.assert_with_reason(Types.two_structs_have_exact_same_field_names_and_order(DEFS, OUTPUT_STRUCT), @src(), "type `OUTPUT_STRUCT` and the type of `output_defs` must have the same number of fields, and all fields have the same names in the same order", .{});
 //                 inline for (@typeInfo(DEFS).@"struct".fields, @typeInfo(OUTPUT_STRUCT).@"struct".fields) |def_field, out_field| {
-//                     const cat_idx = @intFromEnum(@field(output_defs, def_field.name).category);
+//                     const cat_idx = @backingInt(@field(output_defs, def_field.name).category);
 //                     INTERNAL.assert_with_reason(IDForType(@field(out_field.type, "TYPE")) == CATEGORY_TYPE_IDS[cat_idx], @src(), "field `{s}` on output struct must be type `ParamReadOnly(<category type for category {s}>)`, got type `{s}`", .{ def_field.name, name_cast(cat_idx, CategoryName), @typeName(def_field.type) });
 //                 }
 //                 const inputs_flat: [@typeInfo(INS).@"struct".field_names.len]ParamReadOnlyOpaque = build: {
@@ -1106,13 +1100,13 @@
 //                 INTERNAL.assert_with_reason(output_defs.len == outputs.len, @src(), "`output_defs.len` must equal `outputs.len`, got {d} != {d}", .{ output_defs.len, outputs.len });
 //                 INTERNAL.assert_with_reason(inputs.len <= INTERNAL.MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum number possible ({d})", .{ inputs.len, INTERNAL.MAX_INPUTS });
 //                 INTERNAL.assert_with_reason(output_defs.len <= INTERNAL.MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum number possible ({d})", .{ output_defs.len, INTERNAL.MAX_OUTPUTS });
-//                 INTERNAL.assert_with_reason(INTERNAL.funcs_init[@intFromEnum(update_function)] == true, @src(), "function `{s}` was not initialized", .{@tagName(update_function)});
-//                 const _func_idx: INTERNAL.FuncId = @intFromEnum(update_function);
+//                 INTERNAL.assert_with_reason(INTERNAL.funcs_init[@backingInt(update_function)] == true, @src(), "function `{s}` was not initialized", .{@tagName(update_function)});
+//                 const _func_idx: INTERNAL.FuncId = @backingInt(update_function);
 //                 const input_count = inputs.len;
 //                 const output_count = output_defs.len;
 //                 const params_count = input_count + output_count;
 //                 for (output_defs, outputs) |def, *out_param| {
-//                     const cat_idx = @intFromEnum(def.category);
+//                     const cat_idx = @backingInt(def.category);
 //                     var cat_data = &INTERNAL.categories[cat_idx].data;
 //                     var cat_meta = &INTERNAL.categories[cat_idx].meta;
 //                     const cat_alloc = INTERNAL.categories[cat_idx].alloc;
@@ -1186,7 +1180,7 @@
 //             pub fn create_consecutive_indexed_params_internal(comptime category: CategoryName, specific_index: ?Index, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category)), _mutex_key: MutexKey) void {
 //                 var mutex_key: MutexKey, const owns_key: bool = _mutex_key.lock_if_needed(&INTERNAL.access_lock);
 //                 defer mutex_key.unlock_if_needed(owns_key);
-//                 const cat_idx = @intFromEnum(category);
+//                 const cat_idx = @backingInt(category);
 //                 const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //                 var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
 //                 // var cat_meta = INTERNAL.categories[cat_idx].meta;
@@ -1346,7 +1340,7 @@
 //                 const deps_init: [INTERNAL.NUM_FUNCS]InitializeFuncDependantsMem = init.function_dependants_memory;
 //                 var deps_init_done: [INTERNAL.NUM_FUNCS]bool = @splat(false);
 //                 for (deps_init[0..]) |d_init| {
-//                     const f_idx = @intFromEnum(d_init.func_name);
+//                     const f_idx = @backingInt(d_init.func_name);
 //                     INTERNAL.assert_with_reason(deps_init_done[f_idx] == false, @src(), "function `{s}` had its dependants list memory initilized twice", .{@tagName(d_init.func_name)});
 //                     deps_init_done[f_idx] = true;
 //                     switch (d_init.init_mem) {
@@ -1363,7 +1357,7 @@
 //             }
 //             var cat_inits_done: [INTERNAL.NUM_CATEGORIES]bool = @splat(false);
 //             for (init.parameter_memory[0..]) |c_init| {
-//                 const c_idx = @intFromEnum(c_init.category_name);
+//                 const c_idx = @backingInt(c_init.category_name);
 //                 INTERNAL.assert_with_reason(cat_inits_done[c_idx] == false, @src(), "category `{s}` had its parameter memory initilized twice", .{@tagName(c_init.category_name)});
 //                 cat_inits_done[c_idx] = true;
 //                 switch (c_init.init_mem) {
@@ -1462,8 +1456,8 @@
 //         ///
 //         /// This method skips the generation check (if enabled), whatever value
 //         /// is at that index is returned
-//         pub fn get_param_in_category(comptime category: CategoryName, index: Index) INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn get_param_in_category(comptime category: CategoryName, index: Index) INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             return INTERNAL.get_internal(T, cat_idx, index, 0, .{}, true, false);
 //         }
@@ -1473,8 +1467,8 @@
 //         /// is at that index is returned
 //         ///
 //         /// provide the `mutex_key` from the update function you are calling this from
-//         pub fn get_param_in_category_during_update(comptime category: CategoryName, index: Index, mutex_key: MutexKey) INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn get_param_in_category_during_update(comptime category: CategoryName, index: Index, mutex_key: MutexKey) INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             return INTERNAL.get_internal(T, cat_idx, index, 0, mutex_key, true, true);
 //         }
@@ -1482,8 +1476,8 @@
 //         ///
 //         /// This method skips the generation check (if enabled), whatever value
 //         /// is at that location will be replaced unconditionally
-//         pub fn set_param_in_category(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type) void {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn set_param_in_category(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type) void {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             return INTERNAL.set_internal(T, cat_idx, index, 0, val, .{}, true, false);
 //         }
@@ -1493,8 +1487,8 @@
 //         /// is at that location will be replaced unconditionally
 //         ///
 //         /// provide the `mutex_key` from the update function you are calling this from
-//         pub fn set_param_in_category_during_update(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type, mutex_key: MutexKey) void {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn set_param_in_category_during_update(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type, mutex_key: MutexKey) void {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             return INTERNAL.set_internal(T, cat_idx, index, 0, val, mutex_key, true, true);
 //         }
@@ -1503,8 +1497,8 @@
 //         ///
 //         /// This method skips the generation check (if enabled), whatever value
 //         /// is at that location will be replaced unconditionally
-//         pub fn set_param_get_old_in_category(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type) INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn set_param_get_old_in_category(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type) INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             const old = INTERNAL.get_internal(T, cat_idx, index, 0, .{}, true);
 //             INTERNAL.set_internal(T, cat_idx, index, 0, val, .{}, true, false);
@@ -1517,8 +1511,8 @@
 //         /// is at that location will be replaced unconditionally
 //         ///
 //         /// provide the `mutex_key` from the update function you are calling this from
-//         pub fn set_param_get_old_in_category_during_update(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type, mutex_key: MutexKey) INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type {
-//             const cat_idx = @intFromEnum(category);
+//         pub fn set_param_get_old_in_category_during_update(comptime category: CategoryName, index: Index, val: INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type, mutex_key: MutexKey) INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type {
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             const old = INTERNAL.get_internal(T, cat_idx, index, 0, mutex_key, true);
 //             INTERNAL.set_internal(T, cat_idx, index, 0, val, mutex_key, true);
@@ -1529,7 +1523,7 @@
 //         /// This method skips the generation check (if enabled), whatever value
 //         /// is at that location will be deleted unconditionally
 //         pub fn delete_param_in_category(comptime category: CategoryName, index: Index) void {
-//             const cat_idx = @intFromEnum(category);
+//             const cat_idx = @backingInt(category);
 //             return INTERNAL.delete_internal(cat_idx, index, 0, .{}, true, false);
 //         }
 //         /// Delete a parameter at a specific index in a category
@@ -1539,7 +1533,7 @@
 //         ///
 //         /// provide the `mutex_key` from the update function you are calling this from
 //         pub fn delete_param_in_category_during_update(comptime category: CategoryName, index: Index, mutex_key: MutexKey) void {
-//             const cat_idx = @intFromEnum(category);
+//             const cat_idx = @backingInt(category);
 //             return INTERNAL.delete_internal(cat_idx, index, 0, mutex_key, true, true);
 //         }
 
@@ -1688,11 +1682,11 @@
 //             }
 //         };
 //         pub fn type_for_category(comptime category: CategoryName) type {
-//             return INTERNAL.CATEGORY_DEFS[@intFromEnum(category)].param_type;
+//             return INTERNAL.CATEGORY_DEFS[@backingInt(category)].param_type;
 //         }
 //         pub const UpdateFunction = fn (iface: UpdateInterface) void;
 //         pub fn CategoryType(comptime name: CategoryName) type {
-//             return INTERNAL.CATEGORY_DEFS[@intFromEnum(name)].param_type;
+//             return INTERNAL.CATEGORY_DEFS[@backingInt(name)].param_type;
 //         }
 //         pub fn ParamReadWrite(comptime T: type) type {
 //             return packed struct {
@@ -1825,18 +1819,18 @@
 //             }
 
 //             pub fn with_type(self: ParamReadWriteOpaque, comptime T: type) ParamReadWrite(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return @bitCast(self);
 //             }
 //             pub fn as_update_input(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return ParamUpdateInput(T){
 //                     .param = @bitCast(self),
 //                     .key = key,
 //                 };
 //             }
 //             pub fn as_update_output(self: ParamReadWriteOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return ParamUpdateOutput(T){
 //                     .param = @bitCast(self),
 //                     .key = key,
@@ -1964,18 +1958,18 @@
 //             }
 
 //             pub fn with_type(self: ParamReadOnlyOpaque, comptime T: type) ParamReadOnly(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return @bitCast(self);
 //             }
 //             pub fn as_update_output(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return ParamUpdateOutput(T){
 //                     .param = @bitCast(self),
 //                     .key = key,
 //                 };
 //             }
 //             pub fn as_update_input(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
-//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @enumFromInt(self.category))), @typeName(T) });
+//                 INTERNAL.assert_with_reason(INTERNAL.CATEGORY_TYPE_IDS[self.category] == INTERNAL.IDForType(T), @src(), "invalid category `{s}` for converting to a param with type `{s}`", .{ @tagName(@as(CategoryName, @fromBackingInt(@intCast(self.category)))), @typeName(T) });
 //                 return ParamUpdateInput(T){
 //                     .param = @bitCast(self),
 //                     .key = key,
@@ -2263,7 +2257,7 @@
 //         }
 
 //         pub fn create_consecutive_indexed_params(comptime category: CategoryName, specific_index: ?Index, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category))) void {
-//             const cat_idx = @intFromEnum(category);
+//             const cat_idx = @backingInt(category);
 //             const T = INTERNAL.CATEGORY_DEFS[cat_idx].param_type;
 //             var cat_data = INTERNAL.categories[cat_idx].data.to_typed_ptr(T);
 //             // var cat_meta = INTERNAL.categories[cat_idx].meta;

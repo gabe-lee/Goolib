@@ -21,9 +21,16 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Vec3_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const math = std.math;
 const assert = std.debug.assert;
+const build = @import("builtin");
 
 const Root = @import("./_root.zig");
 const Common = Root.CommonTypes;
@@ -157,25 +164,24 @@ pub fn define_vec3_type(comptime T: type) type {
         pub fn triple_product_scalar(self_a: Vec3, other_b: Vec3, other_c: Vec3) T {
             return self_a.dot_product(other_b.cross_product(other_c));
         }
-        pub fn triple_product_vector(self_a: Vec3, other_b: Vec3, other_c: Vec3) T {
+        pub fn triple_product_vector(self_a: Vec3, other_b: Vec3, other_c: Vec3) Vec3 {
             return self_a.cross_product(other_b.cross_product(other_c));
         }
 
         pub inline fn shoelace_area_step(self: Vec3, next: Vec3) Vec3 {
             return self.cross(next);
         }
-        pub fn shoelace_area_total(ccw_ordered_points: []const Vec3) Vec3 {
+        pub fn shoelace_area_total(ccw_ordered_points: []const Vec3) T {
             var sum: Vec3 = .ZERO;
-            var i = 0;
-            var ii = 1;
+            var i: usize = 0;
+            var ii: usize = 1;
             while (ii < ccw_ordered_points.len) {
                 sum = sum.add(ccw_ordered_points[i].shoelace_area_step(ccw_ordered_points[ii]));
                 i = ii;
                 ii += 1;
             }
-            sum += ccw_ordered_points[i].shoelace_area_step(ccw_ordered_points[0]);
-            sum = sum.length();
-            return sum.inverse_scale(2);
+            sum = sum.add(ccw_ordered_points[i].shoelace_area_step(ccw_ordered_points[0]));
+            return MathX.upgrade_divide_out(sum.length(), @as(T, 2), T);
         }
 
         pub fn all_components_less_than(self: Vec3, other: Vec3) bool {
@@ -227,7 +233,7 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn subtract_scale(self: Vec3, subtract_vec: Vec3, scale_subtract_vec_by: anytype) Vec3 {
-            return self.add(subtract_vec.scale(scale_subtract_vec_by));
+            return self.subtract(subtract_vec.scale(scale_subtract_vec_by));
         }
 
         pub fn squared(self: Vec3) Vec3 {
@@ -284,7 +290,7 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn normalize_may_be_zero(self: Vec3, comptime zero_behavior: NormalizeZero) Vec3 {
-            if (@reduce(.Add, self.to_vec() == ZERO.to_vec())) {
+            if (@reduce(.And, self.to_vec() == ZERO.to_vec())) {
                 @branchHint(.unlikely);
                 var out = ZERO;
                 if (zero_behavior == .NORM_ZERO_IS_LAST_COMPONENT_1) {
@@ -347,7 +353,7 @@ pub fn define_vec3_type(comptime T: type) type {
             const dot_prod = self.dot_product(other);
             const self_length_squared = self.length_squared();
             const self_length_squared_float = MathX.upgrade_to_float(self_length_squared, F);
-            const other_length_squared = self.length_squared();
+            const other_length_squared = other.length_squared();
             const other_length_squared_float = MathX.upgrade_to_float(other_length_squared, F);
             const lengths_multiplied = @sqrt(self_length_squared_float) * @sqrt(other_length_squared_float);
             return num_cast(math.acos(MathX.upgrade_to_float(dot_prod, F) / lengths_multiplied), OUT);
@@ -379,11 +385,13 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn perp_any(self: Vec3) Vec3 {
-            return Vec3{
-                .x = math.copysign(self.z, self.x),
-                .y = math.copysign(self.z, self.y),
-                .z = -math.copysign(self.x, self.z) - math.copysign(self.y, self.z),
-            };
+            // Choose an axis that is guaranteed to produce a non-zero perpendicular
+            // vector: (-y, x, 0) when |x| > |z|, otherwise (0, -z, y).
+            if (@abs(self.x) > @abs(self.z)) {
+                return Vec3{ .x = -self.y, .y = self.x, .z = 0 };
+            } else {
+                return Vec3{ .x = 0, .y = -self.z, .z = self.y };
+            }
         }
         pub fn perp_with_righthand(self: Vec3, other: Vec3) Vec3 {
             return self.cross(other);
@@ -399,7 +407,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 break :get percent;
             } else get: {
                 assert_is_float(@TypeOf(percent), @src());
-                break :get @as(@Vector(VEC.len, @TypeOf(percent)), @splat(percent));
+                break :get @as(@Vector(3, @TypeOf(percent)), @splat(percent));
             };
             const nums = MathX.upgrade_3_numbers_for_math(p1.to_vec(), p2.to_vec(), delta);
             const TU = @FieldType(@TypeOf(nums), "a");
@@ -526,10 +534,10 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         pub fn approx_equal(self: Vec3, other: Vec3) bool {
-            return MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec());
+            return @reduce(.And, MathX.approx_equal_vec(VEC, self.to_vec(), other.to_vec()));
         }
         pub fn approx_equal_with_epsilon(self: Vec3, other: Vec3, epsilon: Vec3) bool {
-            return MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon);
+            return @reduce(.And, MathX.approx_equal_with_epsilon_vec(VEC, self.to_vec(), other.to_vec(), epsilon.to_vec()));
         }
 
         pub fn is_zero(self: Vec3) bool {
@@ -586,15 +594,14 @@ pub fn define_vec3_type(comptime T: type) type {
             const ab = b.subtract(a);
             const bc = c.subtract(b);
             const x = ab.cross(bc);
-            const eps: VEC = @splat(math.floatEps(T));
-            return @reduce(.And, x <= eps);
+            const eps = math.floatEps(T);
+            return @abs(x.x) <= eps and @abs(x.y) <= eps and @abs(x.z) <= eps;
         }
         pub fn approx_colinear_with_epsilon(a: Vec3, b: Vec3, c: Vec3, epsilon: T) bool {
             const ab = b.subtract(a);
             const bc = c.subtract(b);
             const x = ab.cross(bc);
-            const eps: VEC = @splat(epsilon);
-            return @reduce(.And, x <= eps);
+            return @abs(x.x) <= epsilon and @abs(x.y) <= epsilon and @abs(x.z) <= epsilon;
         }
 
         pub fn colinear(a: Vec3, b: Vec3, c: Vec3) bool {
@@ -647,7 +654,7 @@ pub fn define_vec3_type(comptime T: type) type {
         ///   - `@abs(threshold) == 0` means the vectors only DONT form a corner if they point in EXACTLY the same direction
         ///   - `@abs(threshold) > 0` means the vectors only form a corner if they are perpendicular, point in generally opposite directions, or point in somewhat the same dirction but not enough to fall below the threshold (smaller numbers allow 'flatter' corners to pass)
         pub fn forms_corner_dot_or_cross_product_threshold(self: Vec3, other: Vec3, threshold: anytype) bool {
-            return self.dot(other) <= threshold or @abs(self.cross(other)) > threshold;
+            return self.dot(other) <= threshold or self.cross(other).length() > threshold;
         }
         /// Where:
         ///   - `degrees == 180` means the vectors only DONT form a corner if they are pointing in the exact same direction
@@ -738,7 +745,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3.new(self.x, self.y, self.z + (ratio * self.y)),
                 .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(sincos.sin, sincos.cos),
+                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_z_axis_sin_cos(sincos.sin, sincos.cos),
             };
         }
         pub fn apply_inverse_transform(self: Vec3, transform: TransformStep) Vec3 {
@@ -749,14 +756,14 @@ pub fn define_vec3_type(comptime T: type) type {
         }
         fn apply_inverse_transform_advanced(self: Vec3, transform: TransformStep, should_translate: ShouldTranslate) Vec3 {
             return switch (transform) {
-                .TRANSLATE => |v| if (should_translate == .PREFORM_TRANSLATIONS) self.add(v) else self,
+                .TRANSLATE => |v| if (should_translate == .PREFORM_TRANSLATIONS) self.subtract(v) else self,
                 .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - x, self.y, self.z) else self,
                 .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y - y, self.z) else self,
                 .TRANSLATE_Z => |z| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y, self.z - z) else self,
                 .TRANSLATE_XY => |xy| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - xy[0], self.y - xy[1], self.z) else self,
                 .TRANSLATE_YZ => |yz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x, self.y - yz[0], self.z - yz[1]) else self,
                 .TRANSLATE_XZ => |xz| if (should_translate == .PREFORM_TRANSLATIONS) Vec3.new(self.x - xz[0], self.y, self.z - xz[1]) else self,
-                .SCALE => |v| self.multiply(v),
+                .SCALE => |v| self.divide(v),
                 .SCALE_X => |x| Vec3.new(self.x / x, self.y, self.z),
                 .SCALE_Y => |y| Vec3.new(self.x, self.y / y, self.z),
                 .SCALE_Z => |z| Vec3.new(self.x, self.y, self.z / z),
@@ -771,7 +778,7 @@ pub fn define_vec3_type(comptime T: type) type {
                 .SKEW_Z_AWAY_FROM_Y => |ratio| Vec3.new(self.x, self.y, self.z + (-ratio * self.y)),
                 .ROTATE_AROUND_X_AXIS => |sincos| self.rotate_around_x_axis_sin_cos(-sincos.sin, sincos.cos),
                 .ROTATE_AROUND_Y_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
-                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_y_axis_sin_cos(-sincos.sin, sincos.cos),
+                .ROTATE_AROUND_Z_AXIS => |sincos| self.rotate_around_z_axis_sin_cos(-sincos.sin, sincos.cos),
             };
         }
 
@@ -842,19 +849,19 @@ pub fn define_vec3_type(comptime T: type) type {
 
         pub fn as_4x1_matrix_column_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 1 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_1x4_matrix_row_fill_1(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 1 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_4x1_matrix_column_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 0 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_1x4_matrix_row_fill_0(self: Vec3) Matrix.define_rectangular_RxC_matrix_type(T, 1, 4, .ROW_MAJOR, 0) {
             const raw: [4]T = .{ self.x, self.y, self.z, 0 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
 
         pub fn apply_affine_matrix_transform(self: Vec3, matrix: anytype) Vec3 {
@@ -865,11 +872,12 @@ pub fn define_vec3_type(comptime T: type) type {
         }
 
         fn apply_affine_matrix_transform_advanced(self: Vec3, matrix: anytype, should_translate: ShouldTranslate) Vec3 {
-            const SEFL_DEF = Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0).DEF;
+            const SELF_MAT = Matrix.define_rectangular_RxC_matrix_type(T, 4, 1, .COLUMN_MAJOR, 0);
+            const SELF_DEF = SELF_MAT.DEF;
             const self_as_mat = if (should_translate == .PREFORM_TRANSLATIONS) self.as_4x1_matrix_column_fill_1() else self.as_4x1_matrix_column_fill_0();
-            const DEF = Matrix.assert_anytype_is_matrix_and_get_def(matrix, @src());
+            const DEF = @TypeOf(matrix).DEF;
             assert_with_reason(DEF.COLS == 4 and DEF.ROWS == 4, @src(), "affine matrix to apply MUST be a 4x4 matrix, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
-            const result = Matrix.Advanced.multiply_matrices(DEF, matrix, SEFL_DEF, self_as_mat, T, .COLUMN_MAJOR, 0);
+            const result = Matrix.Advanced.multiply_matrices(DEF, matrix.mat, SELF_DEF, self_as_mat.mat, T, .COLUMN_MAJOR, 0);
             return .from_vec(.{ result[0][0], result[0][1], result[0][2] });
         }
 
@@ -1185,21 +1193,21 @@ pub fn define_vec3_type(comptime T: type) type {
                     // ROTATIONS
                     //   X axis          Y axis          Z axis
                     //
-                    // 1  0  0  0      C  0 -S  0      C -S  0  0
-                    // 0  C  S  0      0  1  0  0      S  C  0  0
-                    // 0 -S  C  0      S  0  C  0      0  0  1  0
+                    // 1  0  0  0      C  0  S  0      C -S  0  0
+                    // 0  C -S  0      0  1  0  0      S  C  0  0
+                    // 0  S  C  0     -S  0  C  0      0  0  1  0
                     // 0  0  0  1      0  0  0  1      0  0  0  1
                     .ROTATE_AROUND_X_AXIS => |v| {
                         DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
                         DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
-                        DEF.set_cell(&m.mat, 1, 2, num_cast(v.sin, MAT_T));
-                        DEF.set_cell(&m.mat, 2, 1, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(v.sin, MAT_T));
                     },
                     .ROTATE_AROUND_Y_AXIS => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
                         DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
-                        DEF.set_cell(&m.mat, 0, 2, num_cast(-v.sin, MAT_T));
-                        DEF.set_cell(&m.mat, 2, 0, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(-v.sin, MAT_T));
                     },
                     .ROTATE_AROUND_Z_AXIS => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
@@ -1329,21 +1337,21 @@ pub fn define_vec3_type(comptime T: type) type {
                     // ROTATIONS
                     //   X axis          Y axis          Z axis
                     //
-                    // 1  0  0  0      C  0 -S  0      C -S  0  0
-                    // 0  C  S  0      0  1  0  0      S  C  0  0
+                    // 1  0  0  0      C  0 -S  0      C  S  0  0
+                    // 0  C  S  0      0  1  0  0     -S  C  0  0
                     // 0 -S  C  0      S  0  C  0      0  0  1  0
                     // 0  0  0  1      0  0  0  1      0  0  0  1
                     .ROTATE_AROUND_X_AXIS => |v| {
                         DEF.set_cell(&m.mat, 1, 1, num_cast(v.cos, MAT_T));
                         DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
-                        DEF.set_cell(&m.mat, 1, 2, num_cast(-v.sin, MAT_T));
-                        DEF.set_cell(&m.mat, 2, 1, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 1, 2, num_cast(v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 1, num_cast(-v.sin, MAT_T));
                     },
                     .ROTATE_AROUND_Y_AXIS => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));
                         DEF.set_cell(&m.mat, 2, 2, num_cast(v.cos, MAT_T));
-                        DEF.set_cell(&m.mat, 0, 2, num_cast(v.sin, MAT_T));
-                        DEF.set_cell(&m.mat, 2, 0, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 0, 2, num_cast(-v.sin, MAT_T));
+                        DEF.set_cell(&m.mat, 2, 0, num_cast(v.sin, MAT_T));
                     },
                     .ROTATE_AROUND_Z_AXIS => |v| {
                         DEF.set_cell(&m.mat, 0, 0, num_cast(v.cos, MAT_T));

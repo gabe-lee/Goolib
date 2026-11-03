@@ -21,9 +21,16 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Vec2_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const math = std.math;
 const assert = std.debug.assert;
+const build = @import("builtin");
 
 const Root = @import("./_root.zig");
 const ShapeWinding = Root.CommonTypes.ShapeWinding;
@@ -110,7 +117,7 @@ pub fn define_vec2_type(comptime T: type) type {
             return Vec2{ .x = num_cast(x, T), .y = num_cast(y, T) };
         }
         pub fn new_splat_any(val: anytype) Vec2 {
-            return Vec2{ .vec = num_cast(val, T) };
+            return new_splat(num_cast(val, T));
         }
         pub fn new_from_aspect_ratio(comptime ASPECT_RATIO_MODE: AspectRatio, ratio: T, comptime KNOWN_AXIS: Axis, known_axis_size: T) Vec2 {
             const other_axis: T = switch (comptime KNOWN_AXIS) {
@@ -287,7 +294,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn length_using_squares(self_squared: Vec2) T {
-            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.to_vec()});
             const sum = self_squared.component_sum();
             return num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
         }
@@ -304,7 +311,7 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub fn normalize_using_squares(self: Vec2, self_squared: Vec2) Vec2 {
-            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.vec});
+            assert_with_reason(@reduce(.And, self_squared.to_vec() >= ZERO.to_vec()), @src(), "all components of `self_squared` must be positive or zero, got {any}", .{self_squared.to_vec()});
             const sum = self_squared.component_sum();
             const len = num_cast(@sqrt(MathX.upgrade_to_float(sum, F)), T);
             return self.inverse_scale(len);
@@ -354,7 +361,7 @@ pub fn define_vec2_type(comptime T: type) type {
             const dot_prod = self.dot_product(other);
             const self_length_squared = self.length_squared();
             const self_length_squared_float = MathX.upgrade_to_float(self_length_squared, F);
-            const other_length_squared = self.length_squared();
+            const other_length_squared = other.length_squared();
             const other_length_squared_float = MathX.upgrade_to_float(other_length_squared, F);
             const lengths_multiplied = @sqrt(self_length_squared_float) * @sqrt(other_length_squared_float);
             return num_cast(math.acos(MathX.upgrade_to_float(dot_prod, F) / lengths_multiplied), OUT);
@@ -503,7 +510,7 @@ pub fn define_vec2_type(comptime T: type) type {
             return self.x == 0 and self.y == 0;
         }
         pub fn non_zero(self: Vec2) bool {
-            return self.x != 0 and self.y != 0;
+            return !self.is_zero();
         }
         pub fn reflect(self: Vec2, reflect_normal: Vec2) Vec2 {
             const fix_scale = 2 * ((self.x * reflect_normal.x) + (self.y * reflect_normal.y));
@@ -656,18 +663,18 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         pub const MiterNormsAndOffset = struct {
-            corner_to_prev_norm: Vec2 = .ZERO_ZERO,
-            corner_to_next_norm: Vec2 = .ZERO_ZERO,
-            inner_miter_offset_norm: Vec2 = .ZERO_ZERO,
+            corner_to_prev_norm: Vec2 = .ZERO,
+            corner_to_next_norm: Vec2 = .ZERO,
+            inner_miter_offset_norm: Vec2 = .ZERO,
         };
 
         pub const MiterResult = struct {
-            corner_to_prev_norm: Vec2 = .ZERO_ZERO,
-            corner_to_next_norm: Vec2 = .ZERO_ZERO,
-            inner_miter_offset_norm: Vec2 = .ZERO_ZERO,
-            inner_offset: Vec2 = .ZERO_ZERO,
-            inner_point: Vec2 = .ZERO_ZERO,
-            outer_point: Vec2 = .ZERO_ZERO,
+            corner_to_prev_norm: Vec2 = .ZERO,
+            corner_to_next_norm: Vec2 = .ZERO,
+            inner_miter_offset_norm: Vec2 = .ZERO,
+            inner_offset: Vec2 = .ZERO,
+            inner_point: Vec2 = .ZERO,
+            outer_point: Vec2 = .ZERO,
             infinite: bool = false,
 
             pub fn new_infinite(norms: MiterNormsAndOffset) MiterResult {
@@ -719,7 +726,7 @@ pub fn define_vec2_type(comptime T: type) type {
             const miter_offset_inner = norms.inner_miter_offset_norm.scale(miter_length);
             const miter_outer = corner.subtract(miter_offset_inner);
             return MiterResult{
-                .inner_point = .ZERO_ZERO,
+                .inner_point = .ZERO,
                 .outer_point = miter_outer,
                 .inner_offset = miter_offset_inner,
                 .inner_offset_norm = norms.inner_miter_offset_norm,
@@ -728,9 +735,9 @@ pub fn define_vec2_type(comptime T: type) type {
             };
         }
         pub fn inner_miter_offset_normal_same_line_width(corner: Vec2, prev_point: Vec2, next_point: Vec2) MiterNormsAndOffset {
-            const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.norm_zero_is_zero);
-            const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.norm_zero_is_zero);
-            const miter_offset_norm_inner = delta_prev_norm.lerp(delta_next_norm, 0.5).normalize_may_be_zero(.norm_zero_is_zero);
+            const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+            const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+            const miter_offset_norm_inner = delta_prev_norm.lerp(delta_next_norm, 0.5).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
             return MiterNormsAndOffset{
                 .corner_to_prev_norm = delta_prev_norm,
                 .corner_to_next_norm = delta_next_norm,
@@ -738,8 +745,8 @@ pub fn define_vec2_type(comptime T: type) type {
             };
         }
         pub fn miter_different_widths_no_inner_normal(corner: Vec2, prev_point: Vec2, prev_segment_width: anytype, next_point: Vec2, next_segment_width: anytype) MiterResult {
-            const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.norm_zero_is_zero);
-            const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.norm_zero_is_zero);
+            const delta_prev_norm = prev_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+            const delta_next_norm = next_point.subtract(corner).normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
             const angle_between_segs = delta_prev_norm.angle_between_using_norms(delta_next_norm, f32);
             const sin_angle_between = @sin(angle_between_segs);
             if (angle_between_segs == 0) return MiterResult.new_infinite_seg_norms_only(delta_prev_norm, delta_next_norm);
@@ -747,7 +754,7 @@ pub fn define_vec2_type(comptime T: type) type {
             const len_next_seg = prev_segment_width / sin_angle_between;
             const delta_1 = delta_prev_norm.scale(len_prev_seg);
             const delta_2 = delta_next_norm.scale(len_next_seg);
-            const inner_offset = delta_1 + delta_2;
+            const inner_offset = delta_1.add(delta_2);
             const inner_point = corner.add(inner_offset);
             const outer_point = corner.subtract(inner_offset);
             return MiterResult{
@@ -758,9 +765,11 @@ pub fn define_vec2_type(comptime T: type) type {
                 .outer_point = outer_point,
             };
         }
+        
         pub fn miter_different_widths_with_inner_normal(corner: Vec2, prev_point: Vec2, prev_segment_width: anytype, next_point: Vec2, next_segment_width: anytype) MiterResult {
             var result = corner.miter_different_widths_no_inner_normal(prev_point, prev_segment_width, next_point, next_segment_width);
-            result.inner_miter_offset_norm = result.inner_offset.normalize_may_be_zero(.norm_zero_is_zero);
+            result.inner_miter_offset_norm = result.inner_offset.normalize_may_be_zero(.NORM_ZERO_IS_ZERO);
+            return result;
         }
 
         pub fn apply_transform(self: Vec2, transform: TransformStep) Vec2 {
@@ -790,10 +799,10 @@ pub fn define_vec2_type(comptime T: type) type {
         }
         fn apply_inverse_transform_advanced(self: Vec2, transform: TransformStep, should_translate: ShouldTranslate) Vec2 {
             return switch (transform) {
-                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.add(vec) else self,
+                .TRANSLATE => |vec| if (should_translate == .PREFORM_TRANSLATIONS) self.subtract(vec) else self,
                 .TRANSLATE_X => |x| if (should_translate == .PREFORM_TRANSLATIONS) Vec2{ .x = self.x - x, .y = self.y } else self,
                 .TRANSLATE_Y => |y| if (should_translate == .PREFORM_TRANSLATIONS) Vec2{ .x = self.x, .y = self.y - y } else self,
-                .SCALE => |vec| self.multiply(vec),
+                .SCALE => |vec| self.divide(vec),
                 .SCALE_X => |x| Vec2{ .x = self.x / x, .y = self.y },
                 .SCALE_Y => |y| Vec2{ .x = self.x, .y = self.y / y },
                 .SKEW_X => |ratio| Vec2{ .x = self.x + (-ratio * self.y), .y = self.y },
@@ -869,19 +878,19 @@ pub fn define_vec2_type(comptime T: type) type {
 
         pub fn as_3x1_matrix_column_fill_1(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 1 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_1x3_matrix_row_fill_1(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 1, 3, .ROW_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 1 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_3x1_matrix_column_fill_0(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 0 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
         pub fn as_1x3_matrix_row_fill_0(self: Vec2) Matrix.define_rectangular_RxC_matrix_type(T, 1, 3, .ROW_MAJOR, 0) {
             const raw: [3]T = .{ self.x, self.y, 0 };
-            return .from_vec(raw);
+            return .new(.{raw});
         }
 
         pub fn apply_affine_matrix_transform(self: Vec2, matrix: anytype) Vec2 {
@@ -892,11 +901,12 @@ pub fn define_vec2_type(comptime T: type) type {
         }
 
         fn apply_affine_matrix_transform_advanced(self: Vec2, matrix: anytype, should_translate: ShouldTranslate) Vec2 {
-            const SEFL_DEF = Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0).DEF;
+            const SELF_MAT = Matrix.define_rectangular_RxC_matrix_type(T, 3, 1, .COLUMN_MAJOR, 0);
+            const SELF_DEF = SELF_MAT.DEF;
             const self_as_mat = if (should_translate == .PREFORM_TRANSLATIONS) self.as_3x1_matrix_column_fill_1() else self.as_3x1_matrix_column_fill_0();
-            const DEF = Matrix.assert_anytype_is_matrix_and_get_def(matrix, @src());
+            const DEF = @TypeOf(matrix).DEF;
             assert_with_reason(DEF.COLS == 3 and DEF.ROWS == 3, @src(), "affine matrix to apply MUST be a 3x3 matrix, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
-            const result = Matrix.Advanced.multiply_matrices(DEF, matrix, SEFL_DEF, self_as_mat, T, .COLUMN_MAJOR, 0);
+            const result = Matrix.Advanced.multiply_matrices(DEF, matrix.mat, SELF_DEF, self_as_mat.mat, T, .COLUMN_MAJOR, 0);
             return Vec2{ .x = result[0][0], .y = result[0][1] };
         }
 
