@@ -40,7 +40,7 @@ const assert_allocation_failure = Assert.assert_allocation_failure;
 const invalid_ptr = Utils.invalid_ptr;
 const invalid_ptr_many = Utils.invalid_ptr_many;
 
-pub const MutexMode = enum {
+pub const LockMode = enum {
     NO_LOCKS,
     MASTER_LOCK,
     MASTER_AND_BLOCK_LOCK,
@@ -49,7 +49,7 @@ pub const MutexMode = enum {
 pub const PoolDef = struct {
     ELEM: type,
     IDX: type = u32,
-    LOCK_MODE: MutexMode = .NO_LOCKS,
+    LOCK_MODE: LockMode = .NO_LOCKS,
     /// Unsigned integer type used for each group of slot state bits.
     STATE_UINT: type = usize,
     /// Must be a positive multiple of `@bitSizeOf(STATE_UINT)` so that every state
@@ -323,6 +323,18 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                 .io = init_io,
             };
             self.ensure_free_slots_ignore_pool_locks(init_capacity, ALLOC_MODE.alloc_to_func_alloc(allocator));
+        }
+
+        pub fn clear_all_blocks(self: *Self) void {
+            self.lock_for_write();
+            defer self.unlock_for_write();
+            for (self.blocks[0..self.blocks_cap]) |block| {
+                block.lock_for_write();
+                defer block.unlock_for_write();
+                block.num_free = DATA_BLOCK_SLOT_LENGTH;
+                block.state = @splat(EMPTY_STATE_BLOCK);
+            }
+            self.num_free = (self.blocks_cap * DATA_BLOCK_SLOT_LENGTH);
         }
 
         pub fn uninit(self: *Self, fn_alloc: FuncAlloc) void {

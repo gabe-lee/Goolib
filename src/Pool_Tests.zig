@@ -25,7 +25,7 @@ const testing = std.testing;
 
 const Root = @import("./_root.zig");
 const GlobalMappedKeyPool = Root.Pool.GlobalMappedKeyPool;
-const BitTrackedPool = Root.Pool.BitTrackedPool;
+const BitTrackedBlocksPool = Root.Pool.BitTrackedBlocksPool;
 
 const TestPool = GlobalMappedKeyPool(.{
     .ELEM = u32,
@@ -461,20 +461,20 @@ test "GlobalMappedKeyPool -> separate declarations with separate discriminant ha
     try testing.expectEqual(key_diff.get(), 666);
 }
 
-const BitTrackedBasicPool = BitTrackedPool(.{
+const BitTrackedBasicPool = BitTrackedBlocksPool(.{
     .ELEM = u32,
     .IDX = u32,
     .LOCK_MODE = .NO_LOCKS,
     .SLOTS_PER_BLOCK = 64,
 });
 
-const BitTrackedSimdPool = BitTrackedPool(.{
+const BitTrackedSimdPool = BitTrackedBlocksPool(.{
     .ELEM = u32,
     .IDX = u32,
     .LOCK_MODE = .NO_LOCKS,
     .SLOTS_PER_BLOCK = 192,
 });
-const BitTrackedSimdPoolU16 = BitTrackedPool(.{
+const BitTrackedSimdPoolU16 = BitTrackedBlocksPool(.{
     .ELEM = u32,
     .IDX = u32,
     .STATE_UINT = u16,
@@ -482,7 +482,7 @@ const BitTrackedSimdPoolU16 = BitTrackedPool(.{
     .SLOTS_PER_BLOCK = 192,
 });
 
-const BitTrackedCachedPool = BitTrackedPool(.{
+const BitTrackedCachedPool = BitTrackedBlocksPool(.{
     .ELEM = u32,
     .IDX = u32,
     .LOCK_MODE = .NO_LOCKS,
@@ -490,8 +490,8 @@ const BitTrackedCachedPool = BitTrackedPool(.{
     .ALLOC_MODE = .CACHED_ALLOC,
 });
 
-test "BitTrackedPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
-    const SuperPool = BitTrackedPool(.{
+test "BitTrackedBlocksPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
+    const SuperPool = BitTrackedBlocksPool(.{
         .ELEM = u32,
         .IDX = u32,
         .LOCK_MODE = .NO_LOCKS,
@@ -502,7 +502,7 @@ test "BitTrackedPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
     try testing.expectEqual(@as(usize, 256), SuperPool.DATA_BLOCK_ALIGNMENT);
     try testing.expectEqual(@as(usize, 512), SuperPool.DATA_BLOCK_BYTE_SIZE);
 
-    const OddPool = BitTrackedPool(.{
+    const OddPool = BitTrackedBlocksPool(.{
         .ELEM = u8,
         .IDX = u16,
         .LOCK_MODE = .NO_LOCKS,
@@ -514,12 +514,12 @@ test "BitTrackedPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
     try testing.expectEqual(@as(usize, 256), OddPool.DATA_BLOCK_BYTE_SIZE);
 }
 
-test "BitTrackedPool -> every back-pointer strategy reverses slots correctly" {
+test "BitTrackedBlocksPool -> every back-pointer strategy reverses slots correctly" {
     const N = 400;
 
     inline for (.{ 64, 192 }) |slots_per_block| {
         inline for (.{ .SUPER_ALIGN_AND_MASK, .AUXILLIARY_INDEX_FIELD, .SORTED_BLOCKS_BINARY_SEARCH }) |strategy| {
-            const Pool = BitTrackedPool(.{
+            const Pool = BitTrackedBlocksPool(.{
                 .ELEM = u32,
                 .IDX = u32,
                 .LOCK_MODE = .NO_LOCKS,
@@ -580,7 +580,7 @@ test "BitTrackedPool -> every back-pointer strategy reverses slots correctly" {
     }
 }
 
-test "BitTrackedPool -> claim, write, release, and reuse" {
+test "BitTrackedBlocksPool -> claim, write, release, and reuse" {
     const Slot = *BitTrackedBasicPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH;
 
@@ -638,7 +638,7 @@ test "BitTrackedPool -> claim, write, release, and reuse" {
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> growth keeps values intact and release works across blocks" {
+test "BitTrackedBlocksPool -> growth keeps values intact and release works across blocks" {
     const Slot = *BitTrackedBasicPool.ELEM;
     const N = 200;
     const BLOCK: usize = BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH;
@@ -691,8 +691,8 @@ test "BitTrackedPool -> growth keeps values intact and release works across bloc
     try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> small IDX and ELEM types" {
-    const Pool = BitTrackedPool(.{
+test "BitTrackedBlocksPool -> small IDX and ELEM types" {
+    const Pool = BitTrackedBlocksPool(.{
         .ELEM = u8,
         .IDX = u16,
         .LOCK_MODE = .NO_LOCKS,
@@ -728,7 +728,7 @@ test "BitTrackedPool -> small IDX and ELEM types" {
     try testing.expectEqual(total_capacity, pool.get_num_free());
 }
 
-test "BitTrackedPool -> ensure_free_slots grows without claiming" {
+test "BitTrackedBlocksPool -> ensure_free_slots grows without claiming" {
     const Slot = *BitTrackedBasicPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH;
     const NEEDED = 200;
@@ -752,9 +752,9 @@ test "BitTrackedPool -> ensure_free_slots grows without claiming" {
     try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> val, ptr, and const_ptr iterators visit exactly the used slots" {
+test "BitTrackedBlocksPool -> val, ptr, and const_ptr iterators visit exactly the used slots" {
     inline for (.{ 64, 192 }) |slots_per_block| {
-        const Pool = BitTrackedPool(.{
+        const Pool = BitTrackedBlocksPool(.{
             .ELEM = u32,
             .IDX = u32,
             .LOCK_MODE = .NO_LOCKS,
@@ -833,7 +833,7 @@ test "BitTrackedPool -> val, ptr, and const_ptr iterators visit exactly the used
     }
 }
 
-test "BitTrackedPool -> ignore-lock advanced claim, release, and iterators" {
+test "BitTrackedBlocksPool -> ignore-lock advanced claim, release, and iterators" {
     const Slot = *BitTrackedBasicPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH;
 
@@ -866,7 +866,7 @@ test "BitTrackedPool -> ignore-lock advanced claim, release, and iterators" {
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> CACHED_ALLOC mode works without passing an allocator" {
+test "BitTrackedBlocksPool -> CACHED_ALLOC mode works without passing an allocator" {
     const Slot = *BitTrackedCachedPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedCachedPool.DATA_BLOCK_SLOT_LENGTH;
     const N = 300;
@@ -890,7 +890,7 @@ test "BitTrackedPool -> CACHED_ALLOC mode works without passing an allocator" {
     try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> slot lookup and release variants" {
+test "BitTrackedBlocksPool -> slot lookup and release variants" {
     const Slot = *BitTrackedBasicPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH;
 
@@ -926,9 +926,9 @@ test "BitTrackedPool -> slot lookup and release variants" {
     try testing.expectEqual(@as(u32, @intCast(2 * BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> mutex modes support claim, release, block locks, and iterators" {
+test "BitTrackedBlocksPool -> mutex modes support claim, release, block locks, and iterators" {
     inline for (.{ .MASTER_LOCK, .MASTER_AND_BLOCK_LOCK }) |mutex_mode| {
-        const Pool = BitTrackedPool(.{
+        const Pool = BitTrackedBlocksPool(.{
             .ELEM = u32,
             .IDX = u32,
             .LOCK_MODE = mutex_mode,
@@ -984,7 +984,7 @@ test "BitTrackedPool -> mutex modes support claim, release, block locks, and ite
     }
 }
 
-test "BitTrackedPool -> init, uninit, and re-init" {
+test "BitTrackedBlocksPool -> init, uninit, and re-init" {
     var pool: BitTrackedBasicPool = .{};
     pool.init(16, testing.allocator, {});
     const first = pool.claim_slot(testing.allocator);
@@ -1003,13 +1003,13 @@ test "BitTrackedPool -> init, uninit, and re-init" {
     try testing.expectEqual(@as(u32, 9), second.*);
 }
 
-test "BitTrackedPool -> struct elements" {
+test "BitTrackedBlocksPool -> struct elements" {
     const Struct = struct {
         x: u32,
         y: i32,
         z: f32,
     };
-    const Pool = BitTrackedPool(.{
+    const Pool = BitTrackedBlocksPool(.{
         .ELEM = Struct,
         .IDX = u32,
         .LOCK_MODE = .NO_LOCKS,
@@ -1037,13 +1037,13 @@ test "BitTrackedPool -> struct elements" {
     for (slots) |slot| pool.release_slot(slot);
 }
 
-test "BitTrackedPool -> struct elements (u16 state int)" {
+test "BitTrackedBlocksPool -> struct elements (u16 state int)" {
     const Struct = struct {
         x: u32,
         y: i32,
         z: f32,
     };
-    const Pool = BitTrackedPool(.{
+    const Pool = BitTrackedBlocksPool(.{
         .ELEM = Struct,
         .IDX = u32,
         .STATE_UINT = u16,
@@ -1072,8 +1072,8 @@ test "BitTrackedPool -> struct elements (u16 state int)" {
     for (slots) |slot| pool.release_slot(slot);
 }
 
-test "BitTrackedPool -> u8 state int supports more slots than maxInt(u8)" {
-    const Pool = BitTrackedPool(.{
+test "BitTrackedBlocksPool -> u8 state int supports more slots than maxInt(u8)" {
+    const Pool = BitTrackedBlocksPool(.{
         .ELEM = u32,
         .IDX = u32,
         .STATE_UINT = u8,
@@ -1103,7 +1103,7 @@ test "BitTrackedPool -> u8 state int supports more slots than maxInt(u8)" {
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> randomized claims and releases match a model" {
+test "BitTrackedBlocksPool -> randomized claims and releases match a model" {
     const Slot = *BitTrackedSimdPool.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedSimdPool.DATA_BLOCK_SLOT_LENGTH;
 
@@ -1159,7 +1159,7 @@ test "BitTrackedPool -> randomized claims and releases match a model" {
     try testing.expectEqual(@as(u32, @intCast(expected_blocks * BLOCK_SLOTS)), pool.get_num_free());
 }
 
-test "BitTrackedPool -> randomized claims and releases match a model (u16 state int)" {
+test "BitTrackedBlocksPool -> randomized claims and releases match a model (u16 state int)" {
     const Slot = *BitTrackedSimdPoolU16.ELEM;
     const BLOCK_SLOTS: usize = BitTrackedSimdPoolU16.DATA_BLOCK_SLOT_LENGTH;
 

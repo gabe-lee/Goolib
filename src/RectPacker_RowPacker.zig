@@ -28,7 +28,9 @@ const Root = @import("./_root.zig");
 const Cast = Root.Cast;
 const MathX = Root.Math;
 const ListFull = Root.ListSlice.ListFullDefinition;
-const Pool = Root.Pool.Pool;
+// const Pool = Root.Pool.Pool;
+const BitTrackedBlocksPoolModule = Root.Pool.BitTrackedBlocksModule;
+const BitBlockPool = Root.Pool.BitTrackedBlocksPool;
 const AABB2 = Root.AABB2;
 const Rect2 = Root.Rect2;
 const Vec2 = Root.Vec2;
@@ -39,6 +41,10 @@ const CachedAllocMode = Root.CommonTypes.CachedAllocMode;
 const HashMapModule = Root.HashMap.SwissTableHashMapModule;
 const HashMap = HashMapModule.SwissHashMap;
 const HashMapOverrides = HashMapModule.Overrides;
+const LockMode = BitTrackedBlocksPoolModule.LockMode;
+const BackPointStrategy = BitTrackedBlocksPoolModule.BackPointStrategy;
+const RwLock = std.Io.RwLock;
+const Io = std.Io;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -58,6 +64,17 @@ pub const ReleaseMode = enum {
     CLAIM_AND_RELEASE,
 };
 
+pub const PackedDef = struct {
+    SIZE_TYPE: type,
+    IDX: type = u32,
+    RELEASE_MODE: ReleaseMode = .CLAIM_AND_RELEASE,
+    ALLOC: CachedAllocMode = .CACHED_ALLOC,
+    LOCK_MODE: LockMode = .NO_LOCKS,
+    HOLE_POOL_BACK_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
+    HOLE_POOL_SLOTS_PER_BLOCK: type = 64,
+    HOLE_POOL_STATE_UINT: type = usize,
+};
+
 /// Packs rectangles into horizontal rows (shelves), filling each row from smaller x values
 /// to larger x values, and starting each new row at a larger y position.
 ///
@@ -71,29 +88,36 @@ pub const ReleaseMode = enum {
 /// When constructed with `.CLAIM_AND_RELEASE`, a released rect becomes a hole in its
 /// row and later claims will fill holes before extending the row's unused tail.
 /// Individual live rects cannot be moved or resized.
-pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MODE: ReleaseMode, comptime ALLOC: CachedAllocMode) type {
+pub fn RowPacker(comptime DEF: PackedDef) type {
     return struct {
         const Self = @This();
-        pub const AABB = AABB2.define_aabb2_type(T_SIZE);
-        pub const Rect = Rect2.define_rect2_type(T_SIZE);
-        pub const Vec = Vec2.define_vec2_type(T_SIZE);
+        const SIZE_TYPE = DEF.SIZE_TYPE;
+        const IDX = DEF.IDX;
+        const RELEASE_MODE = DEF.RELEASE_MODE;
+        const ALLOC = DEF.ALLOC;
+        const LOCK_MODE = DEF.LOCK_MODE;
+        const HOLE_POOL_BACK_STRATEGY = DEF.HOLE_POOL_BACK_STRATEGY;
+        const HOLE_POOL_SLOTS_PER_BLOCK = DEF.HOLE_POOL_SLOTS_PER_BLOCK;
+        const HOLE_POOL_STATE_UINT = DEF.HOLE_POOL_STATE_UINT;
+        pub const AABB = AABB2.define_aabb2_type(SIZE_TYPE);
+        pub const Rect = Rect2.define_rect2_type(SIZE_TYPE);
+        pub const Vec = Vec2.define_vec2_type(SIZE_TYPE);
         const RowList = ListFull(ConstrainedRow, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
         const CAN_RELEASE = RELEASE_MODE == .CLAIM_AND_RELEASE;
-        const HolePool = Pool(.{
-            .LIST_DEF = .{
-                .ELEM = Hole,
-                .FIELD_LAYOUT = .WHOLE_STRUCTS,
-                .IDX = IDX,
-                .INDEX_LAYOUT = .SERIAL_INDEXES,
-                .OWNERSHIP = .OWNED_ALLOCATED,
-            },
-            .BLOCK_SIZE = 64,
-            .THREADING = .SINGLE_THREADED,
-        }, Hole{});
-        const MAX_HEIGHT: T_SIZE = MathX.max_value(T_SIZE);
+        const MASTER_LOCK = LOCK_MODE != .NO_LOCKS;
+        const HolePool = BitBlockPool(.{
+            .ELEM = Hole,
+            .ALLOC_MODE = .MANUAL_ALLOC,
+            .BACK_POINT_STRATEGY = HOLE_POOL_BACK_STRATEGY,
+            .IDX = IDX,
+            .LOCK_MODE = LOCK_MODE,
+            .SLOTS_PER_BLOCK = HOLE_POOL_SLOTS_PER_BLOCK,
+            .STATE_UINT = HOLE_POOL_STATE_UINT,
+        });
+        const MAX_HEIGHT: SIZE_TYPE = MathX.max_value(SIZE_TYPE);
 
         inline fn doubled_threshold(value: ThresholdVal) ThresholdVal {
-            return switch (@typeInfo(T_SIZE)) {
+            return switch (@typeInfo(SIZE_TYPE)) {
                 .int => ThresholdVal{
                     .flat_tolerance = value.flat_tolerance *| 2,
                     .percent = value.percent * 0.5,
@@ -108,18 +132,20 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
 
         cached_alloc: ALLOC.CachedAlloc() = ALLOC.CACHED_ALLOC_DEFAULT(),
         constrained_rows: RowList = .{},
-        holes_pool: if (CAN_RELEASE) HolePool else void = if (CAN_RELEASE) HolePool{ .alloc = DummyAlloc.allocator_panic } else {},
+        holes_pool: if (CAN_RELEASE) HolePool else void = if (CAN_RELEASE) HolePool{} else {},
         unconstrained_row: UnconstrainedRow = .{},
         full_region: Rect = .{ .pos = .{}, .size = .{} },
         default_height_fit_threshold: ThresholdVal = .threshold_val(0.9, 4),
-        total_wasted_area: T_SIZE = 0,
+        total_wasted_area: SIZE_TYPE = 0,
         claim_count: IDX = 0,
+        lock: if (MASTER_LOCK) RwLock else void = if (MASTER_LOCK) RwLock.init else {},
+        io: if (MASTER_LOCK) Io else void = if (MASTER_LOCK) undefined else {},
 
         pub const ThresholdVal = struct {
             percent: f32 = 0.9,
-            flat_tolerance: T_SIZE = 10,
+            flat_tolerance: SIZE_TYPE = 10,
 
-            pub fn threshold_val(percent: f32, flat_tolerance: T_SIZE) ThresholdVal {
+            pub fn threshold_val(percent: f32, flat_tolerance: SIZE_TYPE) ThresholdVal {
                 return ThresholdVal{
                     .percent = percent,
                     .flat_tolerance = flat_tolerance,
@@ -131,33 +157,29 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             assert_with_reason(CAN_RELEASE, src, "cannot release rects when packer defined as .CLAIM_ONLY", .{});
         }
 
-        pub fn init(cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator) Self {
-            var self = Self{
-                .cached_alloc = ALLOC.alloc_to_cached_alloc(alloc),
-                .constrained_rows = RowList.allocate_new(cap, alloc),
-                .unconstrained_row = UnconstrainedRow.init(region),
-                .full_region = region,
-                .default_height_fit_threshold = default_height_fit_threshold,
-                .total_wasted_area = 0,
-                .claim_count = 0,
-            };
-            if (CAN_RELEASE) {
-                self.holes_pool = HolePool{ .alloc = alloc };
+        pub fn init(self: *Self, row_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+            self.cached_alloc = ALLOC.alloc_to_cached_alloc(alloc);
+            self.constrained_rows = RowList.allocate_new(row_cap, alloc);
+            self.unconstrained_row = UnconstrainedRow.init(region);
+            self.full_region = region;
+            self.default_height_fit_threshold = default_height_fit_threshold;
+            self.total_wasted_area = 0;
+            self.claim_count = 0;
+            if (comptime CAN_RELEASE) {
+                self.holes_pool.init(hole_cap, alloc, io);
             }
             return self;
         }
-        pub fn init_empty(region: Rect, default_height_fit_threshold: ThresholdVal, alloc: ALLOC.FuncParamAlloc()) Self {
-            var self = Self{
-                .cached_alloc = alloc,
-                .constrained_rows = RowList{},
-                .unconstrained_row = UnconstrainedRow.init(region),
-                .full_region = region,
-                .default_height_fit_threshold = default_height_fit_threshold,
-                .total_wasted_area = 0,
-                .claim_count = 0,
-            };
-            if (CAN_RELEASE) {
-                self.holes_pool = HolePool{ .alloc = alloc };
+        pub fn init_empty(self: *Self, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+            self.cached_alloc = ALLOC.alloc_to_cached_alloc(alloc);
+            self.constrained_rows = RowList{};
+            self.unconstrained_row = UnconstrainedRow.init(region);
+            self.full_region = region;
+            self.default_height_fit_threshold = default_height_fit_threshold;
+            self.total_wasted_area = 0;
+            self.claim_count = 0;
+            if (comptime CAN_RELEASE) {
+                self.holes_pool.init(0, alloc, io);
             }
             return self;
         }
@@ -167,15 +189,15 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             self.unconstrained_row = UnconstrainedRow.init(self.full_region);
             self.total_wasted_area = 0;
             self.claim_count = 0;
-            if (CAN_RELEASE) {
-                self.holes_pool.clear_retain_blocks();
+            if (comptime CAN_RELEASE) {
+                self.holes_pool.clear_all_blocks();
             }
         }
 
         pub fn free(self: *Self, alloc: ALLOC.FuncParamAlloc()) void {
             self.constrained_rows.free_if_non_zero(ALLOC.get_alloc(alloc, self.cached_alloc));
-            if (CAN_RELEASE) {
-                self.holes_pool.free_pool();
+            if (comptime CAN_RELEASE) {
+                self.holes_pool.uninit(ALLOC.get_alloc(alloc, self.cached_alloc));
             }
             self.* = .{};
         }
@@ -191,7 +213,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             pub inline fn default_threshold() Threshold {
                 return Threshold{ .DEFAULT_THRESHOLD = {} };
             }
-            pub inline fn custom_threshold(percent: f32, flat_tolerance: T_SIZE) Threshold {
+            pub inline fn custom_threshold(percent: f32, flat_tolerance: SIZE_TYPE) Threshold {
                 return Threshold{ .CUSTOM_THRESHOLD = .threshold_val(percent, flat_tolerance) };
             }
         };
@@ -312,10 +334,10 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             row_idx: IDX = 0,
             size: Vec = .{},
             rotated: bool = false,
-            waste: T_SIZE = 0,
+            waste: SIZE_TYPE = 0,
             hole: ?*Hole = null,
 
-            inline fn consider(self: *Candidate, waste_mode: WasteMode, kind: RowKind, row_idx: IDX, claim_size: Vec, rotated: bool, candidate_waste: T_SIZE, hole: ?*Hole) void {
+            inline fn consider(self: *Candidate, waste_mode: WasteMode, kind: RowKind, row_idx: IDX, claim_size: Vec, rotated: bool, candidate_waste: SIZE_TYPE, hole: ?*Hole) void {
                 if (self.kind == .NONE or (waste_mode == .LEAST_WASTE and candidate_waste < self.waste)) {
                     self.* = .{
                         .kind = kind,
@@ -407,7 +429,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
-            const candidate_waste: T_SIZE = if (waste_mode == .LEAST_WASTE) hole.wasted_area_if_claimed(claim_size) else 0;
+            const candidate_waste: SIZE_TYPE = if (waste_mode == .LEAST_WASTE) hole.wasted_area_if_claimed(claim_size) else 0;
             best_any.consider(waste_mode, row_kind, row_idx, claim_size, rotated, candidate_waste, hole);
             if (threshold_value != null) {
                 best_threshold.consider(waste_mode, row_kind, row_idx, claim_size, rotated, candidate_waste, hole);
@@ -424,7 +446,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
-            const candidate_waste: T_SIZE = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
+            const candidate_waste: SIZE_TYPE = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
             best_any.consider(waste_mode, .UNCONSTRAINED, row_idx, claim_size, rotated, candidate_waste, null);
             if (threshold_value) |t| {
                 if (row.new_height_is_within_threshold(t, claim_size.y)) {
@@ -442,7 +464,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             best_threshold: *Candidate,
             best_any: *Candidate,
         ) void {
-            const candidate_waste: T_SIZE = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
+            const candidate_waste: SIZE_TYPE = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(claim_size) else 0;
             best_any.consider(waste_mode, .CONSTRAINED, row_idx, claim_size, rotated, candidate_waste, null);
             if (threshold_value) |t| {
                 if (row.new_height_is_within_threshold(t, claim_size.y)) {
@@ -684,27 +706,27 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
 
         const ConstrainedRow = struct {
             pos: Vec = .{},
-            width: T_SIZE = 0,
-            used_width: T_SIZE = 0,
-            min_height: T_SIZE = 0,
-            max_height: T_SIZE = 0,
+            width: SIZE_TYPE = 0,
+            used_width: SIZE_TYPE = 0,
+            min_height: SIZE_TYPE = 0,
+            max_height: SIZE_TYPE = 0,
             num_claimed: IDX = 0,
             next_hole: ?*Hole = null,
 
-            inline fn can_fit_width(self: ConstrainedRow, width: T_SIZE) bool {
+            inline fn can_fit_width(self: ConstrainedRow, width: SIZE_TYPE) bool {
                 return self.width >= width;
             }
-            inline fn can_fit_height(self: ConstrainedRow, height: T_SIZE) bool {
+            inline fn can_fit_height(self: ConstrainedRow, height: SIZE_TYPE) bool {
                 return self.max_height >= height;
             }
             inline fn can_fit_size(self: ConstrainedRow, size: Vec) bool {
                 return self.width >= size.x and self.max_height >= size.y;
             }
-            inline fn claim_pos(self: *ConstrainedRow, size: Vec, total_waste_ptr: *T_SIZE) Vec {
+            inline fn claim_pos(self: *ConstrainedRow, size: Vec, total_waste_ptr: *SIZE_TYPE) Vec {
                 const waste = self.wasted_area_if_claimed(size);
                 return self.claim_pos_known_waste(size, waste, total_waste_ptr);
             }
-            inline fn claim_pos_known_waste(self: *ConstrainedRow, size: Vec, waste: T_SIZE, total_waste_pointer: *T_SIZE) Vec {
+            inline fn claim_pos_known_waste(self: *ConstrainedRow, size: Vec, waste: SIZE_TYPE, total_waste_pointer: *SIZE_TYPE) Vec {
                 const pos = self.pos;
                 self.pos.x += size.x;
                 self.width -= size.x;
@@ -714,7 +736,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
                 self.num_claimed += 1;
                 return pos;
             }
-            fn new_height_is_within_threshold(self: ConstrainedRow, threshold: ThresholdVal, height: T_SIZE) bool {
+            fn new_height_is_within_threshold(self: ConstrainedRow, threshold: ThresholdVal, height: SIZE_TYPE) bool {
                 if (height > self.max_height) return false;
                 const new_min = @min(self.min_height, height);
                 const new_min_f: f32 = num_cast(new_min, f32);
@@ -723,7 +745,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
                 if (within_percent) return true;
                 return self.max_height - new_min <= threshold.flat_tolerance;
             }
-            fn wasted_area_if_claimed(self: ConstrainedRow, size: Vec) T_SIZE {
+            fn wasted_area_if_claimed(self: ConstrainedRow, size: Vec) SIZE_TYPE {
                 return (self.max_height - size.y) * size.x;
             }
             fn release_position(self: *ConstrainedRow, pos: Vec, size: Vec, hole: *Hole, hole_pool: *HolePool) void {
@@ -758,11 +780,11 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
 
         const UnconstrainedRow = struct {
             pos: Vec = .{},
-            width: T_SIZE = 0,
-            used_width: T_SIZE = 0,
-            min_height: T_SIZE = 0,
-            max_height: T_SIZE = 0,
-            true_max_height: T_SIZE = 0,
+            width: SIZE_TYPE = 0,
+            used_width: SIZE_TYPE = 0,
+            min_height: SIZE_TYPE = 0,
+            max_height: SIZE_TYPE = 0,
+            true_max_height: SIZE_TYPE = 0,
             num_claimed: IDX = 0,
             next_hole: ?*Hole = null,
 
@@ -785,11 +807,11 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             inline fn can_fit_size_on_new_row(self: UnconstrainedRow, size: Vec) bool {
                 return self.width + self.used_width >= size.x and self.true_max_height - self.max_height >= size.y;
             }
-            inline fn claim_pos(self: *UnconstrainedRow, size: Vec, total_waste_ptr: *T_SIZE) Vec {
+            inline fn claim_pos(self: *UnconstrainedRow, size: Vec, total_waste_ptr: *SIZE_TYPE) Vec {
                 const waste = self.wasted_area_if_claimed(size);
                 return self.claim_pos_known_waste(size, waste, total_waste_ptr);
             }
-            inline fn claim_pos_known_waste(self: *UnconstrainedRow, size: Vec, waste: T_SIZE, total_waste_ptr: *T_SIZE) Vec {
+            inline fn claim_pos_known_waste(self: *UnconstrainedRow, size: Vec, waste: SIZE_TYPE, total_waste_ptr: *SIZE_TYPE) Vec {
                 const pos = self.pos;
                 self.pos.x += size.x;
                 self.width -= size.x;
@@ -801,16 +823,16 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
                 return pos;
             }
 
-            fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: ThresholdVal, height: T_SIZE) bool {
-                const new_min: T_SIZE = @min(self.min_height, height);
-                const new_max: T_SIZE = @max(self.max_height, height);
+            fn new_height_is_within_threshold(self: UnconstrainedRow, threshold: ThresholdVal, height: SIZE_TYPE) bool {
+                const new_min: SIZE_TYPE = @min(self.min_height, height);
+                const new_max: SIZE_TYPE = @max(self.max_height, height);
                 const new_min_f: f32 = num_cast(new_min, f32);
                 const new_max_f: f32 = num_cast(new_max, f32);
                 const within_percent = (new_min_f / new_max_f) >= threshold.percent;
                 if (within_percent) return true;
                 return (new_max - new_min) <= threshold.flat_tolerance;
             }
-            fn wasted_area_if_claimed(self: UnconstrainedRow, size: Vec) T_SIZE {
+            fn wasted_area_if_claimed(self: UnconstrainedRow, size: Vec) SIZE_TYPE {
                 if (size.y > self.max_height) {
                     const delta = size.y - self.max_height;
                     return delta * self.used_width;
@@ -877,7 +899,7 @@ pub fn RowPacker(comptime T_SIZE: type, comptime IDX: type, comptime RELEASE_MOD
             rect: Rect = .{},
             next: ?*Hole = null,
 
-            fn wasted_area_if_claimed(self: Hole, size: Vec) T_SIZE {
+            fn wasted_area_if_claimed(self: Hole, size: Vec) SIZE_TYPE {
                 return (self.rect.size.x - size.x) * self.rect.size.y + (self.rect.size.y - size.y) * size.x;
             }
         };

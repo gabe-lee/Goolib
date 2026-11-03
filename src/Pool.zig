@@ -40,7 +40,7 @@ pub const Simple = @import("./Pool_Simple.zig");
 pub const BitTrackedBlocksModule = @import("./Pool_BitTrackedBlocksPool.zig");
 pub const MappedKeyModule = @import("./Pool_MappedKeyPool.zig");
 pub const GlobalMappedKeyPool = MappedKeyModule.GlobalMappedKeyPool;
-pub const BitTrackedPool = BitTrackedBlocksModule.BitTrackedPool;
+pub const BitTrackedBlocksPool = BitTrackedBlocksModule.BitTrackedPool;
 
 comptime {
     if (build.is_test) {
