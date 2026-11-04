@@ -84,13 +84,6 @@ pub const IterSlotMode = enum {
     CONST_PTR,
 };
 
-/// Smallest power of two that is >= `n` and at least 2. The lower bound of 2
-/// is required so that masking an address actually clears at least one bit.
-fn ceil_pow2_at_least_2(comptime n: usize) usize {
-    if (n <= 2) return 2;
-    return @as(usize, 1) << @intCast(std.math.log2_int_ceil(usize, n));
-}
-
 pub const GlobalDef = struct {
     /// Max number of elements per type catagory
     MAX_NUM_ELEMS: PowerOf2 = ._4_294_967_296,
@@ -190,8 +183,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         StateAssert._with_reason(was_used, @src(), "element was not in a used state, key is invalid", .{});
                     }
                 }
-                /// Returns whether this key still refers to a live (claimed) element.
-                /// Unlike `get`/`set`, this never asserts on an invalid key.
+
                 pub fn is_valid(self: KeySelf) bool {
                     POOL_LOCK_MODE.lock_for_read_io(if (POOL_LOCK_MODE.has_lock()) &POOL.pool_lock else {}, io);
                     defer POOL_LOCK_MODE.unlock_for_read_io(if (POOL_LOCK_MODE.has_lock()) &POOL.pool_lock else {}, io);
@@ -557,3 +549,5 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
         }
     };
 }
+
+//TODO //CHECKPOINT iterators and field/ptr access
