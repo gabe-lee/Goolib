@@ -36,7 +36,7 @@ const assert_with_reason = Assert.assert_with_reason;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Root.Cast.num_cast;
 
-pub const MutexMode = enum {
+pub const LockMode = enum {
     NO_LOCKS,
     MASTER_LOCK,
     MASTER_AND_BLOCK_LOCK,
@@ -45,7 +45,7 @@ pub const MutexMode = enum {
 pub const PoolDef = struct {
     ELEM: type,
     IDX: type = u32,
-    LOCK_MODE: MutexMode = .NO_LOCKS,
+    LOCK_MODE: LockMode = .NO_LOCKS,
     LOCK_BLOCK_COVERAGE: comptime_int = 64,
     GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
 };
@@ -357,6 +357,14 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 unlock_pool_and_index_for_read(mapping_lock);
                 return val;
             }
+            pub fn get_cast(self: Key, comptime OUT: type) OUT {
+                self.assert_lockable_idx(@src());
+                const mapping_lock = lock_pool_and_index_for_read(self.idx);
+                self.assert_valid_internal(@src());
+                const val: OUT = @as(*OUT, @ptrCast(@alignCast(&vals[maps[self.idx].idx]))).*;
+                unlock_pool_and_index_for_read(mapping_lock);
+                return val;
+            }
             pub fn get_field(self: Key, comptime field: FieldEnum) FieldType(field) {
                 assert_field_access(@src());
                 self.assert_lockable_idx(@src());
@@ -388,6 +396,13 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 const mapping_lock = lock_pool_for_read_and_index_for_write(self.idx);
                 self.assert_valid_internal(@src());
                 vals[maps[self.idx].idx] = val;
+                unlock_pool_for_read_and_index_for_write(mapping_lock);
+            }
+            pub fn set_cast(self: Key, val: anytype) void {
+                self.assert_lockable_idx(@src());
+                const mapping_lock = lock_pool_for_read_and_index_for_write(self.idx);
+                self.assert_valid_internal(@src());
+                vals[maps[self.idx].idx] = @as(*const ELEM, @ptrCast(@alignCast(&val))).*;
                 unlock_pool_for_read_and_index_for_write(mapping_lock);
             }
             pub fn set_field(self: Key, comptime field: FieldEnum, val: FieldType(field)) void {
