@@ -1214,3 +1214,428 @@ test "BitTrackedBlocksPool -> randomized claims and releases match a model (u16 
     const expected_blocks = (max_live + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
     try testing.expectEqual(@as(u32, @intCast(expected_blocks * BLOCK_SLOTS)), pool.get_num_free());
 }
+
+const GlobalStructElem = struct {
+    x: u32,
+    y: i32,
+    z: f32,
+};
+
+const GlobalBitTrackedPool = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .POOL_DEFS = &.{
+        .{ .TYPE = u32 },
+        .{ .TYPE = u64 },
+        .{ .TYPE = GlobalStructElem },
+    },
+});
+
+const GlobalBitTrackedPoolU8State = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .POOL_DEFS = &.{
+        .{ .TYPE = u32, .STATE_UINT = u8, .SLOTS_PER_BLOCK = ._256 },
+    },
+});
+
+const GlobalBitTrackedPoolLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .POOL_LOCK_MODE = .MUTEX,
+    .BLOCK_LOCK_MODE = .RW_MUTEX,
+    .ELEM_LOCK_MODE = .MUTEX,
+    .POOL_DEFS = &.{
+        .{ .TYPE = u32 },
+    },
+});
+
+test "GlobalMultiTypeBitTrackedPool -> each type has independent storage" {
+    const Pool = GlobalBitTrackedPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    Pool.init(u64, 0);
+    Pool.init(GlobalStructElem, 0);
+    defer {
+        Pool.uninit(u32);
+        Pool.uninit(u64);
+        Pool.uninit(GlobalStructElem);
+    }
+
+    try testing.expectEqual(@as(u32, 0), @as(u32, Pool.get_num_free(u32)));
+
+    const a = Pool.claim(u32);
+    const b = Pool.claim(u64);
+    const c = Pool.claim(GlobalStructElem);
+
+    try testing.expect(a.is_valid());
+    try testing.expect(b.is_valid());
+    try testing.expect(c.is_valid());
+    try testing.expectEqual(@as(u32, 63), @as(u32, Pool.get_num_free(u32)));
+    try testing.expectEqual(@as(u32, 63), @as(u32, Pool.get_num_free(u64)));
+    try testing.expectEqual(@as(u32, 63), @as(u32, Pool.get_num_free(GlobalStructElem)));
+
+    a.set(11);
+    b.set(@as(u64, 0x1_0000_0002));
+    c.set(.{ .x = 3, .y = -4, .z = 5.5 });
+
+    try testing.expectEqual(@as(u32, 11), a.get());
+    try testing.expectEqual(@as(u64, 0x1_0000_0002), b.get());
+    try testing.expectEqual(@as(u32, 3), c.get().x);
+    try testing.expectEqual(@as(i32, -4), c.get().y);
+    try testing.expectEqual(@as(f32, 5.5), c.get().z);
+
+    a.release();
+    try testing.expect(!a.is_valid());
+    try testing.expect(b.is_valid());
+    try testing.expect(c.is_valid());
+    try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(u32)));
+    try testing.expectEqual(@as(u32, 63), @as(u32, Pool.get_num_free(u64)));
+    try testing.expectEqual(@as(u64, 0x1_0000_0002), b.get());
+    try testing.expectEqual(@as(u32, 3), c.get().x);
+
+    b.release();
+    c.release();
+    try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(u32)));
+    try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(u64)));
+    try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(GlobalStructElem)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> release bumps generation and invalidates stale keys" {
+    const Pool = GlobalBitTrackedPool;
+    const Key = Pool.Key(u32);
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 1);
+    defer Pool.uninit(u32);
+
+    const old: Key = Pool.claim(u32);
+    old.set(5);
+    const old_gen = old.gen;
+    try testing.expect(old.is_valid());
+
+    old.release();
+    try testing.expect(!old.is_valid());
+
+    const new: Key = Pool.claim(u32);
+    new.set(9);
+
+    // The freed slot is the lowest set state bit, so it is reused first.
+    try testing.expectEqual(old.block_idx, new.block_idx);
+    try testing.expectEqual(old.elem_idx, new.elem_idx);
+    try testing.expectEqual(@as(@TypeOf(old_gen), old_gen +% 1), new.gen);
+
+    try testing.expect(new.is_valid());
+    try testing.expect(!old.is_valid());
+    try testing.expectEqual(@as(u32, 9), new.get());
+
+    new.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> clear_all_blocks invalidates keys and resets free count" {
+    const Pool = GlobalBitTrackedPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 4);
+    defer Pool.uninit(u32);
+
+    const a = Pool.claim(u32);
+    const b = Pool.claim(u32);
+    a.set(1);
+    b.set(2);
+    try testing.expectEqual(@as(u32, 62), @as(u32, Pool.get_num_free(u32)));
+
+    Pool.clear_all_blocks(u32);
+    try testing.expect(!a.is_valid());
+    try testing.expect(!b.is_valid());
+    try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(u32)));
+
+    const c = Pool.claim(u32);
+    c.set(3);
+    try testing.expect(c.is_valid());
+    try testing.expectEqual(@as(u32, 3), c.get());
+    try testing.expect(!a.is_valid());
+    try testing.expectEqual(@as(u32, 63), @as(u32, Pool.get_num_free(u32)));
+
+    c.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> growth keeps values intact across blocks" {
+    const Pool = GlobalBitTrackedPool;
+    const Key = Pool.Key(u32);
+    const N = 150;
+    const BLOCK_SLOTS = 64;
+    const EXPECTED_BLOCKS = (N + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [N]Key = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i + 1));
+    }
+
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS - N)), @as(u32, Pool.get_num_free(u32)));
+    for (keys, 0..) |key, i| {
+        try testing.expect(key.is_valid());
+        try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+    }
+
+    for (&keys, 0..) |*key, i| {
+        if (i % 2 == 0) key.release();
+    }
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS - (N / 2))), @as(u32, Pool.get_num_free(u32)));
+
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 1) {
+            try testing.expect(key.is_valid());
+            try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+        } else {
+            try testing.expect(!key.is_valid());
+        }
+    }
+
+    var extra: [N / 2]Key = undefined;
+    for (&extra, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(1000 + i));
+    }
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS - N)), @as(u32, Pool.get_num_free(u32)));
+    for (extra, 0..) |key, i| {
+        try testing.expectEqual(@as(u32, @intCast(1000 + i)), key.get());
+    }
+
+    for (&keys, 0..) |*key, i| {
+        if (i % 2 == 1) key.release();
+    }
+    for (extra) |key| key.release();
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), @as(u32, Pool.get_num_free(u32)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> ensure_free_slots and ignore-lock variants" {
+    const Pool = GlobalBitTrackedPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    Pool.ensure_free_slots(u32, 200);
+    try testing.expectEqual(@as(u32, 256), @as(u32, Pool.get_num_free(u32)));
+
+    Pool.ensure_free_slots_ignore_pool_locks(u32, 300);
+    try testing.expectEqual(@as(u32, 320), @as(u32, Pool.get_num_free_ignore_pool_locks(u32)));
+
+    const a = Pool.claim_slot_advanced(u32, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS);
+    a.set(77);
+    try testing.expectEqual(@as(u32, 77), a.get());
+    try testing.expectEqual(@as(u32, 319), @as(u32, Pool.get_num_free(u32)));
+
+    a.release_advanced(.IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS, .IGNORE_ELEM_LOCKS);
+    try testing.expect(!a.is_valid());
+    try testing.expectEqual(@as(u32, 320), @as(u32, Pool.get_num_free(u32)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> init, uninit, and re-init invalidate old keys" {
+    const Pool = GlobalBitTrackedPool;
+    Pool.init_global(testing.allocator, {});
+
+    Pool.init(u32, 1);
+    const first = Pool.claim(u32);
+    first.set(7);
+    try testing.expect(first.is_valid());
+    try testing.expectEqual(@as(u32, 7), first.get());
+    Pool.uninit(u32);
+    try testing.expect(!first.is_valid());
+
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+    const second = Pool.claim(u32);
+    second.set(9);
+    try testing.expect(second.is_valid());
+    try testing.expectEqual(@as(u32, 9), second.get());
+    try testing.expect(!first.is_valid());
+
+    second.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> u8 state int with SIMD-sized state array" {
+    const Pool = GlobalBitTrackedPoolU8State;
+    const Key = Pool.Key(u32);
+    const N = 700;
+    const BLOCK_SLOTS = 256;
+    const EXPECTED_BLOCKS = (N + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [N]Key = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i + 1));
+    }
+
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS - N)), @as(u32, Pool.get_num_free(u32)));
+    for (keys, 0..) |key, i| {
+        try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+        try testing.expect(key.is_valid());
+    }
+
+    for (keys, 0..) |key, i| {
+        if (i % 3 == 0) key.release();
+    }
+    for (keys, 0..) |key, i| {
+        if (i % 3 == 0) {
+            try testing.expect(!key.is_valid());
+        } else {
+            try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+        }
+    }
+
+    for (keys, 0..) |key, i| {
+        if (i % 3 != 0) key.release();
+    }
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), @as(u32, Pool.get_num_free(u32)));
+}
+
+const GlobalBitTrackedPoolSpinLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .POOL_LOCK_MODE = .RW_SPIN_LOCK,
+    .BLOCK_LOCK_MODE = .SPIN_LOCK,
+    .ELEM_LOCK_MODE = .SPIN_LOCK,
+    .POOL_DEFS = &.{
+        .{ .TYPE = u32 },
+    },
+});
+
+test "GlobalMultiTypeBitTrackedPool -> mutex pool, block, and element locks" {
+    const Pool = GlobalBitTrackedPoolLocked;
+
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+
+    Pool.init_global(testing.allocator, threaded.io());
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [200]Pool.Key(u32) = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i));
+    }
+
+    try testing.expectEqual(@as(u32, @intCast(4 * 64 - keys.len)), @as(u32, Pool.get_num_free(u32)));
+    for (keys, 0..) |key, i| {
+        try testing.expect(key.is_valid());
+        try testing.expectEqual(@as(u32, @intCast(i)), key.get());
+    }
+
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 0) key.release();
+    }
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 0) {
+            try testing.expect(!key.is_valid());
+        } else {
+            try testing.expectEqual(@as(u32, @intCast(i)), key.get());
+        }
+    }
+
+    Pool.clear_all_blocks(u32);
+    for (keys) |key| try testing.expect(!key.is_valid());
+
+    const reused = Pool.claim(u32);
+    reused.set(1234);
+    try testing.expectEqual(@as(u32, 1234), reused.get());
+    reused.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> spin locks" {
+    const Pool = GlobalBitTrackedPoolSpinLocked;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [100]Pool.Key(u32) = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i + 1));
+    }
+    for (keys, 0..) |key, i| {
+        try testing.expect(key.is_valid());
+        try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+    }
+
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 0) key.release();
+    }
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 0) {
+            try testing.expect(!key.is_valid());
+        } else {
+            try testing.expectEqual(@as(u32, @intCast(i + 1)), key.get());
+        }
+    }
+
+    for (keys, 0..) |key, i| {
+        if (i % 2 == 1) key.release();
+    }
+    try testing.expectEqual(@as(u32, 128), @as(u32, Pool.get_num_free(u32)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> randomized claims and releases match a model" {
+    const Pool = GlobalBitTrackedPool;
+    const Key = Pool.Key(u32);
+    const BLOCK_SLOTS: usize = 64;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    const MAX_LIVE = 200;
+    var keys: [MAX_LIVE]Key = undefined;
+    var vals: [MAX_LIVE]u32 = undefined;
+    var live: usize = 0;
+    var max_live: usize = 0;
+
+    var prng = std.Random.DefaultPrng.init(0x610B_4A11);
+    const rand = prng.random();
+
+    var next_val: u32 = 1;
+    for (0..5000) |_| {
+        const can_claim = live < MAX_LIVE;
+        const do_claim = live == 0 or (can_claim and rand.intRangeAtMost(u8, 0, 2) != 0);
+
+        if (do_claim) {
+            const key = Pool.claim(u32);
+            const val = next_val;
+            next_val +%= 1;
+            key.set(val);
+            keys[live] = key;
+            vals[live] = val;
+            live += 1;
+            max_live = @max(max_live, live);
+        } else {
+            const i = rand.intRangeLessThan(usize, 0, live);
+            try testing.expect(keys[i].is_valid());
+            try testing.expectEqual(vals[i], keys[i].get());
+            keys[i].release();
+            live -= 1;
+            keys[i] = keys[live];
+            vals[i] = vals[live];
+        }
+
+        if (rand.intRangeAtMost(u8, 0, 63) == 0) {
+            for (keys[0..live], vals[0..live]) |key, val| {
+                try testing.expect(key.is_valid());
+                try testing.expectEqual(val, key.get());
+            }
+        }
+    }
+
+    for (keys[0..live]) |key| key.release();
+    const expected_blocks = (max_live + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+    try testing.expectEqual(@as(u32, @intCast(expected_blocks * BLOCK_SLOTS)), @as(u32, Pool.get_num_free(u32)));
+}

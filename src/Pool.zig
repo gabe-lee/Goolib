@@ -38,14 +38,19 @@ const num_cast = Root.Cast.num_cast;
 const List = Root.ListSlice.ListAllocated;
 pub const Simple = @import("./Pool_Simple.zig");
 pub const BitTrackedBlocksModule = @import("./Pool_BitTrackedBlocksPool.zig");
+pub const BitTrackedBlocksGlobalModule = @import("./Pool_BitTrackedBlocksPool_Global.zig");
 pub const MappedKeyModule = @import("./Pool_MappedKeyPool.zig");
 pub const GlobalMappedKeyPool = MappedKeyModule.GlobalMappedKeyPool;
 pub const BitTrackedBlocksPool = BitTrackedBlocksModule.BitTrackedPool;
+pub const GlobalMultiTypeBitTrackedPool = BitTrackedBlocksGlobalModule.GlobalMultiTypeBitTrackedPool;
+pub const GlobalPoolDef = BitTrackedBlocksGlobalModule.GlobalDef;
+pub const GlobalSubPoolDef = BitTrackedBlocksGlobalModule.SubPoolDef;
 
 comptime {
     if (build.is_test) {
         _ = @import("./Pool_Simple.zig");
         _ = @import("./Pool_BitTrackedBlocksPool.zig");
+        _ = @import("./Pool_BitTrackedBlocksPool_Global.zig");
         _ = @import("./Pool_MappedKeyPool.zig");
         _ = @import("./Pool_Tests.zig");
     }
@@ -56,7 +61,7 @@ pub const PoolDef = struct {
     BLOCK_SIZE: comptime_int,
     THREADING: Root.CommonTypes.ThreadingMode,
 };
-
+//DEPRECATE
 pub fn Pool(comptime DEF: PoolDef, comptime T_DEFAULT: DEF.LIST_DEF.ELEM) type {
     assert_with_reason(Types.type_is_unsigned_int(DEF.LIST_DEF.IDX), @src(), "type `IDX_TYPE` must be an unsigned integer type, got type `{s}`", .{@typeName(DEF.LIST_DEF.IDX)});
     return struct {
