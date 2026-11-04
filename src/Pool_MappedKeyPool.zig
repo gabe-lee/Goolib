@@ -50,6 +50,12 @@ pub const PoolDef = struct {
     GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
 };
 
+// pub const PoolDefOpaque = struct {
+//     IDX: type = u32,
+//     LOCK_MODE: LockMode = .NO_LOCKS,
+//     LOCK_BLOCK_COVERAGE: comptime_int = 64,
+//     GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
+// };
 const FieldAccessMode = enum {
     NOT_SUPPORTED,
     UNION_TAGGED,
