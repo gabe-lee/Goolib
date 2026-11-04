@@ -50,12 +50,6 @@ pub const PoolDef = struct {
     GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
 };
 
-// pub const PoolDefOpaque = struct {
-//     IDX: type = u32,
-//     LOCK_MODE: LockMode = .NO_LOCKS,
-//     LOCK_BLOCK_COVERAGE: comptime_int = 64,
-//     GLOBAL_POOL_NAME: []const u8 = "<DEFAULT>",
-// };
 const FieldAccessMode = enum {
     NOT_SUPPORTED,
     UNION_TAGGED,
@@ -617,6 +611,45 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 .gen = gen,
             };
         }
+        /// Claim `count` mappings whose indices are guaranteed to be consecutive.
+        ///
+        /// The returned key is the first mapping. Every mapping in the range has the
+        /// same generation, so key `n` is `.{ .idx = first.idx + n, .gen = first.gen }`.
+        ///
+        /// NOTE: this deliberately ignores mappings in the free list (they cannot be
+        /// guaranteed consecutive) and appends new mappings at the end of the mapping
+        /// list. Freed mappings stay available to `claim_key`.
+        pub fn claim_consecutive(count: IDX) Key {
+            assert_with_reason(count > 0, @src(), "cannot claim a consecutive range of zero items", .{});
+            assert_with_reason(maps_len <= INVALID_IDX - count, @src(), "a range of {d} mappings would overflow the mapping index type", .{count});
+            lock_pool_for_write();
+            ensure_free_space_internal(count);
+            const first_map_idx = maps_len;
+            const first_val_idx = vals_len;
+            // `maps_len` may be larger than `vals_len` when free mappings exist, so
+            // ensure the *mapping* side has room for the whole range too.
+            ensure_capacity_internal(first_map_idx + count);
+            var i: IDX = 0;
+            while (i < count) : (i += 1) {
+                const map_idx = first_map_idx + i;
+                const val_idx = first_val_idx + i;
+                assert_with_reason(map_idx >= maps_len, @src(), "a mapping inside the current high-water mark was not expected in a consecutive claim", .{});
+                assert_with_reason(maps[map_idx].gen & FREE_USED_BIT == FREE_STATE, @src(), "mapping {d} was not in a free state", .{map_idx});
+                maps[map_idx].idx = val_idx;
+                // Generation is increased on claim AND free (same rule as claim_key).
+                maps[map_idx].gen +%= 1;
+                vals_to_maps[val_idx] = map_idx;
+            }
+            maps_len += count;
+            vals_len += count;
+            unlock_pool_for_write();
+            // All mappings in this range started at generation 0 and were incremented once.
+            return Key{
+                .idx = first_map_idx,
+                .gen = 1,
+            };
+        }
+
         pub fn release_key(key: Key) void {
             key.assert_lockable_idx(@src());
             const mapping_lock = lock_pool_and_index_for_write(key.idx);

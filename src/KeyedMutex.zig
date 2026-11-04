@@ -37,6 +37,25 @@ pub const PossibleKeyMode = enum(u8) {
     KEY_CREATED_IN_HIGHER_SCOPE,
 };
 
+// Small spin mutex used instead of std.Thread.Mutex (which no longer exists in
+// this Zig version).  The system lock is held only around short bookkeeping
+// sections, so a spin lock is acceptable and avoids threading an `std.Io`.
+const SpinMutex = struct {
+    locked: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    fn lock(self: *SpinMutex) void {
+        while (self.locked.swap(true, .acquire)) {
+            std.atomic.spinLoopHint();
+        }
+    }
+    fn unlock(self: *SpinMutex) void {
+        self.locked.store(false, .release);
+    }
+    fn tryLock(self: *SpinMutex) bool {
+        return !self.locked.swap(true, .acquire);
+    }
+};
+
 /// A mutex with additional safety features in `.Debug` and `.ReleaseSafe` modes.
 ///
 /// When locked it returns a `Key` that is the only way to unlock the mutex.
@@ -44,7 +63,7 @@ pub fn KeyedMutex(comptime ENABLE: bool) type {
     return struct {
         const SelfMutex = @This();
 
-        mutex: if (ENABLE) std.Thread.Mutex else void = .{},
+        mutex: if (ENABLE) SpinMutex else void = if (ENABLE) .{} else {},
         key_owner: if (ENABLE and SHOULD_ASSERT) usize else void = if (ENABLE and SHOULD_ASSERT) 0 else {},
         thread_locked_on: if (ENABLE and SHOULD_ASSERT) u32 else void = if (ENABLE and SHOULD_ASSERT) 0 else {},
 
