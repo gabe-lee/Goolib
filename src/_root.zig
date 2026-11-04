@@ -72,6 +72,7 @@ pub const KeyedMutex = @import("./KeyedMutex.zig");
 pub const Layout = @import("./Layout.zig");
 pub const ListSegmentAllocator = @import("./ListSegmentAllocator.zig");
 pub const ListSlice = @import("./ListSlice.zig");
+pub const Lock = @import("./Lock.zig");
 pub const Math = @import("./Math.zig");
 pub const Matrix = @import("./Matrix.zig");
 pub const Measurement = @import("./Measurement.zig");
@@ -145,6 +146,7 @@ comptime {
         _ = @import("./Layout.zig");
         _ = @import("./ListSegmentAllocator.zig");
         _ = @import("./ListSlice.zig");
+        _ = @import("./Lock.zig");
         _ = @import("./Math.zig");
         _ = @import("./Matrix.zig");
         _ = @import("./Measurement.zig");

@@ -33,6 +33,9 @@ const Types = Root.Types;
 const ANSI = Root.ANSI;
 const Common = Root.CommonTypes;
 const MathX = Root.Math;
+pub const AssertBehavior = Root.CommonTypes.AssertBehavior;
+pub const WarnBehavior = Root.CommonTypes.WarnBehavior;
+pub const ErrorBehavior = Root.CommonTypes.ErrorBehavior;
 
 pub const SHOULD_ASSERT = build.mode == .debug or build.mode == .safe;
 pub const IS_DEBUG = build.mode == .debug;

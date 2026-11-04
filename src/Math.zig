@@ -1609,6 +1609,10 @@ pub const PowerOf2 = enum(u8) {
     _18_446_744_073_709_551_616 = 64,
     _,
 
+    pub const U8_POWER: PowerOf2 = @fromBackingInt(8);
+    pub const U16_POWER: PowerOf2 = @fromBackingInt(16);
+    pub const U32_POWER: PowerOf2 = @fromBackingInt(32);
+    pub const U64_POWER: PowerOf2 = @fromBackingInt(64);
     pub const USIZE_POWER = if (@sizeOf(usize) == 4) PowerOf2._32 else PowerOf2._64;
     pub const USIZE_BITS = if (@sizeOf(usize) == 4) 32 else 64;
     pub const USIZE_BITS_MINUS_ONE = USIZE_BITS - 1;
