@@ -1785,3 +1785,210 @@ test "GlobalMultiTypeBitTrackedPool -> threadlocal vars isolate state per thread
     main_key.release();
     try testing.expectEqual(@as(u32, 64), @as(u32, Pool.get_num_free(u32)));
 }
+
+const GlobalTaggedUnionElem = union(enum) {
+    int: i32,
+    bytes: [4]u8,
+};
+
+const GlobalUntaggedUnionElem = union {
+    int: i32,
+    bytes: [4]u8,
+};
+
+const GlobalBitTrackedFieldPool = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .POOL_DEFS = &.{
+        .{ .TYPE = GlobalStructElem },
+        .{ .TYPE = GlobalTaggedUnionElem },
+        .{ .TYPE = GlobalUntaggedUnionElem },
+    },
+});
+
+const GlobalBitTrackedFieldPoolSpinLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .THREAD_SAFETY = .data_locks(.{
+        .POOL_LOCK_MODE = .RW_SPIN_LOCK,
+        .BLOCK_LOCK_MODE = .SPIN_LOCK,
+        .ELEM_LOCK_MODE = .SPIN_LOCK,
+    }),
+    .POOL_DEFS = &.{
+        .{ .TYPE = GlobalStructElem },
+    },
+});
+
+const GlobalBitTrackedFieldPoolMutexLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .THREAD_SAFETY = .data_locks(.{
+        .POOL_LOCK_MODE = .MUTEX,
+        .BLOCK_LOCK_MODE = .RW_MUTEX,
+        .ELEM_LOCK_MODE = .MUTEX,
+    }),
+    .POOL_DEFS = &.{
+        .{ .TYPE = GlobalStructElem },
+    },
+});
+
+test "GlobalMultiTypeBitTrackedPool -> struct field access" {
+    const Pool = GlobalBitTrackedFieldPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(GlobalStructElem, 0);
+    defer Pool.uninit(GlobalStructElem);
+
+    const key = Pool.claim(GlobalStructElem);
+    key.set(.{ .x = 1, .y = -2, .z = 3.5 });
+
+    try testing.expectEqual(@as(u32, 1), key.get_field(.x));
+    try testing.expectEqual(@as(i32, -2), key.get_field(.y));
+    try testing.expectEqual(@as(f32, 3.5), key.get_field(.z));
+
+    key.set_field(.x, 10);
+    key.set_field(.y, 20);
+    key.set_field(.z, 30.5);
+
+    try testing.expectEqual(@as(u32, 10), key.get_field(.x));
+    try testing.expectEqual(@as(i32, 20), key.get_field(.y));
+    try testing.expectEqual(@as(f32, 30.5), key.get_field(.z));
+
+    const whole = key.get();
+    try testing.expectEqual(@as(u32, 10), whole.x);
+    try testing.expectEqual(@as(i32, 20), whole.y);
+    try testing.expectEqual(@as(f32, 30.5), whole.z);
+
+    const temp_ptr = key.get_field_ptr_temp_lock(.x);
+    temp_ptr.* = 11;
+    try testing.expectEqual(@as(u32, 11), key.get_field(.x));
+
+    const write_ptr = key.get_field_ptr_hold_write_lock(.y);
+    write_ptr[0].* = 21;
+    try testing.expectEqual(@as(i32, 21), key.get_field(.y));
+
+    const read_ptr = key.get_field_const_ptr_hold_read_lock(.z);
+    try testing.expectEqual(@as(f32, 30.5), read_ptr[0].*);
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> tagged union field access" {
+    const Pool = GlobalBitTrackedFieldPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(GlobalTaggedUnionElem, 0);
+    defer Pool.uninit(GlobalTaggedUnionElem);
+
+    const key = Pool.claim(GlobalTaggedUnionElem);
+    key.set(.{ .int = -7 });
+
+    try testing.expectEqual(@as(i32, -7), key.get_field(.int));
+    try testing.expect(std.meta.activeTag(key.get()) == .int);
+
+    // Setting a different field switches the tag, just like assigning the whole union.
+    key.set_field(.bytes, .{ 1, 2, 3, 4 });
+    try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get_field(.bytes));
+    try testing.expect(std.meta.activeTag(key.get()) == .bytes);
+
+    key.set_field(.int, 42);
+    try testing.expectEqual(@as(i32, 42), key.get_field(.int));
+    try testing.expect(std.meta.activeTag(key.get()) == .int);
+
+    const temp_ptr = key.get_field_ptr_temp_lock(.int);
+    temp_ptr.* = 43;
+    try testing.expectEqual(@as(i32, 43), key.get_field(.int));
+
+    const write_ptr = key.get_field_ptr_hold_write_lock(.int);
+    write_ptr[0].* = 44;
+    try testing.expectEqual(@as(i32, 44), key.get_field(.int));
+
+    const read_ptr = key.get_field_const_ptr_hold_read_lock(.int);
+    try testing.expectEqual(@as(i32, 44), read_ptr[0].*);
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> untagged union field access" {
+    const Pool = GlobalBitTrackedFieldPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(GlobalUntaggedUnionElem, 0);
+    defer Pool.uninit(GlobalUntaggedUnionElem);
+
+    const key = Pool.claim(GlobalUntaggedUnionElem);
+    key.set(.{ .int = -7 });
+
+    try testing.expectEqual(@as(i32, -7), key.get_field(.int));
+
+    key.set_field(.int, 42);
+    try testing.expectEqual(@as(i32, 42), key.get_field(.int));
+    try testing.expectEqual(@as(i32, 42), key.get().int);
+
+    key.set_field(.bytes, .{ 1, 2, 3, 4 });
+    try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get_field(.bytes));
+    try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get().bytes);
+
+    const temp_ptr = key.get_field_ptr_temp_lock(.bytes);
+    temp_ptr.* = .{ 5, 6, 7, 8 };
+    try testing.expectEqual([4]u8{ 5, 6, 7, 8 }, key.get_field(.bytes));
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> field pointer access with spin locks" {
+    const Pool = GlobalBitTrackedFieldPoolSpinLocked;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(GlobalStructElem, 0);
+    defer Pool.uninit(GlobalStructElem);
+
+    const key = Pool.claim(GlobalStructElem);
+    key.set(.{ .x = 1, .y = -2, .z = 3.5 });
+
+    {
+        const held = key.get_field_ptr_hold_write_lock(.x);
+        held[0].* = 42;
+        held[1].unlock_for_write();
+    }
+    try testing.expectEqual(@as(u32, 42), key.get_field(.x));
+
+    {
+        const held = key.get_field_const_ptr_hold_read_lock(.y);
+        try testing.expectEqual(@as(i32, -2), held[0].*);
+        held[1].unlock_for_read();
+    }
+
+    const temp_ptr = key.get_field_ptr_temp_lock(.z);
+    try testing.expectEqual(@as(f32, 3.5), temp_ptr.*);
+
+    key.set_field(.y, 7);
+    try testing.expectEqual(@as(i32, 7), key.get_field(.y));
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> field pointer access returns io for unlocking" {
+    const Pool = GlobalBitTrackedFieldPoolMutexLocked;
+
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+
+    Pool.init_global(testing.allocator, threaded.io());
+    Pool.init(GlobalStructElem, 0);
+    defer Pool.uninit(GlobalStructElem);
+
+    const key = Pool.claim(GlobalStructElem);
+    key.set(.{ .x = 1, .y = -2, .z = 3.5 });
+
+    {
+        const held = key.get_field_ptr_hold_write_lock(.x);
+        held[0].* = 42;
+        held[1].unlock_for_write(held[2]);
+    }
+    try testing.expectEqual(@as(u32, 42), key.get_field(.x));
+
+    {
+        const held = key.get_field_const_ptr_hold_read_lock(.y);
+        try testing.expectEqual(@as(i32, -2), held[0].*);
+        held[1].unlock_for_read(held[2]);
+    }
+
+    key.release();
+}

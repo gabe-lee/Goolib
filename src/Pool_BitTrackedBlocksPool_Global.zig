@@ -305,7 +305,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
-                        POOL.assert_tagged_field_active(block.vals[self.elem_idx], field, @src());
+                        POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
                     }
                     return @field(&block.vals[self.elem_idx], @tagName(field));
                 }
@@ -321,11 +321,11 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
-                        POOL.assert_tagged_field_active(block.vals[self.elem_idx], field, @src());
+                        POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
                     }
                     return &@field(&block.vals[self.elem_idx], @tagName(field));
                 }
-                pub fn get_field_ptr_hold_write_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *POOL.field_type(field), ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS) } {
+                pub fn get_field_ptr_hold_write_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *POOL.field_type(field), ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS), Io } {
                     POOL.assert_field_access();
                     POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
@@ -336,16 +336,16 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
-                        POOL.assert_tagged_field_active(block.vals[self.elem_idx], field, @src());
+                        POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
                     }
                     const ptr: *POOL.field_type(field) = &@field(&block.vals[self.elem_idx], @tagName(field));
                     if (comptime ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS) == void) {
-                        return .{ ptr, {} };
+                        return .{ ptr, {}, global.io };
                     } else {
-                        return .{ ptr, &block.val_locks[self.elem_idx] };
+                        return .{ ptr, &block.val_locks[self.elem_idx], global.io };
                     }
                 }
-                pub fn get_field_const_ptr_hold_read_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *const POOL.field_type(field), ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS) } {
+                pub fn get_field_const_ptr_hold_read_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *const POOL.field_type(field), ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS), Io } {
                     POOL.assert_field_access();
                     POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
@@ -356,13 +356,13 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
-                        POOL.assert_tagged_field_active(block.vals[self.elem_idx], field, @src());
+                        POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
                     }
                     const ptr: *const POOL.field_type(field) = &@field(&block.vals[self.elem_idx], @tagName(field));
                     if (comptime ELEM_LOCK_MODE.lock_ptr_type(USE_LOCK_ASSERTS) == void) {
-                        return .{ ptr, {} };
+                        return .{ ptr, {}, global.io };
                     } else {
-                        return .{ ptr, &block.val_locks[self.elem_idx] };
+                        return .{ ptr, &block.val_locks[self.elem_idx], global.io };
                     }
                 }
 
@@ -389,10 +389,11 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
-                    if (comptime POOL.FA_MODE == .UNION_TAGGED) {
-                        POOL.assert_tagged_field_active(block.vals[self.elem_idx], field, @src());
+                    if (comptime POOL.FA_MODE == .UNION_TAGGED or POOL.FA_MODE == .UNION_UNTAGGED) {
+                        block.vals[self.elem_idx] = @unionInit(POOL.TYPE, @tagName(field), val);
+                    } else {
+                        @field(&block.vals[self.elem_idx], @tagName(field)) = val;
                     }
-                    @field(&block.vals[self.elem_idx], @tagName(field)).* = val;
                 }
 
                 pub fn release_advanced(self: KeySelf, comptime pool_lock_mode: PoolLockMode, comptime block_lock_mode: BlockLockMode, comptime elem_lock_mode: ElemLockMode) void {
@@ -506,8 +507,8 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     assert_field_access();
                     return FIELDS_TYPES[@backingInt(field)];
                 }
-                inline fn assert_tagged_field_active(union_val: TYPE, comptime field: FIELDS_ENUM, comptime src: ?std.builtin.SourceLocation) void {
-                    assert_with_reason(std.meta.activeTag(union_val) == std.meta.activeTag(@unionInit(TYPE, @tagName(field), undefined)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
+                inline fn assert_tagged_field_active(active_tag: std.meta.Tag(TYPE), comptime field: FIELDS_ENUM, comptime src: ?std.builtin.SourceLocation) void {
+                    assert_with_reason(active_tag == @field(std.meta.Tag(TYPE), @tagName(field)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
                 }
                 const DataBlock = struct {
                     vals: [ELEMENTS_PER_BLOCK]DEF.TYPE = undefined,
