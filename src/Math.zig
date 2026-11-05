@@ -1635,6 +1635,9 @@ pub const PowerOf2 = enum(u8) {
     pub fn bit_shift(power: PowerOf2) u8 {
         return @backingInt(power);
     }
+    pub fn raw_int(power: PowerOf2) u8 {
+        return @backingInt(power);
+    }
 
     pub fn unsigned_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
         return @Int(.unsigned, @intCast(@backingInt(limit)));
