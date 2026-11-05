@@ -2106,3 +2106,218 @@ test "GlobalMultiTypeBitTrackedPool -> field pointer hold-locks unlock through t
 
     key.release();
 }
+
+test "GlobalMultiTypeBitTrackedPool -> iterators visit exactly the used slots" {
+    const Pool = GlobalBitTrackedPool;
+    const N = 150;
+    const BLOCK_SLOTS = 64;
+    const EXPECTED_BLOCKS = (N + BLOCK_SLOTS - 1) / BLOCK_SLOTS;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [N]Pool.Key(u32) = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i + 1));
+    }
+
+    // Release slots in every block so iteration has to skip holes in more
+    // than one state group and move between data blocks.
+    var expected_used = @as([N]bool, @splat(false));
+    var expected_count: usize = 0;
+    for (&keys, 0..) |*key, i| {
+        if (i % 3 == 0) {
+            key.release();
+        } else {
+            expected_used[i] = true;
+            expected_count += 1;
+        }
+    }
+    try testing.expectEqual(@as(u32, @intCast((EXPECTED_BLOCKS * BLOCK_SLOTS) - expected_count)), @as(u32, Pool.get_num_free(u32)));
+
+    var seen_val = @as([N]bool, @splat(false));
+    var val_count: usize = 0;
+    var val_iter = Pool.iterator(u32, .VAL);
+    while (val_iter.next()) |val| {
+        try testing.expect(val > 0 and val <= N);
+        const i = val - 1;
+        try testing.expect(!seen_val[i]);
+        seen_val[i] = true;
+        val_count += 1;
+    }
+    val_iter.deinit_and_unlock();
+    try testing.expectEqual(expected_count, val_count);
+    try testing.expectEqualSlices(bool, &expected_used, &seen_val);
+
+    var seen_ptr = @as([N]bool, @splat(false));
+    var ptr_count: usize = 0;
+    var ptr_iter = Pool.iterator(u32, .PTR);
+    while (ptr_iter.next()) |slot| {
+        try testing.expect(slot.* > 0 and slot.* <= N);
+        const i = slot.* - 1;
+        try testing.expect(!seen_ptr[i]);
+        seen_ptr[i] = true;
+        slot.* += 1000;
+        ptr_count += 1;
+    }
+    ptr_iter.deinit_and_unlock();
+    try testing.expectEqual(expected_count, ptr_count);
+    try testing.expectEqualSlices(bool, &expected_used, &seen_ptr);
+
+    var seen_const = @as([N]bool, @splat(false));
+    var const_count: usize = 0;
+    var const_iter = Pool.iterator(u32, .CONST_PTR);
+    while (const_iter.next()) |slot| {
+        try testing.expect(slot.* > 1000 and slot.* <= N + 1000);
+        const i = slot.* - 1001;
+        try testing.expect(!seen_const[i]);
+        seen_const[i] = true;
+        const_count += 1;
+    }
+    const_iter.deinit_and_unlock();
+    try testing.expectEqual(expected_count, const_count);
+    try testing.expectEqualSlices(bool, &expected_used, &seen_const);
+
+    // The pointer iterator mutated the live values, so the keys must still
+    // observe the new values through their own access path.
+    for (&keys, 0..) |*key, i| {
+        if (expected_used[i]) {
+            try testing.expectEqual(@as(u32, @intCast(i + 1001)), key.get());
+            key.release();
+        }
+    }
+    try testing.expectEqual(@as(u32, @intCast(EXPECTED_BLOCKS * BLOCK_SLOTS)), @as(u32, Pool.get_num_free(u32)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> iterators on empty and fully free pools" {
+    const Pool = GlobalBitTrackedPool;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    // No blocks have been allocated yet.
+    inline for (.{ .VAL, .PTR, .CONST_PTR }) |slot_mode| {
+        var iter = Pool.iterator(u32, slot_mode);
+        try testing.expectEqual(null, iter.next());
+        iter.deinit_and_unlock();
+    }
+
+    Pool.ensure_free_slots(u32, 64);
+    const key = Pool.claim(u32);
+    key.set(42);
+
+    var seen: usize = 0;
+    var iter = Pool.iterator(u32, .VAL);
+    while (iter.next()) |val| {
+        try testing.expectEqual(@as(u32, 42), val);
+        seen += 1;
+    }
+    iter.deinit_and_unlock();
+    try testing.expectEqual(@as(usize, 1), seen);
+
+    // Blocks still exist, but every slot is free again.
+    key.release();
+    inline for (.{ .VAL, .PTR, .CONST_PTR }) |slot_mode| {
+        var empty_iter = Pool.iterator(u32, slot_mode);
+        try testing.expectEqual(null, empty_iter.next());
+        empty_iter.deinit_and_unlock();
+    }
+}
+
+test "GlobalMultiTypeBitTrackedPool -> iterators are independent per type" {
+    const Pool = GlobalBitTrackedPool;
+
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    Pool.init(u64, 0);
+    defer {
+        Pool.uninit(u32);
+        Pool.uninit(u64);
+    }
+
+    var u32_keys: [5]Pool.Key(u32) = undefined;
+    for (&u32_keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(100 + i));
+    }
+    var u64_keys: [3]Pool.Key(u64) = undefined;
+    for (&u64_keys, 0..) |*key, i| {
+        key.* = Pool.claim(u64);
+        key.*.set(@as(u64, 0x1_0000_0000) + @as(u64, @intCast(i)));
+    }
+
+    var u32_count: usize = 0;
+    var u32_iter = Pool.iterator(u32, .VAL);
+    while (u32_iter.next()) |val| {
+        try testing.expect(val >= 100 and val < 105);
+        u32_count += 1;
+    }
+    u32_iter.deinit_and_unlock();
+    try testing.expectEqual(u32_keys.len, u32_count);
+
+    var u64_count: usize = 0;
+    var u64_iter = Pool.iterator(u64, .CONST_PTR);
+    while (u64_iter.next()) |val| {
+        try testing.expect(val.* >= 0x1_0000_0000 and val.* < 0x1_0000_0003);
+        u64_count += 1;
+    }
+    u64_iter.deinit_and_unlock();
+    try testing.expectEqual(u64_keys.len, u64_count);
+
+    for (u32_keys) |key| key.release();
+    for (u64_keys) |key| key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> iterators release pool, block, and element locks" {
+    const Pool = GlobalBitTrackedPoolLocked;
+
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+
+    Pool.init_global(testing.allocator, threaded.io());
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    var keys: [100]Pool.Key(u32) = undefined;
+    for (&keys, 0..) |*key, i| {
+        key.* = Pool.claim(u32);
+        key.*.set(@intCast(i + 1));
+    }
+    for (&keys, 0..) |*key, i| {
+        if (i % 4 == 0) key.release();
+    }
+
+    var iter_count: usize = 0;
+    var iter = Pool.iterator(u32, .CONST_PTR);
+    while (iter.next()) |slot| {
+        try testing.expect(slot.* > 0 and slot.* <= keys.len);
+        iter_count += 1;
+    }
+    iter.deinit_and_unlock();
+    try testing.expectEqual(keys.len - (keys.len / 4), iter_count);
+
+    // Growing the pool requires the pool write lock. This would deadlock if
+    // the iterator failed to release its read lock.
+    Pool.ensure_free_slots(u32, 256);
+    try testing.expect(@as(u32, Pool.get_num_free(u32)) >= 256);
+
+    var ignore_iter = Pool.iterator_advanced(u32, .PTR, .IGNORE_POOL_LOCKS, .IGNORE_BLOCK_LOCKS, .IGNORE_ELEM_LOCKS);
+    var ignore_count: usize = 0;
+    while (ignore_iter.next()) |slot| {
+        slot.* += 10;
+        ignore_count += 1;
+    }
+    ignore_iter.deinit_and_unlock();
+    try testing.expectEqual(keys.len - (keys.len / 4), ignore_count);
+
+    for (keys, 0..) |key, i| {
+        if (i % 4 != 0) {
+            try testing.expectEqual(@as(u32, @intCast(i + 11)), key.get());
+            key.release();
+        }
+    }
+    try testing.expectEqual(@as(u32, 384), @as(u32, Pool.get_num_free(u32)));
+}

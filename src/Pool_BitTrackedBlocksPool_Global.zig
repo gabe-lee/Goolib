@@ -771,7 +771,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     return struct {
                         const IterSelf = @This();
                         block: *DataBlock = invalid_ptr(DataBlock),
-                        block_idx: ElemIdx = 0,
+                        block_idx: BlockIdx = 0,
                         state_idx: ElemIdx = 0,
                         num_used_in_block: ElemIdx = 0,
                         num_used_in_pool: ElemIdx = 0,
@@ -799,8 +799,8 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                     .IGNORE_BLOCK_LOCKS => {},
                                 }
                                 self.block_is_locked = true;
-                                self.num_used_in_block = ELEMENTS_PER_BLOCK - self.block.num_free;
-                                self.num_used_in_pool = (ELEMENTS_PER_BLOCK * pool.blocks_cap) - pool.num_free;
+                                self.num_used_in_block = @intCast(@as(u64, ELEMENTS_PER_BLOCK) - @as(u64, self.block.num_free));
+                                self.num_used_in_pool = @intCast((@as(u64, ELEMENTS_PER_BLOCK) * @as(u64, pool.blocks_cap)) - @as(u64, pool.pool_num_free));
                                 self.curr_state_inverted = ~self.block.state[0];
                             }
                             return self;
@@ -817,13 +817,13 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                 }
                                 self.elem_is_locked = false;
                             }
-                            if (self.block_idx >= self.pool.blocks_cap) return null;
+                            if (self.block_idx >= pool.blocks_cap) return null;
                             loop_over_data_blocks: while (self.num_used_in_pool > 0) {
                                 loop_over_state_groups: while (self.num_used_in_block > 0) {
                                     while (self.curr_state_inverted != 0) { // loop_over_slots_in_group
                                         const first_used_slot_bit_offset: ElemIdx = @intCast(@ctz(self.curr_state_inverted));
                                         self.curr_state_inverted &= self.curr_state_inverted - 1;
-                                        const first_used_slot_within_block = (self.state_idx * SLOT_STEP_PER_STATE_GROUP) + first_used_slot_bit_offset;
+                                        const first_used_slot_within_block: ElemIdx = @intCast((self.state_idx * SLOT_STEP_PER_STATE_GROUP) + first_used_slot_bit_offset);
                                         switch (comptime elem_lock) {
                                             .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
                                                 .VAL, .CONST_PTR => ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[first_used_slot_within_block] else {}, global.io),
@@ -855,15 +855,15 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                     }
                                     self.block_is_locked = false;
                                 }
-                                self.block_idx = @min(self.block_idx + 1, self.pool.blocks_cap);
-                                if (self.block_idx < self.pool.blocks_cap) {
-                                    self.block = self.pool.blocks[self.block_idx];
+                                self.block_idx = @min(self.block_idx + 1, pool.blocks_cap);
+                                if (self.block_idx < pool.blocks_cap) {
+                                    self.block = pool.blocks[self.block_idx];
                                     switch (comptime block_lock) {
                                         .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
                                         .IGNORE_BLOCK_LOCKS => {},
                                     }
                                     self.block_is_locked = true;
-                                    self.num_used_in_block = ELEMENTS_PER_BLOCK - self.block.num_free;
+                                    self.num_used_in_block = @intCast(@as(u64, ELEMENTS_PER_BLOCK) - @as(u64, self.block.num_free));
                                     self.state_idx = 0;
                                     self.curr_state_inverted = ~self.block.state[0];
                                 } else {
@@ -955,7 +955,14 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
             const KEY = Key(T);
             KEY.POOL.uninit();
         }
+
+        pub fn iterator_advanced(comptime T: type, comptime slot_mode: IterSlotMode, comptime pool_lock_mode: PoolLockMode, comptime block_lock_mode: BlockLockMode, comptime elem_lock_mode: ElemLockMode) Key(T).POOL.IteratorAdvanced(slot_mode, pool_lock_mode, block_lock_mode, elem_lock_mode) {
+            const KEY = Key(T);
+            return KEY.POOL.iterator_advanced(slot_mode, pool_lock_mode, block_lock_mode, elem_lock_mode);
+        }
+        pub fn iterator(comptime T: type, comptime slot_mode: IterSlotMode) Key(T).POOL.IteratorAdvanced(slot_mode, .CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS, .CHECK_ELEM_LOCKS) {
+            const KEY = Key(T);
+            return KEY.POOL.iterator(slot_mode);
+        }
     };
 }
-
-//TODO //CHECKPOINT iterators
