@@ -759,6 +759,144 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     pool.blocks_cap = 0;
                     pool.pool_num_free = 0;
                 }
+
+                pub fn iterator_advanced(comptime slot_mode: IterSlotMode, comptime pool_lock: PoolLockMode, comptime block_lock: BlockLockMode, comptime elem_lock: ElemLockMode) IteratorAdvanced(slot_mode, pool_lock, block_lock, elem_lock) {
+                    return IteratorAdvanced(slot_mode, pool_lock, block_lock, elem_lock).init_and_lock();
+                }
+                pub fn iterator(comptime slot_mode: IterSlotMode) IteratorAdvanced(slot_mode, .CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS, .CHECK_ELEM_LOCKS) {
+                    return IteratorAdvanced(slot_mode, .CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS, .CHECK_ELEM_LOCKS).init_and_lock();
+                }
+
+                pub fn IteratorAdvanced(comptime slot_mode: IterSlotMode, comptime pool_lock: PoolLockMode, comptime block_lock: BlockLockMode, comptime elem_lock: ElemLockMode) type {
+                    return struct {
+                        const IterSelf = @This();
+                        block: *DataBlock = invalid_ptr(DataBlock),
+                        block_idx: ElemIdx = 0,
+                        state_idx: ElemIdx = 0,
+                        num_used_in_block: ElemIdx = 0,
+                        num_used_in_pool: ElemIdx = 0,
+                        curr_state_inverted: STATE_UINT = 0,
+                        block_is_locked: bool = false,
+                        elem_is_locked: bool = false,
+                        locked_elem_idx: ElemIdx = 0,
+
+                        const SlotReturn = switch (slot_mode) {
+                            .VAL => ?TYPE,
+                            .PTR => ?*TYPE,
+                            .CONST_PTR => ?*const TYPE,
+                        };
+
+                        pub fn init_and_lock() IterSelf {
+                            var self = IterSelf{};
+                            switch (comptime pool_lock) {
+                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                                .IGNORE_POOL_LOCKS => {},
+                            }
+                            if (pool.blocks_cap > 0) {
+                                self.block = pool.blocks[0];
+                                switch (comptime block_lock) {
+                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                    .IGNORE_BLOCK_LOCKS => {},
+                                }
+                                self.block_is_locked = true;
+                                self.num_used_in_block = ELEMENTS_PER_BLOCK - self.block.num_free;
+                                self.num_used_in_pool = (ELEMENTS_PER_BLOCK * pool.blocks_cap) - pool.num_free;
+                                self.curr_state_inverted = ~self.block.state[0];
+                            }
+                            return self;
+                        }
+
+                        pub fn next(self: *IterSelf) SlotReturn {
+                            if (self.elem_is_locked) {
+                                switch (comptime elem_lock) {
+                                    .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
+                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                    },
+                                    .IGNORE_ELEM_LOCKS => {},
+                                }
+                                self.elem_is_locked = false;
+                            }
+                            if (self.block_idx >= self.pool.blocks_cap) return null;
+                            loop_over_data_blocks: while (self.num_used_in_pool > 0) {
+                                loop_over_state_groups: while (self.num_used_in_block > 0) {
+                                    while (self.curr_state_inverted != 0) { // loop_over_slots_in_group
+                                        const first_used_slot_bit_offset: ElemIdx = @intCast(@ctz(self.curr_state_inverted));
+                                        self.curr_state_inverted &= self.curr_state_inverted - 1;
+                                        const first_used_slot_within_block = (self.state_idx * SLOT_STEP_PER_STATE_GROUP) + first_used_slot_bit_offset;
+                                        switch (comptime elem_lock) {
+                                            .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
+                                                .VAL, .CONST_PTR => ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[first_used_slot_within_block] else {}, global.io),
+                                                .PTR => ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[first_used_slot_within_block] else {}, global.io),
+                                            },
+                                            .IGNORE_ELEM_LOCKS => {},
+                                        }
+                                        self.elem_is_locked = true;
+                                        self.locked_elem_idx = first_used_slot_within_block;
+                                        const slot: SlotReturn = switch (comptime slot_mode) {
+                                            .VAL => self.block.vals[first_used_slot_within_block],
+                                            .PTR, .CONST_PTR => &self.block.vals[first_used_slot_within_block],
+                                        };
+                                        self.num_used_in_block -= 1;
+                                        self.num_used_in_pool -= 1;
+                                        return slot;
+                                    }
+                                    self.state_idx += 1;
+                                    if (self.state_idx < DATA_BLOCK_STATE_GROUP_LENGTH) {
+                                        self.curr_state_inverted = ~self.block.state[self.state_idx];
+                                    } else {
+                                        break :loop_over_state_groups;
+                                    }
+                                }
+                                if (self.block_is_locked) {
+                                    switch (comptime block_lock) {
+                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                        .IGNORE_BLOCK_LOCKS => {},
+                                    }
+                                    self.block_is_locked = false;
+                                }
+                                self.block_idx = @min(self.block_idx + 1, self.pool.blocks_cap);
+                                if (self.block_idx < self.pool.blocks_cap) {
+                                    self.block = self.pool.blocks[self.block_idx];
+                                    switch (comptime block_lock) {
+                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                        .IGNORE_BLOCK_LOCKS => {},
+                                    }
+                                    self.block_is_locked = true;
+                                    self.num_used_in_block = ELEMENTS_PER_BLOCK - self.block.num_free;
+                                    self.state_idx = 0;
+                                    self.curr_state_inverted = ~self.block.state[0];
+                                } else {
+                                    break :loop_over_data_blocks;
+                                }
+                            }
+                            return null;
+                        }
+
+                        pub fn deinit_and_unlock(self: *IterSelf) void {
+                            if (self.elem_is_locked) {
+                                switch (comptime elem_lock) {
+                                    .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
+                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                    },
+                                    .IGNORE_ELEM_LOCKS => {},
+                                }
+                            }
+                            if (self.block_is_locked) {
+                                switch (comptime block_lock) {
+                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                    .IGNORE_BLOCK_LOCKS => {},
+                                }
+                            }
+                            switch (comptime pool_lock) {
+                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                                .IGNORE_POOL_LOCKS => {},
+                            }
+                            self.* = IterSelf{};
+                        }
+                    };
+                }
             };
         }
         const global = if (USE_THREADLOCAL) struct {
