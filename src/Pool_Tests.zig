@@ -1513,6 +1513,17 @@ const GlobalBitTrackedPoolSpinLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.
     },
 });
 
+const GlobalBitTrackedPoolPoolLockOnly = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
+    .MAX_NUM_ELEMS = ._1_048_576,
+    .MAX_GENERATION = ._65_536,
+    .THREAD_SAFETY = .data_locks(.{
+        .POOL_LOCK_MODE = .RW_SPIN_LOCK,
+    }),
+    .POOL_DEFS = &.{
+        .{ .TYPE = u32 },
+    },
+});
+
 const GlobalBitTrackedPoolKeyedSpinLocked = Root.Pool.GlobalMultiTypeBitTrackedPool(.{
     .MAX_NUM_ELEMS = ._1_048_576,
     .MAX_GENERATION = ._65_536,
@@ -1622,6 +1633,89 @@ test "GlobalMultiTypeBitTrackedPool -> spin locks" {
         if (i % 2 == 1) key.release();
     }
     try testing.expectEqual(@as(u32, 128), @as(u32, Pool.get_num_free(u32)));
+}
+
+test "GlobalMultiTypeBitTrackedPool -> element pointer hold-locks (no locks)" {
+    const Pool = GlobalBitTrackedPool;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 1);
+    defer Pool.uninit(u32);
+
+    const key = Pool.claim(u32);
+    key.set(123);
+
+    {
+        const held = key.get_ptr_hold_locks();
+        try testing.expect(!@typeInfo(@TypeOf(held[0])).pointer.attrs.@"const");
+        try testing.expectEqual(@as(u32, 123), held[0].*);
+        held[0].* = 456;
+        held[1].unlock();
+    }
+    try testing.expectEqual(@as(u32, 456), key.get());
+
+    {
+        const held = key.get_const_ptr_hold_locks();
+        try testing.expect(@typeInfo(@TypeOf(held[0])).pointer.attrs.@"const");
+        try testing.expectEqual(@as(u32, 456), held[0].*);
+        held[1].unlock();
+    }
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> element pointer hold-locks (spin locks)" {
+    const Pool = GlobalBitTrackedPoolSpinLocked;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 1);
+    defer Pool.uninit(u32);
+
+    const key = Pool.claim(u32);
+    key.set(7);
+
+    {
+        const held = key.get_ptr_hold_locks();
+        held[0].* = 8;
+        held[1].unlock();
+    }
+    try testing.expectEqual(@as(u32, 8), key.get());
+
+    {
+        const held = key.get_const_ptr_hold_locks();
+        try testing.expectEqual(@as(u32, 8), held[0].*);
+        held[1].unlock();
+    }
+
+    key.release();
+}
+
+test "GlobalMultiTypeBitTrackedPool -> pointer hold-locks release the pool lock when other locks are disabled" {
+    const Pool = GlobalBitTrackedPoolPoolLockOnly;
+    Pool.init_global(testing.allocator, {});
+    Pool.init(u32, 0);
+    defer Pool.uninit(u32);
+
+    const key = Pool.claim(u32);
+    key.set(11);
+
+    {
+        const held = key.get_ptr_hold_locks();
+        held[0].* = 22;
+        held[1].unlock();
+    }
+    try testing.expectEqual(@as(u32, 22), key.get());
+
+    // Growing the pool needs the pool write lock, so this would deadlock if the
+    // LockPackage failed to release the pool read lock held by get_ptr_hold_locks.
+    Pool.ensure_free_slots(u32, 128);
+    try testing.expect(@as(u32, Pool.get_num_free(u32)) >= 128);
+
+    {
+        const held = key.get_const_ptr_hold_locks();
+        try testing.expectEqual(@as(u32, 22), held[0].*);
+        held[1].unlock();
+    }
+
+    key.release();
 }
 
 test "GlobalMultiTypeBitTrackedPool -> randomized claims and releases match a model" {
@@ -1858,16 +1952,25 @@ test "GlobalMultiTypeBitTrackedPool -> struct field access" {
     try testing.expectEqual(@as(i32, 20), whole.y);
     try testing.expectEqual(@as(f32, 30.5), whole.z);
 
-    const temp_ptr = key.get_field_ptr_temp_lock(.x);
-    temp_ptr.* = 11;
+    {
+        const held = key.get_field_ptr_hold_lock(.x);
+        held[0].* = 11;
+        held[1].unlock();
+    }
     try testing.expectEqual(@as(u32, 11), key.get_field(.x));
 
-    const write_ptr = key.get_field_ptr_hold_write_lock(.y);
-    write_ptr[0].* = 21;
+    {
+        const held = key.get_field_ptr_hold_lock(.y);
+        held[0].* = 21;
+        held[1].unlock();
+    }
     try testing.expectEqual(@as(i32, 21), key.get_field(.y));
 
-    const read_ptr = key.get_field_const_ptr_hold_read_lock(.z);
-    try testing.expectEqual(@as(f32, 30.5), read_ptr[0].*);
+    {
+        const held = key.get_field_const_ptr_hold_locks(.z);
+        try testing.expectEqual(@as(f32, 30.5), held[0].*);
+        held[1].unlock();
+    }
 
     key.release();
 }
@@ -1893,16 +1996,25 @@ test "GlobalMultiTypeBitTrackedPool -> tagged union field access" {
     try testing.expectEqual(@as(i32, 42), key.get_field(.int));
     try testing.expect(std.meta.activeTag(key.get()) == .int);
 
-    const temp_ptr = key.get_field_ptr_temp_lock(.int);
-    temp_ptr.* = 43;
+    {
+        const held = key.get_field_ptr_hold_lock(.int);
+        held[0].* = 43;
+        held[1].unlock();
+    }
     try testing.expectEqual(@as(i32, 43), key.get_field(.int));
 
-    const write_ptr = key.get_field_ptr_hold_write_lock(.int);
-    write_ptr[0].* = 44;
+    {
+        const held = key.get_field_ptr_hold_lock(.int);
+        held[0].* = 44;
+        held[1].unlock();
+    }
     try testing.expectEqual(@as(i32, 44), key.get_field(.int));
 
-    const read_ptr = key.get_field_const_ptr_hold_read_lock(.int);
-    try testing.expectEqual(@as(i32, 44), read_ptr[0].*);
+    {
+        const held = key.get_field_const_ptr_hold_locks(.int);
+        try testing.expectEqual(@as(i32, 44), held[0].*);
+        held[1].unlock();
+    }
 
     key.release();
 }
@@ -1926,8 +2038,11 @@ test "GlobalMultiTypeBitTrackedPool -> untagged union field access" {
     try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get_field(.bytes));
     try testing.expectEqual([4]u8{ 1, 2, 3, 4 }, key.get().bytes);
 
-    const temp_ptr = key.get_field_ptr_temp_lock(.bytes);
-    temp_ptr.* = .{ 5, 6, 7, 8 };
+    {
+        const held = key.get_field_ptr_hold_lock(.bytes);
+        held[0].* = .{ 5, 6, 7, 8 };
+        held[1].unlock();
+    }
     try testing.expectEqual([4]u8{ 5, 6, 7, 8 }, key.get_field(.bytes));
 
     key.release();
@@ -1943,20 +2058,19 @@ test "GlobalMultiTypeBitTrackedPool -> field pointer access with spin locks" {
     key.set(.{ .x = 1, .y = -2, .z = 3.5 });
 
     {
-        const held = key.get_field_ptr_hold_write_lock(.x);
+        const held = key.get_field_ptr_hold_lock(.x);
         held[0].* = 42;
-        held[1].unlock_for_write();
+        held[1].unlock();
     }
     try testing.expectEqual(@as(u32, 42), key.get_field(.x));
 
     {
-        const held = key.get_field_const_ptr_hold_read_lock(.y);
+        const held = key.get_field_const_ptr_hold_locks(.y);
         try testing.expectEqual(@as(i32, -2), held[0].*);
-        held[1].unlock_for_read();
+        held[1].unlock();
     }
 
-    const temp_ptr = key.get_field_ptr_temp_lock(.z);
-    try testing.expectEqual(@as(f32, 3.5), temp_ptr.*);
+    try testing.expectEqual(@as(f32, 3.5), key.get_field(.z));
 
     key.set_field(.y, 7);
     try testing.expectEqual(@as(i32, 7), key.get_field(.y));
@@ -1964,7 +2078,7 @@ test "GlobalMultiTypeBitTrackedPool -> field pointer access with spin locks" {
     key.release();
 }
 
-test "GlobalMultiTypeBitTrackedPool -> field pointer access returns io for unlocking" {
+test "GlobalMultiTypeBitTrackedPool -> field pointer hold-locks unlock through the package" {
     const Pool = GlobalBitTrackedFieldPoolMutexLocked;
 
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
@@ -1978,16 +2092,16 @@ test "GlobalMultiTypeBitTrackedPool -> field pointer access returns io for unloc
     key.set(.{ .x = 1, .y = -2, .z = 3.5 });
 
     {
-        const held = key.get_field_ptr_hold_write_lock(.x);
+        const held = key.get_field_ptr_hold_lock(.x);
         held[0].* = 42;
-        held[1].unlock_for_write(held[2]);
+        held[1].unlock();
     }
     try testing.expectEqual(@as(u32, 42), key.get_field(.x));
 
     {
-        const held = key.get_field_const_ptr_hold_read_lock(.y);
+        const held = key.get_field_const_ptr_hold_locks(.y);
         try testing.expectEqual(@as(i32, -2), held[0].*);
-        held[1].unlock_for_read(held[2]);
+        held[1].unlock();
     }
 
     key.release();

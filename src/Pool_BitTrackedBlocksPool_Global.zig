@@ -329,7 +329,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     self.assert_valid(block);
                     return block.vals[self.elem_idx];
                 }
-                pub fn get_const_ptr_hold_locks(self: KeySelf) struct { *T, LockPackage } {
+                pub fn get_const_ptr_hold_locks(self: KeySelf) struct { *const T, LockPackage } {
                     POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
@@ -343,7 +343,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
                         .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
-                        .pm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
+                        .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
                 pub fn get_ptr_hold_locks(self: KeySelf) struct { *T, LockPackage } {
@@ -360,7 +360,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
                         .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
-                        .pm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
+                        .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
 
@@ -399,7 +399,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
                         .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
-                        .pm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
+                        .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
                 pub fn get_field_const_ptr_hold_locks(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *const POOL.field_type(field), LockPackage } {
@@ -421,7 +421,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
                         .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
-                        .pm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
+                        .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
 
@@ -820,4 +820,4 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
     };
 }
 
-//TODO //CHECKPOINT iterators and field/ptr access
+//TODO //CHECKPOINT iterators
