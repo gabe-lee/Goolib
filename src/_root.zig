@@ -145,7 +145,6 @@ comptime {
         _ = @import("./Layout.zig");
         _ = @import("./ListSegmentAllocator.zig");
         _ = @import("./ListSlice.zig");
-        _ = @import("./Lock.zig");
         _ = @import("./Math.zig");
         _ = @import("./Matrix.zig");
         _ = @import("./Measurement.zig");

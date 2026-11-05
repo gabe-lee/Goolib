@@ -137,10 +137,10 @@ pub const LockKind = enum {
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
             .RW_MUTEX => *RwMutex,
-            .KEYED_SPIN_LOCK => KeyedSpinLock(USE_ASSERTS).WriteKey,
-            .KEYED_RW_SPIN_LOCK => KeyedRwSpinLock(USE_ASSERTS).WriteKey,
-            .KEYED_MUTEX => KeyedMutex(USE_ASSERTS).WriteKey,
-            .KEYED_RW_MUTEX => KeyedRwMutex(USE_ASSERTS).WriteKey,
+            .KEYED_SPIN_LOCK => *KeyedSpinLock(USE_ASSERTS).WriteKey,
+            .KEYED_RW_SPIN_LOCK => *KeyedRwSpinLock(USE_ASSERTS).WriteKey,
+            .KEYED_MUTEX => *KeyedMutex(USE_ASSERTS).WriteKey,
+            .KEYED_RW_MUTEX => *KeyedRwMutex(USE_ASSERTS).WriteKey,
         };
     }
     pub fn io_type(comptime self: LockKind) type {
@@ -149,7 +149,7 @@ pub const LockKind = enum {
             .MUTEX, .RW_MUTEX, .KEYED_MUTEX, .KEYED_RW_MUTEX => Io,
         };
     }
-    pub fn init(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type() {
+    pub fn init(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type(USE_ASSERTS) {
         return switch (comptime self) {
             .NONE => {},
             .SPIN_LOCK => SpinLock{},
@@ -283,55 +283,55 @@ pub fn AnyLock(comptime USE_ASSERT: bool) type {
         KEYED_RW_MUTEX: KeyedRwMutex(USE_ASSERT),
 
         pub fn lock_for_read(self: *Self, io: Io) void {
-            switch (self) {
+            switch (self.*) {
                 .NONE => {},
-                .SPIN_LOCK => |lock| lock.lock_for_read(),
-                .RW_SPIN_LOCK => |lock| lock.lock_for_read(),
-                .MUTEX => |lock| lock.lock_for_read(io),
-                .RW_MUTEX => |lock| lock.lock_for_read(io),
-                .KEYED_SPIN_LOCK => |lock| lock.lock_for_read(),
-                .KEYED_RW_SPIN_LOCK => |lock| lock.lock_for_read(),
-                .KEYED_MUTEX => |lock| lock.lock_for_read(io),
-                .KEYED_RW_MUTEX => |lock| lock.lock_for_read(io),
+                .SPIN_LOCK => |*lock| lock.lock_for_read(),
+                .RW_SPIN_LOCK => |*lock| lock.lock_for_read(),
+                .MUTEX => |*lock| lock.lock_for_read(io),
+                .RW_MUTEX => |*lock| lock.lock_for_read(io),
+                .KEYED_SPIN_LOCK => |*lock| lock.lock_for_read(),
+                .KEYED_RW_SPIN_LOCK => |*lock| lock.lock_for_read(),
+                .KEYED_MUTEX => |*lock| lock.lock_for_read(io),
+                .KEYED_RW_MUTEX => |*lock| lock.lock_for_read(io),
             }
         }
         pub fn unlock_for_read(self: *Self, io: Io) void {
-            switch (self) {
+            switch (self.*) {
                 .NONE => {},
-                .SPIN_LOCK => |lock| lock.unlock_for_read(),
-                .RW_SPIN_LOCK => |lock| lock.unlock_for_read(),
-                .MUTEX => |lock| lock.unlock_for_read(io),
-                .RW_MUTEX => |lock| lock.unlock_for_read(io),
-                .KEYED_SPIN_LOCK => |lock| lock.unlock_for_read(),
-                .KEYED_RW_SPIN_LOCK => |lock| lock.unlock_for_read(),
-                .KEYED_MUTEX => |lock| lock.unlock_for_read(io),
-                .KEYED_RW_MUTEX => |lock| lock.unlock_for_read(io),
+                .SPIN_LOCK => |*lock| lock.unlock_for_read(),
+                .RW_SPIN_LOCK => |*lock| lock.unlock_for_read(),
+                .MUTEX => |*lock| lock.unlock_for_read(io),
+                .RW_MUTEX => |*lock| lock.unlock_for_read(io),
+                .KEYED_SPIN_LOCK => |*lock| lock.unlock_for_read(),
+                .KEYED_RW_SPIN_LOCK => |*lock| lock.unlock_for_read(),
+                .KEYED_MUTEX => |*lock| lock.unlock_for_read(io),
+                .KEYED_RW_MUTEX => |*lock| lock.unlock_for_read(io),
             }
         }
         pub fn lock_for_write(self: *Self, io: Io) void {
-            switch (self) {
+            switch (self.*) {
                 .NONE => {},
-                .SPIN_LOCK => |lock| lock.lock_for_write(),
-                .RW_SPIN_LOCK => |lock| lock.lock_for_write(),
-                .MUTEX => |lock| lock.lock_for_write(io),
-                .RW_MUTEX => |lock| lock.lock_for_write(io),
-                .KEYED_SPIN_LOCK => |lock| lock.lock_for_write(),
-                .KEYED_RW_SPIN_LOCK => |lock| lock.lock_for_write(),
-                .KEYED_MUTEX => |lock| lock.lock_for_write(io),
-                .KEYED_RW_MUTEX => |lock| lock.lock_for_write(io),
+                .SPIN_LOCK => |*lock| lock.lock_for_write(),
+                .RW_SPIN_LOCK => |*lock| lock.lock_for_write(),
+                .MUTEX => |*lock| lock.lock_for_write(io),
+                .RW_MUTEX => |*lock| lock.lock_for_write(io),
+                .KEYED_SPIN_LOCK => |*lock| lock.lock_for_write(),
+                .KEYED_RW_SPIN_LOCK => |*lock| lock.lock_for_write(),
+                .KEYED_MUTEX => |*lock| lock.lock_for_write(io),
+                .KEYED_RW_MUTEX => |*lock| lock.lock_for_write(io),
             }
         }
         pub fn unlock_for_write(self: *Self, io: Io) void {
-            switch (self) {
+            switch (self.*) {
                 .NONE => {},
-                .SPIN_LOCK => |lock| lock.unlock_for_write(),
-                .RW_SPIN_LOCK => |lock| lock.unlock_for_write(),
-                .MUTEX => |lock| lock.unlock_for_write(io),
-                .RW_MUTEX => |lock| lock.unlock_for_write(io),
-                .KEYED_SPIN_LOCK => |lock| lock.unlock_for_write(),
-                .KEYED_RW_SPIN_LOCK => |lock| lock.unlock_for_write(),
-                .KEYED_MUTEX => |lock| lock.unlock_for_write(io),
-                .KEYED_RW_MUTEX => |lock| lock.unlock_for_write(io),
+                .SPIN_LOCK => |*lock| lock.unlock_for_write(),
+                .RW_SPIN_LOCK => |*lock| lock.unlock_for_write(),
+                .MUTEX => |*lock| lock.unlock_for_write(io),
+                .RW_MUTEX => |*lock| lock.unlock_for_write(io),
+                .KEYED_SPIN_LOCK => |*lock| lock.unlock_for_write(),
+                .KEYED_RW_SPIN_LOCK => |*lock| lock.unlock_for_write(),
+                .KEYED_MUTEX => |*lock| lock.unlock_for_write(io),
+                .KEYED_RW_MUTEX => |*lock| lock.unlock_for_write(io),
             }
         }
     };
@@ -400,7 +400,7 @@ pub fn KeyedSpinLock(comptime ENABLE_ASSERTS: bool) type {
             pub fn unlock(self: *WriteKey) void {
                 if (ENABLE_ASSERTS) {
                     assert_with_reason(self.ptr != null, @src(), "KeyedSpinLock Key was improperly created or was already unlocked", .{});
-                    assert_with_reason(self.ptr.?.write_owner == self.id, @src(), "attempted to unlock a KeyedSpinLock with a Key that did did not originally lock it", .{});
+                    assert_with_reason(self.ptr.?.write_owner == self.id, @src(), "attempted to unlock a KeyedSpinLock with a Key that did not originally lock it", .{});
                     self.id = 0;
                     self.ptr.?.write_owner = 0;
                 }
@@ -521,7 +521,7 @@ pub fn KeyedRwSpinLock(comptime ENABLE_ASSERTS: bool) type {
             pub fn unlock(self: *WriteKey) void {
                 if (ENABLE_ASSERTS) {
                     assert_with_reason(self.ptr != null, @src(), "KeyedRwSpinLock Key was improperly created or was already unlocked", .{});
-                    assert_with_reason(self.ptr.?.write_owner_id == self.id, @src(), "attempted to unlock a KeyedRwSpinLock with a Key that did did not originally lock it", .{});
+                    assert_with_reason(self.ptr.?.write_owner_id == self.id, @src(), "attempted to unlock a KeyedRwSpinLock with a Key that did not originally lock it", .{});
                     self.id = 0;
                     self.ptr.?.write_owner_id +%= 1;
                     self.ptr.?.write_owner_id = @max(1, self.ptr.?.write_owner_id);
@@ -557,7 +557,7 @@ pub fn KeyedRwSpinLock(comptime ENABLE_ASSERTS: bool) type {
                 }
             }
 
-            pub fn unlock(self: *WriteKey) void {
+            pub fn unlock(self: *ReadKey) void {
                 if (ENABLE_ASSERTS) {
                     assert_with_reason(self.ptr != null, @src(), "KeyedRwSpinLock Key was improperly created or was already unlocked", .{});
                 }
@@ -565,7 +565,7 @@ pub fn KeyedRwSpinLock(comptime ENABLE_ASSERTS: bool) type {
                 self.ptr = null;
             }
 
-            pub fn unlock_if_needed(self: *WriteKey, needed: bool) void {
+            pub fn unlock_if_needed(self: *ReadKey, needed: bool) void {
                 if (needed) {
                     self.unlock();
                 }
@@ -632,7 +632,7 @@ pub fn KeyedMutex(comptime ENABLE_ASSERTS: bool) type {
 
             /// Locks the lock an updates the key, and a bool
             /// descibing whether the lock was needed
-            pub fn lock_if_needed(self: *WriteKey, lock: *Self) bool {
+            pub fn lock_if_needed(self: *WriteKey, lock: *Self, io: Io) bool {
                 if (self.ptr) |p| {
                     if (ENABLE_ASSERTS) {
                         const this_addr = @intFromPtr(p);
@@ -641,39 +641,39 @@ pub fn KeyedMutex(comptime ENABLE_ASSERTS: bool) type {
                     }
                     return false;
                 } else {
-                    const new_key = lock.keyed_lock_for_write();
+                    const new_key = lock.keyed_lock_for_write(io);
                     self.ptr = new_key.ptr;
                     self.id = new_key.id;
                     return true;
                 }
             }
 
-            pub fn unlock(self: *WriteKey) void {
+            pub fn unlock(self: *WriteKey, io: Io) void {
                 if (ENABLE_ASSERTS) {
                     const this_thread_id = get_this_thread_id();
-                    assert_with_reason(self.ptr != null, @src(), "KeyedRwSpinLock Key was improperly created or was already unlocked", .{});
+                    assert_with_reason(self.ptr != null, @src(), "KeyedMutex Key was improperly created or was already unlocked", .{});
                     assert_with_reason(@atomicLoad(u32, &self.ptr.?.thread_locked_on, .monotonic) == this_thread_id, @src(), "attempted to unlock a KeyedMutex on a thread it was not originally locked on", .{});
-                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.write_owner_id, .monotonic) == self.id, @src(), "attempted to unlock a KeyedRwSpinLock with a Key that did did not originally lock it", .{});
+                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.write_owner_id, .monotonic) == self.id, @src(), "attempted to unlock a KeyedMutex with a Key that did not originally lock it", .{});
                     self.id = 0;
                     self.ptr.?.write_owner_id +%= 1;
                     self.ptr.?.write_owner_id = @max(1, self.ptr.?.write_owner_id);
                     self.ptr.?.thread_locked_on = 0;
                 }
-                self.ptr.?.lock.unlock_for_write();
+                self.ptr.?.lock.unlock_for_write(io);
                 self.ptr = null;
             }
 
-            pub fn unlock_if_needed(self: *WriteKey, needed: bool) void {
+            pub fn unlock_if_needed(self: *WriteKey, needed: bool, io: Io) void {
                 if (needed) {
-                    self.unlock();
+                    self.unlock(io);
                 }
             }
         };
-        pub inline fn keyed_lock_for_read(self: *Self) WriteKey {
-            return self.keyed_lock_for_write();
+        pub inline fn keyed_lock_for_read(self: *Self, io: Io) WriteKey {
+            return self.keyed_lock_for_write(io);
         }
-        pub inline fn keyed_lock_for_write(self: *Self) WriteKey {
-            self.lock.lock_for_write();
+        pub inline fn keyed_lock_for_write(self: *Self, io: Io) WriteKey {
+            self.lock.lock_for_write(io);
             if (ENABLE_ASSERTS) {
                 self.thread_locked_on = get_this_thread_id();
             }
@@ -682,24 +682,25 @@ pub fn KeyedMutex(comptime ENABLE_ASSERTS: bool) type {
                 .id = if (ENABLE_ASSERTS) self.write_owner_id else {},
             };
         }
-        pub inline fn lock_for_read(self: *Self) void {
-            return self.lock_for_write();
+        pub inline fn lock_for_read(self: *Self, io: Io) void {
+            return self.lock_for_write(io);
         }
-        pub inline fn lock_for_write(self: *Self) void {
-            self.lock.lock_for_write();
+        pub inline fn lock_for_write(self: *Self, io: Io) void {
+            self.lock.lock_for_write(io);
             if (ENABLE_ASSERTS) {
                 self.thread_locked_on = get_this_thread_id();
             }
         }
-        pub inline fn unlock_for_read(self: *Self) void {
-            return self.unlock_for_write();
+        pub inline fn unlock_for_read(self: *Self, io: Io) void {
+            return self.unlock_for_write(io);
         }
-        pub inline fn unlock_for_write(self: *Self) void {
+        pub inline fn unlock_for_write(self: *Self, io: Io) void {
             if (ENABLE_ASSERTS) {
-                self.thread_locked_on = get_this_thread_id();
+                const this_thread_id = get_this_thread_id();
+                assert_with_reason(self.thread_locked_on == this_thread_id, @src(), "attempted to unlock a KeyedMutex on a thread it was not originally locked on", .{});
+                self.thread_locked_on = 0;
             }
-            self.thread_locked_on = 0;
-            self.lock.unlock_for_write();
+            self.lock.unlock_for_write(io);
         }
     };
 }
@@ -754,9 +755,9 @@ pub fn KeyedRwMutex(comptime ENABLE_ASSERTS: bool) type {
             pub fn unlock(self: *WriteKey, io: Io) void {
                 if (ENABLE_ASSERTS) {
                     const this_thread_id = get_this_thread_id();
-                    assert_with_reason(self.ptr != null, @src(), "KeyedRwSpinLock Key was improperly created or was already unlocked", .{});
-                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.thread_locked_on, .monotonic) == this_thread_id, @src(), "attempted to unlock a KeyedMutex on a thread it was not originally locked on", .{});
-                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.write_owner_id, .monotonic) == self.id, @src(), "attempted to unlock a KeyedRwSpinLock with a Key that did did not originally lock it", .{});
+                    assert_with_reason(self.ptr != null, @src(), "KeyedRwMutex Key was improperly created or was already unlocked", .{});
+                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.thread_locked_on, .monotonic) == this_thread_id, @src(), "attempted to unlock a KeyedRwMutex on a thread it was not originally locked on", .{});
+                    assert_with_reason(@atomicLoad(u32, &self.ptr.?.write_owner_id, .monotonic) == self.id, @src(), "attempted to unlock a KeyedRwMutex with a Key that did not originally lock it", .{});
                     self.id = 0;
                     self.ptr.?.write_owner_id +%= 1;
                     self.ptr.?.write_owner_id = @max(1, self.ptr.?.write_owner_id);
@@ -793,15 +794,15 @@ pub fn KeyedRwMutex(comptime ENABLE_ASSERTS: bool) type {
                 }
             }
 
-            pub fn unlock(self: *WriteKey, io: Io) void {
+            pub fn unlock(self: *ReadKey, io: Io) void {
                 if (ENABLE_ASSERTS) {
-                    assert_with_reason(self.ptr != null, @src(), "KeyedRwSpinLock Key was improperly created or was already unlocked", .{});
+                    assert_with_reason(self.ptr != null, @src(), "KeyedRwMutex Key was improperly created or was already unlocked", .{});
                 }
                 self.ptr.?.lock.unlock_for_read(io);
                 self.ptr = null;
             }
 
-            pub fn unlock_if_needed(self: *WriteKey, needed: bool, io: Io) void {
+            pub fn unlock_if_needed(self: *ReadKey, needed: bool, io: Io) void {
                 if (needed) {
                     self.unlock(io);
                 }
@@ -812,7 +813,6 @@ pub fn KeyedRwMutex(comptime ENABLE_ASSERTS: bool) type {
             self.lock.lock_for_read(io);
             return ReadKey{
                 .ptr = self,
-                .io = io,
             };
         }
 
@@ -823,7 +823,6 @@ pub fn KeyedRwMutex(comptime ENABLE_ASSERTS: bool) type {
             }
             return WriteKey{
                 .ptr = self,
-                .io = io,
                 .id = if (ENABLE_ASSERTS) self.write_owner_id else {},
             };
         }
@@ -845,9 +844,10 @@ pub fn KeyedRwMutex(comptime ENABLE_ASSERTS: bool) type {
 
         pub inline fn unlock_for_write(self: *Self, io: Io) void {
             if (ENABLE_ASSERTS) {
-                self.thread_locked_on = get_this_thread_id();
+                const this_thread_id = get_this_thread_id();
+                assert_with_reason(self.thread_locked_on == this_thread_id, @src(), "attempted to unlock a KeyedRwMutex on a thread it was not originally locked on", .{});
+                self.thread_locked_on = 0;
             }
-            self.thread_locked_on = 0;
             self.lock.unlock_for_write(io);
         }
     };
