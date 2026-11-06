@@ -153,6 +153,13 @@ pub const GlobalDef = struct {
     MAX_GENERATION: PowerOf2 = ._4_294_967_296,
     /// A list of all types for the Global Multi-Type Pool
     POOL_DEFS: []const SubPoolDef,
+    /// If included, every element will have this metadata type
+    /// paired along side it, regardless of pool type.
+    ELEM_METADATA_TYPE: ?type = null,
+    /// If included and `ELEM_METADATA_TYPE != null`,
+    /// the element metadata will be initialized to the
+    /// value pointed to by this pointer on element claim
+    ELEM_METADATA_TYPE_DEFAULT: ?*const anyopaque = null,
     /// The thead safety model to use for the global pool
     THREAD_SAFETY: ThreadSafteyModel = .no_thread_safety(),
     /// How to handle assertions for element state
@@ -218,6 +225,9 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
         const ElemLockIo = ELEM_LOCK_MODE.io_type();
         const TypeId = PowerOf2.round_up_to_power_of_2(NUM_TYPES).unsigned_integer_type_that_holds_all_values_less_than();
         const PoolTypes = pool_types_const;
+        const HAS_META = GDEF.ELEM_METADATA_TYPE != null;
+        const META = if (GDEF.ELEM_METADATA_TYPE) |MT| MT else void;
+        const META_DEFAULT: META = if (HAS_META) (if (GDEF.ELEM_METADATA_TYPE_DEFAULT) |ptr| @as(*const META, @ptrCast(@alignCast(ptr))) else undefined) else {};
         const POOLS = build: {
             var out: [NUM_TYPES]type = undefined;
             for (GDEF.POOL_DEFS, 0..) |def, i| {
@@ -265,10 +275,35 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 };
                 const POOL_DEF = POOL_DEFS[POOL_IDX];
                 const POOL: type = POOLS[POOL_IDX];
+                comptime {
+                    assert_with_reason(@typeInfo(KeySelf).@"struct".backing_integer.? == @typeInfo(OpaqueKey).@"struct".backing_integer.?, null, "the backing integer of `Key({s})` ({s}) does not match the backing integer of `OpaqueKey` ({s})", .{ @typeName(T), @typeInfo(KeySelf).@"struct".backing_integer.?, @typeInfo(OpaqueKey).@"struct".backing_integer.? });
+                    assert_with_reason(@typeInfo(KeySelf).@"struct".backing_integer.? == @typeInfo(ConstKey(T)).@"struct".backing_integer.?, null, "the backing integer of `Key({s})` ({s}) does not match the backing integer of `ConstKey({s})` ({s})", .{ @typeName(T), @typeInfo(KeySelf).@"struct".backing_integer.?, @typeName(T), @typeInfo(OpaqueKey).@"struct".backing_integer.? });
+                    assert_with_reason(@bitSizeOf(POOL.BlockIdx) + @bitSizeOf(POOL.SubElemIdx) == @bitSizeOf(ElemIdx), null, "for `Key({s})`, `@bitSizeOf(POOL.BlockIdx)` ({d}) + `@bitSizeOf(POOL.SubElemIdx)` ({d}) does not match `@bitSizeOf(ElemIdx)` ({d})", .{ @typeName(T), @bitSizeOf(POOL.BlockIdx) + @bitSizeOf(POOL.SubElemIdx) == @bitSizeOf(ElemIdx) });
+                }
+                pub const Field = POOL.FIELD_ENUM;
+                pub fn FieldType(comptime field: Field) type {
+                    return POOL.field_type(field);
+                }
+                pub const INVALID = KeySelf{
+                    .block_idx = math.maxInt(POOL.BlockIdx),
+                    .elem_idx = math.maxInt(POOL.SubElemIdx),
+                    .gen = math.maxInt(GenId),
+                };
+                pub const FA_MODE: FieldAccessMode = POOL.FA_MODE;
 
                 block_idx: POOL.BlockIdx,
                 elem_idx: POOL.SubElemIdx,
                 gen: GenId,
+
+                pub inline fn to_opaque(self: KeySelf) OpaqueKey {
+                    return @fromBackingInt(@backingInt(self));
+                }
+                pub inline fn from_opaque(opq: OpaqueKey) KeySelf {
+                    return @fromBackingInt(@backingInt(opq));
+                }
+                pub inline fn to_const(self: KeySelf) ConstKey(T) {
+                    return @fromBackingInt(@backingInt(self));
+                }
 
                 fn assert_valid(self: KeySelf, block: *POOL.DataBlock) void {
                     StateAssert._with_reason(block.gens[self.elem_idx] == self.gen, @src(), "cached gen does not match gen on key ({d} != {d}), key invalid", .{ block.gens[self.elem_idx], self.gen });
@@ -328,6 +363,35 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
                     self.assert_valid(block);
                     return block.vals[self.elem_idx];
+                }
+                pub fn get_meta(self: KeySelf) META {
+                    if (comptime !HAS_META) return {};
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
+                    const block = POOL.pool.blocks[self.block_idx];
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    self.assert_valid(block);
+                    return block.meta[self.elem_idx];
+                }
+                pub fn get_val_and_meta(self: KeySelf) struct { T, META } {
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
+                    const block = POOL.pool.blocks[self.block_idx];
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    self.assert_valid(block);
+                    if (comptime HAS_META) {
+                        return .{ block.vals[self.elem_idx], block.meta[self.elem_idx] };
+                    } else {
+                        return .{ block.vals[self.elem_idx], {} };
+                    }
                 }
                 pub fn get_const_ptr_hold_locks(self: KeySelf) struct { *const T, LockPackage } {
                     POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
@@ -437,6 +501,34 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     self.assert_valid(block);
                     block.vals[self.elem_idx] = val;
                 }
+                pub fn set_meta(self: KeySelf, meta: META) void {
+                    if (comptime !HAS_META) return;
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
+                    const block = POOL.pool.blocks[self.block_idx];
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    self.assert_valid(block);
+                    block.meta[self.elem_idx] = meta;
+                }
+                pub fn set_val_and_meta(self: KeySelf, val: T, meta: META) void {
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
+                    const block = POOL.pool.blocks[self.block_idx];
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    self.assert_valid(block);
+                    block.vals[self.elem_idx] = val;
+                    if (comptime HAS_META) {
+                        block.meta[self.elem_idx] = meta;
+                    }
+                }
                 pub fn set_field(self: KeySelf, comptime field: POOL.FIELDS_ENUM, val: POOL.field_type(field)) void {
                     POOL.assert_field_access();
                     POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
@@ -493,6 +585,90 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
             };
         }
+        pub fn ConstKey(comptime T: type) type {
+            return packed struct {
+                const KeySelf = @This();
+                pub const TYPE = T;
+                const POOL_IDX = find: {
+                    for (GDEF.POOL_DEFS, 0..) |def, i| {
+                        if (def.TYPE == T) break :find i;
+                    }
+                    assert_unreachable(null, "type `{s}` is not valid for any pool", .{@typeName(T)});
+                };
+                const POOL_DEF = POOL_DEFS[POOL_IDX];
+                const POOL: type = POOLS[POOL_IDX];
+                comptime {
+                    assert_with_reason(@typeInfo(KeySelf).@"struct".backing_integer.? == @typeInfo(OpaqueKey).@"struct".backing_integer.?, null, "the backing integer of `ConstKey({s})` ({s}) does not match the backing integer of `OpaqueKey` ({s})", .{ @typeName(T), @typeInfo(KeySelf).@"struct".backing_integer.?, @typeInfo(OpaqueKey).@"struct".backing_integer.? });
+                    assert_with_reason(@bitSizeOf(POOL.BlockIdx) + @bitSizeOf(POOL.SubElemIdx) == @bitSizeOf(ElemIdx), null, "for `ConstKey({s})`, `@bitSizeOf(POOL.BlockIdx)` ({d}) + `@bitSizeOf(POOL.SubElemIdx)` ({d}) does not match `@bitSizeOf(ElemIdx)` ({d})", .{ @typeName(T), @bitSizeOf(POOL.BlockIdx) + @bitSizeOf(POOL.SubElemIdx) == @bitSizeOf(ElemIdx) });
+                }
+                pub const Field = POOL.FIELD_ENUM;
+                pub fn FieldType(comptime field: Field) type {
+                    return POOL.field_type(field);
+                }
+                pub const INVALID = KeySelf{
+                    .block_idx = math.maxInt(POOL.BlockIdx),
+                    .elem_idx = math.maxInt(POOL.SubElemIdx),
+                    .gen = math.maxInt(GenId),
+                };
+                pub const FA_MODE: FieldAccessMode = POOL.FA_MODE;
+
+                block_idx: POOL.BlockIdx,
+                elem_idx: POOL.SubElemIdx,
+                gen: GenId,
+
+                inline fn to_mut(self: KeySelf) Key(T) {
+                    return @fromBackingInt(@backingInt(self));
+                }
+                pub inline fn to_opaque(self: KeySelf) OpaqueKey {
+                    return @fromBackingInt(@backingInt(self));
+                }
+                pub inline fn from_opaque(opq: OpaqueKey) KeySelf {
+                    return @fromBackingInt(@backingInt(opq));
+                }
+
+                pub inline fn is_valid(self: KeySelf) bool {
+                    return self.to_mut().is_valid();
+                }
+
+                pub inline fn get(self: KeySelf) T {
+                    return self.to_mut().get();
+                }
+                pub inline fn get_const_ptr_hold_locks(self: KeySelf) struct { *const T, LockPackage } {
+                    return self.to_mut().get_const_ptr_hold_locks();
+                }
+                pub inline fn get_ptr_hold_locks(self: KeySelf) struct { *T, LockPackage } {
+                    return self.to_mut().get_ptr_hold_locks();
+                }
+
+                pub inline fn get_field(self: KeySelf, comptime field: POOL.FIELDS_ENUM) POOL.field_type(field) {
+                    return self.to_mut().get_field(field);
+                }
+                pub inline fn get_field_ptr_hold_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *POOL.field_type(field), LockPackage } {
+                    return self.to_mut().get_field_ptr_hold_lock(field);
+                }
+                pub inline fn get_field_const_ptr_hold_locks(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *const POOL.field_type(field), LockPackage } {
+                    return self.to_mut().get_field_const_ptr_hold_locks(field);
+                }
+
+                pub inline fn release_advanced(self: KeySelf, comptime pool_lock_mode: PoolLockMode, comptime block_lock_mode: BlockLockMode, comptime elem_lock_mode: ElemLockMode) void {
+                    return self.to_mut().release_advanced(pool_lock_mode, block_lock_mode, elem_lock_mode);
+                }
+                pub inline fn release(self: KeySelf) void {
+                    self.to_mut().release_advanced(.CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS, .CHECK_ELEM_LOCKS);
+                }
+            };
+        }
+        pub const OpaqueKey = packed struct {
+            idx: ElemIdx,
+            gen: GenId,
+
+            pub inline fn to_typed(self: OpaqueKey, comptime T: type) Key(T) {
+                return Key(T).from_opaque(self);
+            }
+            pub inline fn from_typed(comptime T: type, key: Key(T)) OpaqueKey {
+                return key.to_opaque();
+            }
+        };
         fn SubPool(comptime DEF: SubPoolDef) type {
             assert_with_reason(Types.type_is_unsigned_int(ElemIdx), @src(), "type `ElemIdx` must be an unsigned integer type, got type `{s}`", .{@typeName(ElemIdx)});
             assert_with_reason(@sizeOf(DEF.TYPE) > 0, @src(), "type `TYPE` must have a non-zero size so that every slot has a distinct address", .{});
@@ -571,6 +747,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
                 const DataBlock = struct {
                     vals: [ELEMENTS_PER_BLOCK]DEF.TYPE = undefined,
+                    meta: if (HAS_META) [ELEMENTS_PER_BLOCK]META else void = if (HAS_META) @splat(META_DEFAULT) else {},
                     gens: [ELEMENTS_PER_BLOCK]GenId = @splat(0),
                     state: [DATA_BLOCK_STATE_GROUP_LENGTH]STATE_UINT align(STATE_VEC_ALIGN) = @splat(EMPTY_STATE_BLOCK),
                     val_locks: [ELEMENTS_PER_BLOCK]ElemLock = @splat(ElemLockDefault),
@@ -631,6 +808,9 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                     const elem_idx_wide = ((state_idx + first_group_with_empty) * SLOT_STEP_PER_STATE_GROUP) + first_emtpy_slot_in_block;
                                     assert_with_reason(elem_idx_wide < ELEMENTS_PER_BLOCK, @src(), "claim found a free state bit beyond the configured slots per block", .{});
                                     const elem_idx: SubElemIdx = @intCast(elem_idx_wide);
+                                    if (comptime HAS_META) {
+                                        block.meta[elem_idx] = META_DEFAULT;
+                                    }
                                     const key = Key(TYPE){
                                         .block_idx = @intCast(block_idx),
                                         .elem_idx = elem_idx,
