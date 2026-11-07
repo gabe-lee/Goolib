@@ -1609,19 +1609,123 @@ pub const PowerOf2 = enum(u8) {
     _18_446_744_073_709_551_616 = 64,
     _,
 
-    pub const U8_POWER: PowerOf2 = @fromBackingInt(8);
-    pub const U16_POWER: PowerOf2 = @fromBackingInt(16);
-    pub const U32_POWER: PowerOf2 = @fromBackingInt(32);
-    pub const U64_POWER: PowerOf2 = @fromBackingInt(64);
-    pub const USIZE_POWER = if (@sizeOf(usize) == 4) PowerOf2._32 else PowerOf2._64;
-    pub const USIZE_BITS = if (@sizeOf(usize) == 4) 32 else 64;
-    pub const USIZE_BITS_MINUS_ONE = USIZE_BITS - 1;
-    pub const USIZE_BITS_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
+    pub const Bytes = struct {
+        pub const _1_B = PowerOf2._1;
+        pub const _2_B = PowerOf2._2;
+        pub const _4_B = PowerOf2._4;
+        pub const _8_B = PowerOf2._8;
+        pub const _16_B = PowerOf2._16;
+        pub const _32_B = PowerOf2._32;
+        pub const _64_B = PowerOf2._64;
+        pub const _128_B = PowerOf2._128;
+        pub const _256_B = PowerOf2._256;
+        pub const _512_B = PowerOf2._512;
+        pub const _1_KB = PowerOf2._1_024;
+        pub const _2_KB = PowerOf2._2_048;
+        pub const _4_KB = PowerOf2._4_096;
+        pub const _8_KB = PowerOf2._8_192;
+        pub const _16_KB = PowerOf2._16_384;
+        pub const _32_KB = PowerOf2._32_768;
+        pub const _64_KB = PowerOf2._65_536;
+        pub const _128_KB = PowerOf2._131_072;
+        pub const _256_KB = PowerOf2._262_144;
+        pub const _512_KB = PowerOf2._524_288;
+        pub const _1_MB = PowerOf2._1_048_576;
+        pub const _2_MB = PowerOf2._2_097_152;
+        pub const _4_MB = PowerOf2._4_194_304;
+        pub const _8_MB = PowerOf2._8_388_608;
+        pub const _16_MB = PowerOf2._16_777_216;
+        pub const _32_MB = PowerOf2._33_554_432;
+        pub const _64_MB = PowerOf2._67_108_864;
+        pub const _128_MB = PowerOf2._134_217_728;
+        pub const _256_MB = PowerOf2._268_435_456;
+        pub const _512_MB = PowerOf2._536_870_912;
+        pub const _1_GB = PowerOf2._1_073_741_824;
+        pub const _2_GB = PowerOf2._2_147_483_648;
+        pub const _4_GB = PowerOf2._4_294_967_296;
+        pub const _8_GB = PowerOf2._8_589_934_592;
+        pub const _16_GB = PowerOf2._17_179_869_184;
+        pub const _32_GB = PowerOf2._34_359_738_368;
+        pub const _64_GB = PowerOf2._68_719_476_736;
+        pub const _128_GB = PowerOf2._137_438_953_472;
+        pub const _256_GB = PowerOf2._274_877_906_944;
+        pub const _512_GB = PowerOf2._549_755_813_888;
+        pub const _1_TB = PowerOf2._1_099_511_627_776;
+        pub const _2_TB = PowerOf2._2_199_023_255_552;
+        pub const _4_TB = PowerOf2._4_398_046_511_104;
+        pub const _8_TB = PowerOf2._8_796_093_022_208;
+        pub const _16_TB = PowerOf2._17_592_186_044_416;
+        pub const _32_TB = PowerOf2._35_184_372_088_832;
+        pub const _64_TB = PowerOf2._70_368_744_177_664;
+        pub const _128_TB = PowerOf2._140_737_488_355_328;
+        pub const _256_TB = PowerOf2._281_474_976_710_656;
+        pub const _512_TB = PowerOf2._562_949_953_421_312;
+        pub const _1_PtB = PowerOf2._1_125_899_906_842_624;
+        pub const _2_PtB = PowerOf2._2_251_799_813_685_248;
+        pub const _4_PtB = PowerOf2._4_503_599_627_370_496;
+        pub const _8_PtB = PowerOf2._9_007_199_254_740_992;
+        pub const _16_PtB = PowerOf2._18_014_398_509_481_984;
+        pub const _32_PtB = PowerOf2._36_028_797_018_963_968;
+        pub const _64_PtB = PowerOf2._72_057_594_037_927_936;
+        pub const _128_PtB = PowerOf2._144_115_188_075_855_872;
+        pub const _256_PtB = PowerOf2._288_230_376_151_711_744;
+        pub const _512_PtB = PowerOf2._576_460_752_303_423_488;
+        pub const _1_ExB = PowerOf2._1_152_921_504_606_846_976;
+        pub const _2_ExB = PowerOf2._2_305_843_009_213_693_952;
+        pub const _4_ExB = PowerOf2._4_611_686_018_427_387_904;
+        pub const _8_ExB = PowerOf2._9_223_372_036_854_775_808;
+        pub const _16_ExB = PowerOf2._18_446_744_073_709_551_616;
+    };
+
+    pub const U8_BITS: PowerOf2 = @fromBackingInt(8);
+    pub const U16_BITS: PowerOf2 = @fromBackingInt(16);
+    pub const U32_BITS: PowerOf2 = @fromBackingInt(32);
+    pub const U64_BITS: PowerOf2 = @fromBackingInt(64);
+    pub const USIZE_BITS: PowerOf2 = if (@sizeOf(usize) == 4) PowerOf2._32 else PowerOf2._64;
+    pub const U8_BYTES: PowerOf2 = @fromBackingInt(1);
+    pub const U16_BYTES: PowerOf2 = @fromBackingInt(2);
+    pub const U32_BYTES: PowerOf2 = @fromBackingInt(4);
+    pub const U64_BYTES: PowerOf2 = @fromBackingInt(8);
+    pub const STD_HEAP_MIN_PAGE_SIZE = round_up_to_power_of_2(std.heap.page_size_min);
+    pub const STD_HEAP_MAX_PAGE_SIZE = round_up_to_power_of_2(std.heap.page_size_max);
+    pub const USIZE_BYTES: PowerOf2 = if (@sizeOf(usize) == 4) PowerOf2._4 else PowerOf2._8;
+    pub const USIZE_BITS_VAL = if (@sizeOf(usize) == 4) 32 else 64;
+    pub const USIZE_BITS_VAL_MINUS_ONE = USIZE_BITS_VAL - 1;
+    pub const USIZE_BITS_VAL_SHIFT = if (@sizeOf(usize) == 4) 5 else 6;
+
+    pub inline fn less_than(self: PowerOf2, other: PowerOf2) bool {
+        return @backingInt(self) < @backingInt(other);
+    }
+    pub inline fn less_than_or_equal(self: PowerOf2, other: PowerOf2) bool {
+        return @backingInt(self) <= @backingInt(other);
+    }
+    pub inline fn greater_than(self: PowerOf2, other: PowerOf2) bool {
+        return @backingInt(self) > @backingInt(other);
+    }
+    pub inline fn greater_than_or_equal(self: PowerOf2, other: PowerOf2) bool {
+        return @backingInt(self) >= @backingInt(other);
+    }
+    pub inline fn multiply_value(self: PowerOf2, other: PowerOf2) PowerOf2 {
+        return @fromBackingInt(@backingInt(self) + @backingInt(other));
+    }
+    pub inline fn divide_value(self: PowerOf2, other: PowerOf2) PowerOf2 {
+        return @fromBackingInt(@backingInt(self) - @backingInt(other));
+    }
+    pub inline fn min(self: PowerOf2, other: PowerOf2) PowerOf2 {
+        return @fromBackingInt(@min(@backingInt(self), @backingInt(other)));
+    }
+    pub inline fn max(self: PowerOf2, other: PowerOf2) PowerOf2 {
+        return @fromBackingInt(@max(@backingInt(self), @backingInt(other)));
+    }
 
     pub fn to_alloc_align(self: PowerOf2) std.mem.Alignment {
         const raw = @backingInt(self);
         const raw_cast: math.Log2Int(usize) = @intCast(raw);
         return @fromBackingInt(@intCast(raw_cast));
+    }
+
+    pub fn from_alloc_align(alignment: std.mem.Alignment) PowerOf2 {
+        return @fromBackingInt(@as(u8, @intCast(@backingInt(alignment))));
     }
 
     pub fn align_of_type(comptime T: type) PowerOf2 {
@@ -1637,6 +1741,9 @@ pub const PowerOf2 = enum(u8) {
     }
     pub fn raw_int(power: PowerOf2) u8 {
         return @backingInt(power);
+    }
+    pub fn raw_int_as(power: PowerOf2, comptime T: type) T {
+        return @intCast(@backingInt(power));
     }
 
     pub fn unsigned_integer_type_that_holds_all_values_less_than(comptime limit: PowerOf2) type {
@@ -1705,6 +1812,7 @@ pub const PowerOf2 = enum(u8) {
         };
         return @fromBackingInt(@intCast(i));
     }
+
     pub fn value(self: PowerOf2) u64 {
         return @as(u64, 1) << @intCast(@backingInt(self));
     }
@@ -1721,7 +1829,7 @@ pub const PowerOf2 = enum(u8) {
     }
 
     pub fn usize_blocks_needed(count: anytype, bit_size: anytype) usize {
-        return PowerOf2.align_value_forward(PowerOf2.USIZE_POWER, Math.upgrade_multiply_out(count, bit_size, usize)) >> PowerOf2.USIZE_BITS_SHIFT;
+        return PowerOf2.align_value_forward(PowerOf2.USIZE_BITS_VAL, Math.upgrade_multiply_out(count, bit_size, usize)) >> PowerOf2.USIZE_BITS_VAL_SHIFT;
     }
 
     pub fn align_value_forward(self: PowerOf2, int_or_ptr: anytype) @TypeOf(int_or_ptr) {

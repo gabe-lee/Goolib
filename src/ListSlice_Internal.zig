@@ -1290,11 +1290,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             self.root_offset = offset;
         }
         pub inline fn get_unused_space(self: List) IDX {
-            return get_cap(
-                self,
-            ) - get_len(
-                self,
-            );
+            return get_cap(self) - get_len(self);
         }
         pub inline fn clear(self: *List) void {
             self.set_len_unchecked(0);

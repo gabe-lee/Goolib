@@ -91,6 +91,19 @@ pub const LockKind = enum {
             .KEYED_RW_MUTEX => *KeyedRwMutex(USE_ASSERTS),
         };
     }
+    pub fn opt_lock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
+        return switch (comptime self) {
+            .NONE => void,
+            .SPIN_LOCK => ?*SpinLock,
+            .RW_SPIN_LOCK => ?*RwSpinLock,
+            .MUTEX => ?*Mutex,
+            .RW_MUTEX => ?*RwMutex,
+            .KEYED_SPIN_LOCK => ?*KeyedSpinLock(USE_ASSERTS),
+            .KEYED_RW_SPIN_LOCK => ?*KeyedRwSpinLock(USE_ASSERTS),
+            .KEYED_MUTEX => ?*KeyedMutex(USE_ASSERTS),
+            .KEYED_RW_MUTEX => ?*KeyedRwMutex(USE_ASSERTS),
+        };
+    }
     pub fn keyed_read_unlock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
             .NONE => void,
@@ -149,6 +162,14 @@ pub const LockKind = enum {
             .MUTEX, .RW_MUTEX, .KEYED_MUTEX, .KEYED_RW_MUTEX => Io,
         };
     }
+    pub fn get_lock_ptr(comptime self: LockKind, comptime USE_ASSERTS: bool, container: anytype, comptime field: []const u8) self.lock_ptr_type(USE_ASSERTS) {
+        return switch (comptime self) {
+            .NONE => {},
+            else => {
+                return &@field(container, field);
+            },
+        };
+    }
     pub fn init(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type(USE_ASSERTS) {
         return switch (comptime self) {
             .NONE => {},
@@ -160,6 +181,19 @@ pub const LockKind = enum {
             .KEYED_RW_SPIN_LOCK => KeyedRwSpinLock(USE_ASSERTS){},
             .KEYED_MUTEX => KeyedMutex(USE_ASSERTS){},
             .KEYED_RW_MUTEX => KeyedRwMutex(USE_ASSERTS){},
+        };
+    }
+    pub fn null_opt_ptr(comptime self: LockKind, comptime USE_ASSERTS: bool) self.opt_lock_ptr_type(USE_ASSERTS) {
+        return switch (comptime self) {
+            .NONE => {},
+            .SPIN_LOCK => null,
+            .RW_SPIN_LOCK => null,
+            .MUTEX => null,
+            .RW_MUTEX => null,
+            .KEYED_SPIN_LOCK => null,
+            .KEYED_RW_SPIN_LOCK => null,
+            .KEYED_MUTEX => null,
+            .KEYED_RW_MUTEX => null,
         };
     }
     pub fn lock_for_read(comptime KIND: LockKind, comptime USE_ASSERTS: bool, lock: KIND.lock_ptr_type(USE_ASSERTS), io: KIND.io_type()) void {

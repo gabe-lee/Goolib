@@ -56,9 +56,13 @@ const GlobalMultiTypeBitTrackedPool = BitTrackedBlocksGlobalModule.GlobalMultiTy
 const GlobalPoolDef = BitTrackedBlocksGlobalModule.GlobalDef;
 const SubPoolDef = BitTrackedBlocksGlobalModule.SubPoolDef;
 const ThreadSafteyModel = BitTrackedBlocksGlobalModule.ThreadSafteyModel;
+const LockKind = BitTrackedBlocksGlobalModule.LockKind;
 const AssertBehavior = Root.CommonTypes.AssertBehavior;
+const QuickBucketAllocator = Root.Allocator.QuickBucketAlloc.QuickBucketAllocator;
+const QuickBucketAllocatorDef = Root.Allocator.QuickBucketAlloc.Def;
+const List = Root.ListSlice.ListFullDefinition;
 
-const ct_assert_with_reason = Assert_.assert_with_reason;
+const ct_assert_with_reason = Assert_.Assert._with_reason;
 const ct_assert_unreachable = Assert_.assert_unreachable;
 const ct_assert_unreachable_err = Assert_.assert_unreachable_err;
 const ct_assert_allocation_failure = Assert_.assert_allocation_failure;
@@ -157,129 +161,85 @@ pub const SubPoolDefPSS = struct {
 
 pub const Settings = struct {
     MASTER_ASSERT_MODE: AssertBehavior = .PANIC_IN_SAFE_MODES,
-    RECURSION_ASSERT_MODE: AssertBehavior = .PANIC_IN_SAFE_MODES,
     ELEM_STATE_ASSERT_MODE: AssertBehavior = .PANIC_IN_SAFE_MODES,
-    MAX_NUM_ELEMS_PER_TYPE: PowerOf2 = ._4_294_967_296,
-    MAX_GENERATION: PowerOf2 = ._4_294_967_296,
+    THREAD_SAFETY_ASSERT_MODE: AssertBehavior = .PANIC_IN_SAFE_MODES,
+    MAX_NUM_ELEMS_PER_TYPE: PowerOf2 = ._65_536,
+    MAX_ELEM_GENERATION: PowerOf2 = ._65_536,
+    MAX_FUNC_INPUTS: PowerOf2 = ._16,
+    MAX_FUNC_OUTPUTS: PowerOf2 = ._16,
+    FUNCTION_NAMES_ENUM: type,
     TYPE_POOL_DEFS: []const SubPoolDefPSS,
     THREAD_SAFETY: ThreadSafteyModel = .no_thread_safety(),
-    UNIQUE_NAME: []const u8 = "<DEFAULT>",
-    ALLOW_FUNCTION_DELETION: bool = false,
-    ALLOW_FUNCTION_REPLACEMENT: bool = false,
-    DELETE_DEPENDANT_PARAMETERS_WHEN_FUNCTION_DELETED: bool = true,
+    PSS_LOCK_KIND: LockKind = .NONE,
+    UNIQUE_NAME: []const u8 = "PARAMETRIC_STATE_SYSTEM",
     MAX_NUM_UNIQUE_FUNCTION_PAYLOADS: PowerOf2 = ._65_536,
-    MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE: PowerOf2 = ._256,
-    ALLOWED_RECURSIVE_UPDATES: usize = 0,
-    MAX_PAYLOAD_LIST_LIMIT: PowerOf2 = ._2_097_152,
-
-    pub fn make_pool_type(comptime self: Settings) type {
-        comptime var defs: [self.TYPE_POOL_DEFS.len]SubPoolDef = undefined;
-        inline for (self.TYPE_POOL_DEFS, 0..) |def, i| {
-            defs[i] = def.to_sub_pool_def();
-        }
-        return GlobalMultiTypeBitTrackedPool(GlobalPoolDef{
-            .POOL_DEFS = defs[0..],
-            .ELEM_STATE_ASSERT_MODE = self.ELEM_STATE_ASSERT_MODE,
-            .MAX_GENERATION = self.MAX_GENERATION,
-            .MAX_NUM_ELEMS = self.MAX_NUM_ELEMS_PER_TYPE,
-            .THREAD_SAFETY = self.THREAD_SAFETY,
-            .UNIQUE_NAME = self.UNIQUE_NAME ++ "_DATA_POOLS",
-        });
-    }
+    QUICK_BUCKET_ALLOC_BACKING_BLOCK_SIZE: PowerOf2 = ._4_096,
+    QUICK_BUCKET_ALLOC_META_BACKING_BLOCK_SIZE: PowerOf2 = ._4_096,
 };
-
-const FuncInOuts = struct {
-    fn_type: type,
-    in: type,
-    out: type,
-    num_ins: usize,
-    num_outs: usize,
-};
-
-pub fn FuncDefinition(comptime FN_NAME: type) type {
-    return struct {
-        const Self = @This();
-        NAME: FN_NAME,
-        INPUT_STRUCT: type,
-        OUTPUT_STRUCT: type,
-
-        pub fn make_func_in_outs(comptime self: Self, comptime PSS: type) FuncInOuts {
-            ct_assert_with_reason(Types.type_is_struct(self.INPUT_STRUCT), @src(), "function `{s}` input type was not a struct, got type `{s}`", .{ @tagName(self.NAME), @typeName(self.INPUT_STRUCT) });
-            ct_assert_with_reason(Types.type_is_struct(self.OUTPUT_STRUCT), @src(), "function `{s}` output type was not a struct, got type `{s}`", .{ @tagName(self.NAME), @typeName(self.OUTPUT_STRUCT) });
-            const IN_INFO = @typeInfo(self.INPUT_STRUCT).@"struct";
-            const OUT_INFO = @typeInfo(self.OUTPUT_STRUCT).@"struct";
-            comptime var in_keys: [IN_INFO.field_types.len]type = undefined;
-            comptime var in_attrs: [IN_INFO.field_types.len]std.builtin.Type.Struct.FieldAttributes = undefined;
-            inline for (IN_INFO.field_types, 0..) |real_t, i| {
-                in_attrs[i] = std.builtin.Type.Struct.FieldAttributes{
-                    .@"align" = null,
-                    .@"comptime" = false,
-                    .default_value_ptr = @ptrCast(&PSS.ConstKey(real_t).INVALID),
-                };
-                in_keys[i] = PSS.ConstKey(real_t);
-            }
-            const IN_STRUCT = @Struct(.auto, null, IN_INFO.field_names, &in_keys, &in_attrs);
-            comptime var out_keys: [IN_INFO.field_types.len]type = undefined;
-            comptime var out_attrs: [IN_INFO.field_types.len]std.builtin.Type.Struct.FieldAttributes = undefined;
-            inline for (OUT_INFO.field_types, 0..) |real_t, i| {
-                out_attrs[i] = std.builtin.Type.Struct.FieldAttributes{
-                    .@"align" = null,
-                    .@"comptime" = false,
-                    .default_value_ptr = @ptrCast(&PSS.Key(real_t).INVALID),
-                };
-                out_keys[i] = PSS.Key(real_t);
-            }
-            const OUT_STRUCT = @Struct(.auto, null, OUT_INFO.field_names, &out_keys, &out_attrs);
-            const FN_PARAM_TYPES = [2]type{ IN_STRUCT, OUT_STRUCT };
-            const FN_PARAM_ATTRS = [2]std.builtin.Type.Fn.ParamAttributes{
-                std.builtin.Type.Fn.ParamAttributes{ .@"noalias" = false },
-                std.builtin.Type.Fn.ParamAttributes{ .@"noalias" = false },
-            };
-            const FN = @Fn(FN_PARAM_TYPES[0..], &FN_PARAM_ATTRS, void, .{ .@"callconv" = .auto, .varargs = false });
-            return FuncInOuts{
-                .in = IN_STRUCT,
-                .out = OUT_STRUCT,
-                .fn_type = FN,
-                .num_ins = in_keys.len,
-                .num_outs = out_keys.len,
-            };
-        }
-    };
-}
 
 pub fn ParametricStateSystem(
     /// The main settings for the ParametricStateSystem
-    comptime SETTINGS_: Settings,
-    /// An enum type with a tag name for each function that will be used for updates.
-    comptime FUNCTION_NAMES: type,
-    /// A list of function definitions that define the inputs and outputs
-    /// for each defined function name
-    comptime FUNCTION_DEFS: [Types.enum_defined_field_count(FUNCTION_NAMES)]FuncDefinition(FUNCTION_NAMES),
+    comptime DEF_: Settings,
 ) type {
-    ct_assert_with_reason(Types.type_is_enum(FUNCTION_NAMES) and Types.all_enum_values_start_from_zero_with_no_gaps(FUNCTION_NAMES), @src(), "type `FUNCTION_NAMES` must be an enum type with tag values from 0 to max with no gaps, got type `{s}`", .{@typeName(FUNCTION_NAMES)});
-    const NUM_FUNCTIONS = Types.enum_defined_field_count(FUNCTION_NAMES);
-    comptime var ordered_func_defs: [NUM_FUNCTIONS]FuncDefinition(FUNCTION_NAMES) = undefined;
-    comptime var func_defs_defined: [NUM_FUNCTIONS]bool = @splat(false);
-    comptime var ordered_func_names: [NUM_FUNCTIONS][]const u8 = undefined;
-    inline for (FUNCTION_DEFS) |fn_def| {
-        const idx = @backingInt(fn_def.NAME);
-        ct_assert_with_reason(func_defs_defined[idx] == false, @src(), "func name `{s}` was defined more than once", .{@tagName(fn_def.NAME)});
-        func_defs_defined[idx] = true;
-        ordered_func_names[idx] = @tagName(fn_def.NAME);
-        ordered_func_defs[idx] = fn_def;
-    }
-    const ordered_func_defs_const = ordered_func_defs;
-    const ordered_func_names_const = ordered_func_names;
-
+    ct_assert_with_reason(Types.all_enum_values_start_from_zero_with_no_gaps(DEF_.FUNCTION_NAMES_ENUM), @src(), "all function names in `FUNCTION_NAMES_ENUM` must have tag values starting from 0 and increasing with no gaps", .{});
+    const NUM_FUNCTIONS_ = Types.enum_defined_field_count(DEF_.FUNCTION_NAMES_ENUM);
     return struct {
-        const SelfPSS = @This();
+        const DEF = DEF_;
 
-        pub const SETTINGS = SETTINGS_;
-        pub const GlobalDataPool = SETTINGS.make_pool_type();
-        pub const OpaqueKey = GlobalDataPool.OpaqueKey;
-        pub fn Key(comptime T: type) type {
+        const Assert = Assert_.AssertHandler(DEF_.MASTER_ASSERT_MODE);
+        const RecursionAssert = Assert_.AssertHandler(DEF_.RECURSION_ASSERT_MODE);
+        const ThreadAssert = Assert_.AssertHandler(DEF_.THREAD_SAFETY_ASSERT_MODE);
+        const LOCK_ASSERT = ThreadAssert._should_assert();
+        const PSS_LOCK_KIND = if (DEF.THREAD_SAFETY != .THREADLOCAL_VARS) DEF.PSS_LOCK_KIND else LockKind.NONE;
+        const NEED_IO = PSS_LOCK_KIND.io_type() != void;
+        const NEED_IO_ANYWHERE = NEED_IO or GlobalDataPool.NEED_IO or AuxDataPool.NEED_IO;
+        const Lock = PSS_LOCK_KIND.lock_type(LOCK_ASSERT);
+        const LockInit = PSS_LOCK_KIND.init(LOCK_ASSERT);
+        const LockPtr = PSS_LOCK_KIND.lock_ptr_type(LOCK_ASSERT);
+        const LockOptPtr = PSS_LOCK_KIND.opt_lock_ptr_type(LOCK_ASSERT);
+        const LockOptPtrNull = PSS_LOCK_KIND.null_opt_ptr(LOCK_ASSERT);
+
+        pub const GlobalDataPool = make: {
+            var defs: [DEF.TYPE_POOL_DEFS.len]SubPoolDef = undefined;
+            for (DEF.TYPE_POOL_DEFS, 0..) |def, i| {
+                defs[i] = def.to_sub_pool_def();
+            }
+            break :make GlobalMultiTypeBitTrackedPool(GlobalPoolDef{
+                .POOL_DEFS = defs[0..],
+                .ELEM_STATE_ASSERT_MODE = DEF.ELEM_STATE_ASSERT_MODE,
+                .MAX_GENERATION = DEF.MAX_ELEM_GENERATION,
+                .MAX_NUM_ELEMS = DEF.MAX_NUM_ELEMS_PER_TYPE,
+                .THREAD_SAFETY = DEF.THREAD_SAFETY,
+                .UNIQUE_NAME = DEF.UNIQUE_NAME ++ "_DATA_POOLS",
+                .ELEM_METADATA_TYPE = AuxDataPool.ConstKey(UpdatePackage),
+                .ELEM_METADATA_TYPE_DEFAULT = @ptrCast(&AuxDataPool.ConstKey(UpdatePackage).INVALID),
+            });
+        };
+        const AuxDataPool = GlobalMultiTypeBitTrackedPool(.{
+            .UNIQUE_NAME = DEF.UNIQUE_NAME ++ "_AUX_POOLS",
+            .MAX_NUM_ELEMS = DEF.MAX_NUM_UNIQUE_FUNCTION_PAYLOADS,
+            .MAX_GENERATION = PowerOf2._1,
+            .THREAD_SAFETY = .NO_THREAD_SAFETY,
+            .ELEM_STATE_ASSERT_MODE = .IGNORE,
+            .POOL_DEFS = &.{
+                SubPoolDef{
+                    .TYPE = UpdatePackage,
+                    .ELEMENTS_PER_BLOCK = ._256,
+                    .ELEMENTS_PER_STATE_GROUP = .USIZE_POWER,
+                },
+            },
+        });
+
+        const QuickBucketAlloc = QuickBucketAllocator(.{
+            .BACKING_BLOCK_SIZE = DEF.QUICK_BUCKET_ALLOC_BACKING_BLOCK_SIZE,
+            .BACKING_META_BLOCK_SIZE = DEF.QUICK_BUCKET_ALLOC_META_BACKING_BLOCK_SIZE,
+            .LARGEST_BUCKET_SIZE = QUICK_ALLOC_MAX_BUCKET,
+        });
+
+        pub const OpaqueVal = GlobalDataPool.OpaqueKey;
+        pub fn Val(comptime T: type) type {
             return struct {
-                const KeySelf = @This();
+                const ValSelf = @This();
                 const PKey = GlobalDataPool.Key(T);
                 const Field = PKey.Field;
                 pub inline fn FieldType(comptime field: Field) type {
@@ -287,15 +247,15 @@ pub fn ParametricStateSystem(
                 }
                 const FA_MODE = PKey.FA_MODE;
                 const DEF_IDX: usize = get: {
-                    for (SETTINGS.TYPE_POOL_DEFS, 0..) |type_def, i| {
+                    for (DEF.TYPE_POOL_DEFS, 0..) |type_def, i| {
                         if (type_def.TYPE == T) {
                             break :get i;
                         }
-                        ct_assert_unreachable(@src(), "type `{s}` is not a valid type for any type pool in the ParametricStateSystem `{s}`", .{ @typeName(T), SETTINGS.UNIQUE_NAME });
+                        ct_assert_unreachable(null, "type `{s}` is not a valid type for any type pool in the ParametricStateSystem `{s}`", .{ @typeName(T), DEF.UNIQUE_NAME });
                     }
                 };
                 const DEFAULT: T = get: {
-                    const type_def = SETTINGS.TYPE_POOL_DEFS[DEF_IDX];
+                    const type_def = DEF.TYPE_POOL_DEFS[DEF_IDX];
                     if (type_def.DEFAULT_VALUE_FOR_TYPE) |default_ptr| {
                         break :get @as(*const T, @ptrCast(@alignCast(default_ptr))).*;
                     } else {
@@ -303,71 +263,70 @@ pub fn ParametricStateSystem(
                     }
                 };
                 const val_equal: *const fn (T, T) bool = get: {
-                    const type_def = SETTINGS.TYPE_POOL_DEFS[DEF_IDX];
+                    const type_def = DEF.TYPE_POOL_DEFS[DEF_IDX];
                     break :get @ptrCast(@alignCast(type_def.TYPE_EQUALITY_FUNC));
                 };
 
                 pkey: PKey,
 
-                pub fn to_opaque(self: KeySelf) OpaqueKey {
+                pub fn to_opaque(self: ValSelf) OpaqueVal {
                     return self.pkey.to_opaque();
                 }
-                pub fn from_opaque(opq: OpaqueKey) KeySelf {
-                    return KeySelf{ .pkey = PKey.from_opaque(opq) };
+                pub fn from_opaque(opq: OpaqueVal) ValSelf {
+                    return ValSelf{ .pkey = PKey.from_opaque(opq) };
                 }
 
-                pub fn queue_update(self: KeySelf) void {
+                pub fn force_update(self: ValSelf) void {
                     //FIXME
                 }
 
-                pub fn is_valid(self: KeySelf) bool {
+                pub fn is_valid(self: ValSelf) bool {
                     return self.pkey.is_valid();
                 }
 
-                pub inline fn get(self: KeySelf) T {
+                pub inline fn get(self: ValSelf) T {
                     return self.pkey.get();
                 }
-                pub inline fn get_or_default(self: KeySelf) T {
+                pub inline fn get_or_default(self: ValSelf) T {
                     if (self.is_valid()) {
                         return self.pkey.get();
                     } else {
                         return DEFAULT;
                     }
                 }
-                pub inline fn get_field(self: KeySelf, comptime field: Field) FieldType(field) {
+                pub inline fn get_field(self: ValSelf, comptime field: Field) FieldType(field) {
                     return self.pkey.get_field(field);
                 }
-                pub inline fn get_field_or_default(self: KeySelf, comptime field: Field) FieldType(field) {
+                pub inline fn get_field_or_default(self: ValSelf, comptime field: Field) FieldType(field) {
                     if (self.is_valid()) {
                         return self.pkey.get_field(field);
                     } else {
                         @field(DEFAULT, @tagName(field));
                     }
                 }
-                
 
-                pub inline fn set(self: KeySelf, val: T) void {
+                pub inline fn set(self: ValSelf, val: T) void {
                     const old = self.pkey.get();
                     self.set_known_old(old, val);
                 }
-                pub inline fn set_known_old(self: KeySelf, old: T, val: T) void {
+                pub inline fn set_known_old(self: ValSelf, old: T, val: T) void {
                     self.pkey.set(val);
                     if (!val_equal(old, val)) {
                         self.queue_update();
                     }
                 }
-                pub inline fn set_force_update(self: KeySelf, val: T) void {
+                pub inline fn set_force_update(self: ValSelf, val: T) void {
                     self.pkey.set(val);
                     self.queue_update();
                 }
-                pub inline fn set_ignore_update(self: KeySelf, val: T) void {
+                pub inline fn set_ignore_update(self: ValSelf, val: T) void {
                     self.pkey.set(val);
                 }
-                pub inline fn set_field(self: KeySelf, comptime field: Field, val: FieldType(field)) void {
+                pub inline fn set_field(self: ValSelf, comptime field: Field, val: FieldType(field)) void {
                     const old = self.pkey.get();
                     self.set_field_known_old(old, field, val);
                 }
-                pub inline fn set_field_known_old(self: KeySelf, old: T, comptime field: Field, val: FieldType(field)) void {
+                pub inline fn set_field_known_old(self: ValSelf, old: T, comptime field: Field, val: FieldType(field)) void {
                     self.pkey.set_field(val);
                     switch (comptime FA_MODE) {
                         .STRUCT => {
@@ -386,18 +345,18 @@ pub fn ParametricStateSystem(
                         .NOT_SUPPORTED => unreachable,
                     }
                 }
-                pub inline fn set_force_update(self: KeySelf, comptime field: Field, val: FieldType(field)) void {
+                pub inline fn set_field_force_update(self: ValSelf, comptime field: Field, val: FieldType(field)) void {
                     self.pkey.set_field(field, val);
                     self.queue_update();
                 }
-                pub inline fn set_ignore_update(self: KeySelf, comptime field: Field, val: FieldType(field)) void {
+                pub inline fn set_field_ignore_update(self: ValSelf, comptime field: Field, val: FieldType(field)) void {
                     self.pkey.set_field(field, val);
                 }
             };
         }
-        pub fn ConstKey(comptime T: type) type {
+        pub fn ConstVal(comptime T: type) type {
             return struct {
-                const KeySelf = @This();
+                const ValSelf = @This();
                 const PKey = GlobalDataPool.ConstKey(T);
                 const Field = PKey.Field;
                 pub inline fn FieldType(comptime field: Field) type {
@@ -405,15 +364,15 @@ pub fn ParametricStateSystem(
                 }
                 const FA_MODE = PKey.FA_MODE;
                 const DEF_IDX: usize = get: {
-                    for (SETTINGS.TYPE_POOL_DEFS, 0..) |type_def, i| {
+                    for (DEF.TYPE_POOL_DEFS, 0..) |type_def, i| {
                         if (type_def.TYPE == T) {
                             break :get i;
                         }
-                        ct_assert_unreachable(@src(), "type `{s}` is not a valid type for any type pool in the ParametricStateSystem `{s}`", .{ @typeName(T), SETTINGS.UNIQUE_NAME });
+                        ct_assert_unreachable(null, "type `{s}` is not a valid type for any type pool in the ParametricStateSystem `{s}`", .{ @typeName(T), DEF.UNIQUE_NAME });
                     }
                 };
                 const DEFAULT: T = get: {
-                    const type_def = SETTINGS.TYPE_POOL_DEFS[DEF_IDX];
+                    const type_def = DEF.TYPE_POOL_DEFS[DEF_IDX];
                     if (type_def.DEFAULT_VALUE_FOR_TYPE) |default_ptr| {
                         break :get @as(*const T, @ptrCast(@alignCast(default_ptr))).*;
                     } else {
@@ -421,252 +380,202 @@ pub fn ParametricStateSystem(
                     }
                 };
                 const val_equal: *const fn (T, T) bool = get: {
-                    const type_def = SETTINGS.TYPE_POOL_DEFS[DEF_IDX];
+                    const type_def = DEF.TYPE_POOL_DEFS[DEF_IDX];
                     break :get @ptrCast(@alignCast(type_def.TYPE_EQUALITY_FUNC));
                 };
 
                 pkey: PKey,
 
-                pub fn to_opaque(self: KeySelf) OpaqueKey {
+                pub fn to_opaque(self: ValSelf) OpaqueVal {
                     return self.pkey.to_opaque();
                 }
-                pub fn from_opaque(opq: OpaqueKey) KeySelf {
-                    return KeySelf{ .pkey = PKey.from_opaque(opq) };
+                pub fn from_opaque(opq: OpaqueVal) ValSelf {
+                    return ValSelf{ .pkey = PKey.from_opaque(opq) };
                 }
 
-                pub fn is_valid(self: KeySelf) bool {
+                pub fn is_valid(self: ValSelf) bool {
                     return self.pkey.is_valid();
                 }
 
-                pub inline fn get(self: KeySelf) T {
+                pub inline fn get(self: ValSelf) T {
                     return self.pkey.get();
                 }
-                pub inline fn get_field(self: KeySelf, comptime field: Field) FieldType(field) {
+                pub inline fn get_field(self: ValSelf, comptime field: Field) FieldType(field) {
                     return self.pkey.get_field(field);
                 }
-                pub inline fn get_or_default(self: KeySelf) T {
+                pub inline fn get_or_default(self: ValSelf) T {
                     if (self.is_valid()) {
                         return self.pkey.get();
                     } else {
                         return DEFAULT;
                     }
                 }
-                pub inline fn get_field_or_default(self: KeySelf, comptime field: Field) FieldType(field) {
+                pub inline fn get_field_or_default(self: ValSelf, comptime field: Field) FieldType(field) {
                     if (self.is_valid()) {
                         return self.pkey.get_field(field);
                     } else {
                         @field(DEFAULT, @tagName(field));
                     }
                 }
-                pub inline fn get_field(self: KeySelf, comptime field: Field) FieldType(field) {
-                    return self.pkey.get_field(field);
-                }
             };
         }
-        const FUNC_DEFS = ordered_func_defs_const;
-        const FUNC_IN_OUTS = make: {
-            var vals: [NUM_FUNCTIONS]FuncInOuts = undefined;
-            for (FUNC_DEFS, 0..) |def, i| {
-                vals[i] = def.make_func_in_outs(SelfPSS);
-            }
-            break :make vals;
-        };
-        const FUNC_NAMES = ordered_func_names_const;
-        const FUNC_PTR_TYPES = get: {
-            var vals: [NUM_FUNCTIONS]type = undefined;
-            for (FUNC_IN_OUTS, 0..) |in_out, i| {
-                vals[i] = *const in_out.fn_type;
-            }
-            break :get vals;
-        };
-        const FUNC_INS = get: {
-            var vals: [NUM_FUNCTIONS]type = undefined;
-            for (FUNC_IN_OUTS, 0..) |in_out, i| {
-                vals[i] = in_out.in;
-            }
-            break :get vals;
-        };
-        const FUNC_IN_COUNTS = get: {
-            var vals: [NUM_FUNCTIONS]usize = undefined;
-            for (FUNC_IN_OUTS, 0..) |in_out, i| {
-                vals[i] = in_out.num_ins;
-            }
-            break :get vals;
-        };
-        const FUNC_OUTS = get: {
-            var vals: [NUM_FUNCTIONS]type = undefined;
-            for (FUNC_IN_OUTS, 0..) |in_out, i| {
-                vals[i] = in_out.out;
-            }
-            break :get vals;
-        };
-        const FUNC_OUT_COUNTS = get: {
-            var vals: [NUM_FUNCTIONS]usize = undefined;
-            for (FUNC_IN_OUTS, 0..) |in_out, i| {
-                vals[i] = in_out.num_outs;
-            }
-            break :get vals;
-        };
-        const MAX_FN_INPUTS = check: {
-            var max: usize = 0;
-            for (FUNC_IN_OUTS) |in_out| {
-                max = @max(max, in_out.num_ins);
-            }
-            break :check max;
-        };
-        const MAX_FN_OUTPUTS = check: {
-            var max: usize = 0;
-            for (FUNC_IN_OUTS) |in_out| {
-                max = @max(max, in_out.num_outs);
-            }
-            break :check max;
-        };
+        pub const UpdateInterface = struct {
+            inputs: []const OpaqueVal,
+            outputs: []const OpaqueVal,
+            lock: LockOptPtr = LockOptPtrNull,
 
+            pub fn create_new_root_param_during_update(self: UpdateInterface, comptime category: CategoryName, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
+                const ref = create_root_internal(category, initial_val, .{ .update_mode = update_mode }, self.lock);
+                return ref.to_read_write(CategoryType(category));
+            }
+            pub fn create_new_derived_param_set_from_struct_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
+                return create_derived_set_from_struct(update_function, inputs, output_defs, OUTPUT_STRUCT, self.lock, false);
+            }
+            pub fn create_new_derived_param_set_during_update(self: UpdateInterface, update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque) void {
+                Assert._with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
+                Assert._with_reason(outputs.len <= MAX_OUTPUTS and output_defs.len == outputs.len, @src(), "the number of outputs ({d}) must match `output_defs.len` ({d}) and be at most {d}", .{ outputs.len, output_defs.len, MAX_OUTPUTS });
+                var in_refs: [MAX_INPUTS]OpaqueVal = undefined;
+                for (inputs, 0..) |in, i| in_refs[i] = OpaqueVal.from_opaque_read_only(in);
+                var out_refs: [MAX_OUTPUTS]OpaqueVal = undefined;
+                create_derived_set_internal(update_function, in_refs[0..inputs.len], output_defs, out_refs[0..outputs.len], null, 0, self.lock, false);
+                for (out_refs[0..outputs.len], outputs) |ref, *out| out.* = ref.to_opaque_read_only();
+            }
+            pub fn create_new_derived_param_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
+                const DefsStruct = struct { param: ParamReadOnlyDef };
+                const OutStruct = struct { param: ParamReadOnly(OUTPUT_TYPE) };
+                const out = create_derived_set_from_struct(update_function, inputs, DefsStruct{ .param = output_def }, OutStruct, self.lock, false);
+                return out.param;
+            }
+
+            pub fn make_input_struct(self: UpdateInterface, comptime IN_STRUCT: type) IN_STRUCT {
+                ct_assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type", .{});
+                ct_assert_with_reason(self.inputs.len == @typeInfo(IN_STRUCT).@"struct".field_names.len, @src(), "field count mismatch", .{});
+                var object: IN_STRUCT = undefined;
+                inline for (@typeInfo(IN_STRUCT).@"struct".field_names, @typeInfo(IN_STRUCT).@"struct".field_types, 0..) |field_name, field_type, f| {
+                    const T = @field(field_type, "TYPE");
+                    @field(object, field_name) = self.inputs[f].as_update_input(self.lock, T);
+                }
+                return object;
+            }
+            pub fn make_output_struct(self: UpdateInterface, comptime OUT_STRUCT: type) OUT_STRUCT {
+                ct_assert_with_reason(Types.type_is_struct(OUT_STRUCT), @src(), "type `OUT_STRUCT` must be a struct type", .{});
+                ct_assert_with_reason(self.outputs.len == @typeInfo(OUT_STRUCT).@"struct".field_names.len, @src(), "field count mismatch", .{});
+                var object: OUT_STRUCT = undefined;
+                inline for (@typeInfo(OUT_STRUCT).@"struct".field_names, @typeInfo(OUT_STRUCT).@"struct".field_types, 0..) |field_name, field_type, f| {
+                    const T = @field(field_type, "TYPE");
+                    @field(object, field_name) = self.outputs[f].as_update_output(self.lock, T);
+                }
+                return object;
+            }
+
+            pub fn commit_changes(self: UpdateInterface) void {
+                process_all_deletes_if_needed(self.lock);
+                process_all_updates_if_needed(self.lock);
+            }
+        };
+        const NUM_FUNCTIONS = NUM_FUNCTIONS_;
+        const MAX_FN_INPUTS = DEF.MAX_FUNC_INPUTS.value();
+        const MAX_FN_OUTPUTS = DEF.MAX_FUNC_OUTPUTS.value();
+        const MAX_TOTAL_FN_PARAMS = MAX_FN_INPUTS + MAX_FN_OUTPUTS;
+        const MAX_FN_PARAMS_ALLOC = @sizeOf(OpaqueVal) * MAX_TOTAL_FN_PARAMS;
+        const MAX_QUICK_ALLOC = MAX_FN_PARAMS_ALLOC; // @max(MAX_FN_PARAMS_ALLOC, ...)
+        const QUICK_ALLOC_MAX_BUCKET = PowerOf2.round_up_to_power_of_2(MAX_QUICK_ALLOC);
         const FnInIdx = PowerOf2.round_up_to_power_of_2(MAX_FN_INPUTS).unsigned_integer_type_that_holds_all_values_less_than();
         const FnOutIdx = PowerOf2.round_up_to_power_of_2(MAX_FN_OUTPUTS).unsigned_integer_type_that_holds_all_values_less_than();
-        const PayloadListIdx = SETTINGS.MAX_PAYLOAD_LIST_LIMIT.unsigned_integer_type_that_holds_all_values_less_than();
-        const UpdateTriggerIdx = SETTINGS.MAX_NUM_TRIGGERED_UPDATES_ON_PARAM_CHANGE.unsigned_integer_type_that_holds_all_values_less_than();
-        const UniquePayloadIdx = SETTINGS.MAX_NUM_UNIQUE_FUNCTION_PAYLOADS.unsigned_integer_type_that_holds_all_values_less_than();
-        const RecursionCounter = if (RECURSION_ALLOWED) PowerOf2.round_down_to_power_of_2(RECURSION_LIMIT).unsigned_integer_type_that_holds_all_values_less_than() else void;
-        const RecursionCounterDefault = if (RECURSION_ALLOWED) 0 else {};
-        const FnName = FUNCTION_NAMES;
-        pub fn FnType(comptime FUNC_NAME: FnName) type {
-            return FUNC_PTR_TYPES[@backingInt(FUNC_NAME)];
-        }
-        pub fn InStruct(comptime FUNC_NAME: FnName) type {
-            return FUNC_INS[@backingInt(FUNC_NAME)];
-        }
-        pub fn OutStruct(comptime FUNC_NAME: FnName) type {
-            return FUNC_OUTS[@backingInt(FUNC_NAME)];
-        }
-        pub fn InCount(comptime FUNC_NAME: FnName) usize {
-            return FUNC_IN_COUNTS[@backingInt(FUNC_NAME)];
-        }
-        pub fn OutCount(comptime FUNC_NAME: FnName) usize {
-            return FUNC_OUT_COUNTS[@backingInt(FUNC_NAME)];
-        }
-        const FUNC_POINTERS_STRUCT = build: {
-            const ATTRS: [NUM_FUNCTIONS]std.builtin.Type.Struct.FieldAttributes = @splat(std.builtin.Type.Struct.FieldAttributes{
-                .@"align" = null,
-                .@"comptime" = true,
-                .default_value_ptr = null,
-            });
-            break :build @Struct(.auto, null, FUNC_NAMES[0..], &FUNC_PTR_TYPES, &ATTRS);
+        const FnName = DEF.FUNCTION_NAMES_ENUM;
+        const FnIdx = PowerOf2.round_down_to_power_of_2(NUM_FUNCTIONS).unsigned_integer_type_that_holds_all_values_less_than();
+
+        pub const pss = if (DEF.THREAD_SAFETY == .THREADLOCAL_VARS) struct {
+            threadlocal var is_init: bool = false;
+            threadlocal var quick_alloc = QuickBucketAlloc{};
+            threadlocal var lock: Lock = LockInit;
+            threadlocal var io: if (NEED_IO) Io else void = if (NEED_IO) undefined else {};
+            threadlocal var funcs: [NUM_FUNCTIONS]*const fn (UpdateInterface) void = undefined;
+            threadlocal var funcs_defined: [NUM_FUNCTIONS]bool = @splat(false);
+            threadlocal var func_in_counts: [NUM_FUNCTIONS]FnInIdx = undefined;
+            threadlocal var func_out_counts: [NUM_FUNCTIONS]FnOutIdx = undefined;
+            threadlocal var cascade_active: bool = false;
+            threadlocal var updates_in_progress: bool = false;
+            threadlocal var deletes_in_progress: bool = false;
+            threadlocal var update_queue: QueueList = QueueList.new();
+            threadlocal var update_queue_cursor: usize = 0;
+            threadlocal var delete_queue: DeleteList = DeleteList.new();
+            threadlocal var queue_allocator: Allocator = DummyAllocator.allocator_panic_free_noop;
+        } else struct {
+            var is_init: bool = false;
+            var quick_alloc = QuickBucketAlloc{};
+            var lock: Lock = LockInit;
+            var io: if (NEED_IO) Io else void = if (NEED_IO) undefined else {};
+            var funcs: [NUM_FUNCTIONS]*const fn (UpdateInterface) void = undefined;
+            var funcs_defined: [NUM_FUNCTIONS]bool = @splat(false);
+            var func_in_counts: [NUM_FUNCTIONS]FnInIdx = undefined;
+            var func_out_counts: [NUM_FUNCTIONS]FnOutIdx = undefined;
+            var cascade_active: bool = false;
+            var updates_in_progress: bool = false;
+            var deletes_in_progress: bool = false;
+            var update_queue: QueueList = QueueList.new();
+            var update_queue_cursor: usize = 0;
+            var delete_queue: DeleteList = DeleteList.new();
+            var queue_allocator: Allocator = DummyAllocator.allocator_panic_free_noop;
         };
-        var FUNC_POINTERS: FUNC_POINTERS_STRUCT = undefined;
-        pub inline fn get_fn(comptime FUNC_NAME: FnName) FnType(FUNC_NAME) {
-            return @field(FUNC_POINTERS, @tagName(FUNC_NAME));
-        }
-        pub inline fn call_fn(comptime FUNC_NAME: FnName, in: InStruct(FUNC_NAME), out: OutStruct(FUNC_NAME)) void {
-            return @field(FUNC_POINTERS, @tagName(FUNC_NAME))(in, out);
-        }
-
-        pub const RECURSION_ALLOWED = SETTINGS.ALLOWED_RECURSIVE_UPDATES > 0;
-        pub const RECURSION_LIMIT: u32 = if (SETTINGS.ALLOWED_RECURSIVE_UPDATES > 0) @intCast(SETTINGS.ALLOWED_RECURSIVE_UPDATES) else 0;
-
-        pub const Assert = Assert_.AssertHandler(SETTINGS.MASTER_ASSERT_MODE);
-        pub const RecursionAssert = Assert_.AssertHandler(SETTINGS.RECURSION_ASSERT_MODE);
-
-        pub const PoolKey = struct {
-            idx: IndexType,
-            gen: GenId,
-        };
-
-        pub const ParamMeta = struct {
-            update_mode: UpdateMode = .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-            parent_delete_behavior: ParentDeleteMode = .TRIGGER_UPDATE_WHEN_PARENT_DELETED,
-            get_deleted_behavior: GetDeletedParamMode = .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED,
-            set_deleted_behavior: SetDeletedParamMode = .CAN_NEVER_SET_THIS_PARAM_WHEN_DELETED,
-            generation: GenId = 0,
-            first_dep: ?*DependantNode = null,
-            last_dep: ?*DependantNode = null,
-        };
-
-        pub const PayloadBlock = struct {
-            refs: [SETTINGS.MAX_NUM_FUNCTION_INPUTS + SETTINGS.MAX_NUM_FUNCTION_OUTPUTS]ParamRef = undefined,
-            in_count: InputCount = 0,
-            out_count: OutputCount = 0,
-        };
-
-        pub const UpdatePackage = struct {
-            func_idx: FuncId,
-            payload: *PayloadBlock,
-            in_count: InputCount,
-            out_count: OutputCount,
-            alive: bool = false,
-            queued_epoch: u32 = 0,
-            pending: bool = false,
-            recursion_count: u32 = 0,
-        };
-
-        pub const FunctionDependants = *UpdatePackage;
-        pub const UpdateQueueItem = *UpdatePackage;
-        pub const UpdateQueueUnique = *UpdatePackage;
-
-        pub const DependantNode = struct {
-            package: *UpdatePackage,
-            next: ?*DependantNode = null,
-        };
-
-        const CATEGORY_POOLS: [NUM_CATEGORIES]type = build: {
-            var out: [NUM_CATEGORIES]type = undefined;
-            for (CATEGORY_DEFS, 0..) |def, cat| {
-                const name = std.fmt.comptimePrint("{s}|cat{d}", .{ @typeName(PARAM_CATEGORIES), cat });
-                out[cat] = GlobalMappedKeyPool(.{
-                    .ELEM = def.param_type,
-                    .IDX = IndexType,
-                    .LOCK_MODE = .NO_LOCKS,
-                    .GLOBAL_POOL_NAME = name,
-                });
+        pub fn init(quick_alloc_backing_allocator: Allocator, global_data_pool_allocator: Allocator, aux_data_pool_allocator: Allocator, io: if (NEED_IO_ANYWHERE) Io else void) void {
+            Assert._with_reason(!pss.is_init, @src(), "ParametricStateSystem `{s}` is already initialized", .{DEF.UNIQUE_NAME});
+            pss.is_init = true;
+            pss.quick_alloc.backing_alloc = quick_alloc_backing_allocator;
+            if (comptime GlobalDataPool.NEED_IO) {
+                GlobalDataPool.init_global(global_data_pool_allocator, io);
+            } else {
+                GlobalDataPool.init_global(global_data_pool_allocator, {});
             }
-            break :build out;
+            if (comptime AuxDataPool.NEED_IO) {
+                AuxDataPool.init_global(aux_data_pool_allocator, io);
+            } else {
+                AuxDataPool.init_global(aux_data_pool_allocator, {});
+            }
+            if (comptime NEED_IO) {
+                pss.io = io;
+            }
+        }
+
+        const UpdatePackageKey = AuxDataPool.Key(UpdatePackage);
+        const UpdatePackageConstKey = AuxDataPool.ConstKey(UpdatePackage);
+        const UpdatePackage = struct {
+            func_params: [*]OpaqueVal,
+            func_idx: FnIdx,
+
+            fn equals(a: UpdatePackage, b: UpdatePackage) bool {
+                return a.func_idx == b.func_idx and a.func_params == b.func_params;
+            }
+            fn in_slice(self: UpdatePackage) []OpaqueVal {
+                return self.func_params[0..pss.func_in_counts[self.func_idx]];
+            }
+            fn out_slice(self: UpdatePackage) []OpaqueVal {
+                return self.func_params[pss.func_in_counts[self.func_idx] .. pss.func_in_counts[self.func_idx] + pss.func_out_counts[self.func_idx]];
+            }
+            fn get_func(self: UpdatePackage) *const UpdateFunction {
+                Assert._with_reason(pss.funcs_defined[self.func_idx], @src(), "func `{s}` was never defined", .{@tagName(num_cast(self.func_idx, FnName))});
+            }
         };
-
-        const PayloadPool = BitTrackedPool(.{ .ELEM = PayloadBlock, .IDX = u32, .LOCK_MODE = .NO_LOCKS, .SLOTS_PER_BLOCK = 64 });
-        const PackagePool = BitTrackedPool(.{ .ELEM = UpdatePackage, .IDX = u32, .LOCK_MODE = .NO_LOCKS, .SLOTS_PER_BLOCK = 64 });
-        const DepPool = BitTrackedPool(.{ .ELEM = DependantNode, .IDX = u32, .LOCK_MODE = .NO_LOCKS, .SLOTS_PER_BLOCK = 64 });
-
-        const ListAlloc = Root.ListSlice.ListFullDefinition;
-        const MetaList = ListAlloc(ParamMeta, IndexType, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const QueueList = ListAlloc(UpdateQueueItem, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const DeleteList = ListAlloc(ParamRef, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const FuncList = ListAlloc(FunctionDependants, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-
-        pub var initialized: bool = false;
-        var system_allocator: Allocator = DummyAllocator.allocator_panic_free_noop;
-
-        var payload_pool: PayloadPool = .{};
-
-        var package_pool: PackagePool = .{};
-        var dep_pool: DepPool = .{};
-
-        var update_queue: QueueList = QueueList.new();
-        var update_queue_cursor: usize = 0;
-
-        var delete_queue: DeleteList = DeleteList.new();
-
-        var funcs: [NUM_FUNCTIONS]*const UpdateFunction = @splat(Utils.invalid_ptr_const(UpdateFunction));
-        var funcs_init: [NUM_FUNCTIONS]bool = @splat(false);
-        var func_packages: [NUM_FUNCTIONS]FuncList = @splat(FuncList.new());
-        var func_packages_init: [NUM_FUNCTIONS]bool = @splat(false);
-
-        var metas: [NUM_CATEGORIES]MetaList = @splat(MetaList.new());
-
-        var category_counts: [NUM_CATEGORIES]IndexType = @splat(0);
-
-        // Meta category side storage.  Slot `i` tracks user category `i`.
-        var meta_values: [NUM_USER_CATEGORIES]IndexType = @splat(0);
-        var meta_first_deps: [NUM_USER_CATEGORIES]?*DependantNode = @splat(null);
-        var meta_last_deps: [NUM_USER_CATEGORIES]?*DependantNode = @splat(null);
-        var meta_metas: [NUM_USER_CATEGORIES]ParamMeta = @splat(.{});
-
-        var current_epoch: u32 = 0;
-        var cascade_active: bool = false;
-        var updates_in_progress: bool = false;
-        var deletes_in_progress: bool = false;
+        inline fn new_update_pkg(func_name: FnName, ins: []const OpaqueVal, outs: []const OpaqueVal) UpdatePackageConstKey {
+            const key_mem = pss.quick_alloc.alloc_no_err(OpaqueVal, ins.len + outs.len);
+            @memcpy(key_mem[0..ins.len], ins);
+            @memcpy(key_mem[ins.len..], outs);
+            const pkg = UpdatePackage{
+                .func_params = key_mem,
+                .func_idx = @intCast(@backingInt(func_name)),
+                .in_count = @intCast(ins.len),
+                .out_count = @intCast(outs.len),
+            };
+            const key = AuxDataPool.claim(UpdatePackage);
+            key.set(pkg);
+            return key.to_const();
+        }
+        
+        const QueueList = List(UpdatePackage, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+        const DeleteList = List(OpaqueVal, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
 
         inline fn assert_initialized() void {
-            assert_with_reason(initialized, @src(), "ParametricStateSystem memory has not been initialized (call `init` first)", .{});
+            Assert._with_reason(initialized, @src(), "ParametricStateSystem memory has not been initialized (call `init` first)", .{});
         }
 
         inline fn to_pool_key(key: anytype) PoolKey {
@@ -718,7 +627,7 @@ pub fn ParametricStateSystem(
             return pool_key_is_valid(cat, key);
         }
 
-        fn get_value_bytes(ref: ParamRef, out: []u8) void {
+        fn get_value_bytes(ref: OpaqueVal, out: []u8) void {
             if (INCLUDE_META and ref.category == META_CAT_IDX) {
                 const bytes = std.mem.asBytes(&meta_values[ref.index]);
                 @memcpy(out[0..bytes.len], bytes);
@@ -736,7 +645,7 @@ pub fn ParametricStateSystem(
             }
             unreachable;
         }
-        fn set_value_bytes(ref: ParamRef, bytes: []const u8) void {
+        fn set_value_bytes(ref: OpaqueVal, bytes: []const u8) void {
             if (INCLUDE_META and ref.category == META_CAT_IDX) {
                 const dst = std.mem.asBytes(&meta_values[ref.index]);
                 @memcpy(dst, bytes[0..dst.len]);
@@ -767,7 +676,7 @@ pub fn ParametricStateSystem(
 
         fn get_meta_at(cat: CategoryId, index: IndexType) ParamMeta {
             if (INCLUDE_META and cat == META_CAT_IDX) {
-                assert_with_reason(index < NUM_USER_CATEGORIES, @src(), "meta parameter index {d} out of range", .{index});
+                Assert._with_reason(index < NUM_USER_CATEGORIES, @src(), "meta parameter index {d} out of range", .{index});
                 return meta_metas[index];
             }
             const list = &metas[cat];
@@ -776,7 +685,7 @@ pub fn ParametricStateSystem(
         }
         fn set_meta_at(cat: CategoryId, index: IndexType, meta: ParamMeta) void {
             if (INCLUDE_META and cat == META_CAT_IDX) {
-                assert_with_reason(index < NUM_USER_CATEGORIES, @src(), "meta parameter index {d} out of range", .{index});
+                Assert._with_reason(index < NUM_USER_CATEGORIES, @src(), "meta parameter index {d} out of range", .{index});
                 meta_metas[index] = meta;
                 return;
             }
@@ -788,7 +697,7 @@ pub fn ParametricStateSystem(
             ensure_meta_len(cat, index);
         }
 
-        fn read_typed_direct(comptime T: type, ref: ParamRef) T {
+        fn read_typed_direct(comptime T: type, ref: OpaqueVal) T {
             if (INCLUDE_META and ref.category == META_CAT_IDX) {
                 if (comptime T == IndexType) return @intCast(meta_values[ref.index]);
                 unreachable;
@@ -841,7 +750,7 @@ pub fn ParametricStateSystem(
             update_queue.append_one(pkg, system_allocator);
         }
 
-        fn trigger_dependants(ref: ParamRef) void {
+        fn trigger_dependants(ref: OpaqueVal) void {
             var dep = if (INCLUDE_META and ref.category == META_CAT_IDX)
                 meta_first_deps[ref.index]
             else
@@ -855,14 +764,14 @@ pub fn ParametricStateSystem(
         fn update_meta_for_category(cat: CategoryId) void {
             if (!INCLUDE_META or cat >= NUM_USER_CATEGORIES) return;
             const new_len = category_counts[cat];
-            const always = SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE;
+            const always = DEF.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE;
             if (meta_values[cat] != new_len or always) {
                 meta_values[cat] = new_len;
                 trigger_dependants(.{ .category = @intCast(META_CAT_IDX), .index = cat, .generation = 0 });
             }
         }
 
-        fn add_dependant(ref: ParamRef, pkg: *UpdatePackage) void {
+        fn add_dependant(ref: OpaqueVal, pkg: *UpdatePackage) void {
             const node = dep_pool.claim_slot(system_allocator);
             node.* = .{ .package = pkg, .next = null };
             if (INCLUDE_META and ref.category == META_CAT_IDX) {
@@ -909,7 +818,7 @@ pub fn ParametricStateSystem(
             pkg.pending = false;
         }
 
-        fn create_package(func_idx: FuncId, inputs: []const ParamRef, output_refs: []ParamRef) *UpdatePackage {
+        fn create_package(func_idx: FuncId, inputs: []const OpaqueVal, output_refs: []OpaqueVal) *UpdatePackage {
             const block = payload_pool.claim_slot(system_allocator);
             @memcpy(block.refs[0..inputs.len], inputs);
             @memcpy(block.refs[inputs.len .. inputs.len + output_refs.len], output_refs);
@@ -927,7 +836,7 @@ pub fn ParametricStateSystem(
             return pkg;
         }
 
-        fn register_package(pkg: *UpdatePackage, inputs: []const ParamRef) void {
+        fn register_package(pkg: *UpdatePackage, inputs: []const OpaqueVal) void {
             for (inputs) |input| add_dependant(input, pkg);
             const f: usize = @intCast(pkg.func_idx);
             func_packages[f].append_one(pkg, system_allocator);
@@ -976,11 +885,11 @@ pub fn ParametricStateSystem(
             package_pool.release_slot(pkg);
         }
 
-        fn get_typed_locked(comptime T: type, ref: ParamRef, mutex_key: MutexKey, comptime SKIP_GEN_CHECK: bool) T {
-            var key: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn get_typed_locked(comptime T: type, ref: OpaqueVal, mutex_key: LockOptPtr, comptime SKIP_GEN_CHECK: bool) T {
+            var key: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer key.unlock_if_needed(owns);
             _ = SKIP_GEN_CHECK;
-            assert_with_reason(CATEGORY_TYPE_IDS[ref.category] == id_for_type(T), @src(), "category type does not match the parameter type", .{});
+            Assert._with_reason(CATEGORY_TYPE_IDS[ref.category] == id_for_type(T), @src(), "category type does not match the parameter type", .{});
             if (key_is_valid(ref.category, .{ .idx = ref.index, .gen = ref.generation })) {
                 return read_typed_direct(T, ref);
             }
@@ -988,7 +897,7 @@ pub fn ParametricStateSystem(
             switch (meta.get_deleted_behavior) {
                 .CAN_NEVER_GET_THIS_PARAM_WHEN_DELETED => assert_unreachable(@src(), "attempted to access parameter (category `{s}` index {d}) that is not used (or uses a stale generation)", .{ @tagName(@as(PARAM_CATEGORIES, @fromBackingInt(@intCast(ref.category)))), ref.index }),
                 else => {
-                    assert_with_reason(CATEGORY_DEFAULT_VALUES[ref.category] != null, @src(), "getting parameter `{s}` index {d} that is not used (settings set to return default value), but category has no default value", .{ @tagName(@as(PARAM_CATEGORIES, @fromBackingInt(@intCast(ref.category)))), ref.index });
+                    Assert._with_reason(CATEGORY_DEFAULT_VALUES[ref.category] != null, @src(), "getting parameter `{s}` index {d} that is not used (settings set to return default value), but category has no default value", .{ @tagName(@as(PARAM_CATEGORIES, @fromBackingInt(@intCast(ref.category)))), ref.index });
                     if (meta.get_deleted_behavior == .RETURN_DEFAULT_VALUE_WHEN_GET_DELETED_AND_WARN) {
                         Assert_.warn_unconditional_always(@src(), "get parameter that was not used (or stale generation) `{s}` index {d}", .{ @tagName(@as(PARAM_CATEGORIES, @fromBackingInt(@intCast(ref.category)))), ref.index });
                     }
@@ -1003,10 +912,10 @@ pub fn ParametricStateSystem(
             return eq(a, b);
         }
 
-        fn set_typed_locked(comptime T: type, ref: ParamRef, val: T, mutex_key: MutexKey, comptime SKIP_PROCESS: bool) void {
-            var key: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn set_typed_locked(comptime T: type, ref: OpaqueVal, val: T, mutex_key: LockOptPtr, comptime SKIP_PROCESS: bool) void {
+            var key: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer key.unlock_if_needed(owns);
-            assert_with_reason(CATEGORY_TYPE_IDS[ref.category] == id_for_type(T), @src(), "category type does not match the parameter type", .{});
+            Assert._with_reason(CATEGORY_TYPE_IDS[ref.category] == id_for_type(T), @src(), "category type does not match the parameter type", .{});
             const meta = get_meta_at(ref.category, ref.index);
             if (!key_is_valid(ref.category, .{ .idx = ref.index, .gen = ref.generation })) {
                 switch (meta.set_deleted_behavior) {
@@ -1026,20 +935,20 @@ pub fn ParametricStateSystem(
                 if (meta.update_mode != .NEVER_TRIGGER_UPDATES) {
                     trigger_dependants(ref);
                 }
-                if (INCLUDE_META and SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
+                if (INCLUDE_META and DEF.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
                     update_meta_for_category(ref.category);
                 }
             } else if (meta.update_mode == .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED) {
                 trigger_dependants(ref);
-                if (INCLUDE_META and SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
+                if (INCLUDE_META and DEF.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
                     update_meta_for_category(ref.category);
                 }
             }
             if (!SKIP_PROCESS) process_all_updates_if_needed(key);
         }
 
-        fn set_opaque_locked(ref: ParamRef, bytes: []const u8, mutex_key: MutexKey, comptime SKIP_PROCESS: bool) void {
-            var key: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn set_opaque_locked(ref: OpaqueVal, bytes: []const u8, mutex_key: LockOptPtr, comptime SKIP_PROCESS: bool) void {
+            var key: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer key.unlock_if_needed(owns);
             const meta = get_meta_at(ref.category, ref.index);
             if (!key_is_valid(ref.category, .{ .idx = ref.index, .gen = ref.generation })) {
@@ -1056,7 +965,7 @@ pub fn ParametricStateSystem(
             set_value_bytes(ref, bytes[0..size]);
             if (changed) {
                 if (meta.update_mode != .NEVER_TRIGGER_UPDATES) trigger_dependants(ref);
-                if (INCLUDE_META and SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
+                if (INCLUDE_META and DEF.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE) {
                     update_meta_for_category(ref.category);
                 }
             } else if (meta.update_mode == .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED) {
@@ -1065,17 +974,17 @@ pub fn ParametricStateSystem(
             if (!SKIP_PROCESS) process_all_updates_if_needed(key);
         }
 
-        fn set_default_locked(ref: ParamRef, mutex_key: MutexKey, comptime SKIP_PROCESS: bool) void {
+        fn set_default_locked(ref: OpaqueVal, opt_lock: LockOptPtr, comptime SKIP_PROCESS: bool) void {
             const default_ptr = CATEGORY_DEFAULT_VALUES[ref.category];
-            assert_with_reason(default_ptr != null, @src(), "parameter index {d} needs its default value, but the category has no default value", .{ref.index});
+            Assert._with_reason(default_ptr != null, @src(), "parameter index {d} needs its default value, but the category has no default value", .{ref.index});
             const size = CATEGORY_TYPE_SIZES[ref.category];
             const bytes: [*]const u8 = @ptrCast(default_ptr.?);
-            set_opaque_locked(ref, bytes[0..size], mutex_key, SKIP_PROCESS);
+            set_opaque_locked(ref, bytes[0..size], opt_lock, SKIP_PROCESS);
         }
 
         // ---- meta category helpers -----------------------------------------
         // ---- update processing ---------------------------------------------
-        fn process_one_update(mutex_key: MutexKey, pkg: *UpdatePackage) void {
+        fn process_one_update(mutex_key: LockOptPtr, pkg: *UpdatePackage) void {
             if (!pkg.alive) return;
             const f: usize = @intCast(pkg.func_idx);
             if (!funcs_init[f]) return;
@@ -1087,12 +996,12 @@ pub fn ParametricStateSystem(
             const iface = UpdateInterface{
                 .inputs = inputs,
                 .outputs = outputs,
-                .key = mutex_key,
+                .lock = mutex_key,
             };
             funcs[f](iface);
         }
 
-        fn process_all_updates_if_needed(mutex_key: MutexKey) void {
+        fn process_all_updates_if_needed(mutex_key: LockOptPtr) void {
             if (updates_in_progress) return;
             updates_in_progress = true;
             defer {
@@ -1110,9 +1019,9 @@ pub fn ParametricStateSystem(
             update_queue_cursor = 0;
         }
 
-        fn process_one_delete(ref: ParamRef, mutex_key: MutexKey) void {
-            if (!key_is_valid(ref.category, .{ .idx = ref.index, .gen = ref.generation })) return;
-            var meta = get_meta_at(ref.category, ref.index);
+        fn process_one_delete(val: OpaqueVal, opt_lock: LockOptPtr) void {
+            if (!key_is_valid(val.category, .{ .idx = val.index, .gen = val.generation })) return;
+            var meta = get_meta_at(val.category, val.index);
             var dep = meta.first_dep;
             while (dep) |node| {
                 dep = node.next;
@@ -1127,7 +1036,7 @@ pub fn ParametricStateSystem(
                         const out_meta = get_meta_at(out_ref.category, out_ref.index);
                         switch (out_meta.parent_delete_behavior) {
                             .DELETE_WHEN_PARENT_IS_DELETED => delete_queue.append_one(out_ref, system_allocator),
-                            .SET_DEFAULT_VALUE_WHEN_PARENT_IS_DELETED => set_default_locked(out_ref, mutex_key, true),
+                            .SET_DEFAULT_VALUE_WHEN_PARENT_IS_DELETED => set_default_locked(out_ref, opt_lock, true),
                             .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED => {},
                             .TRIGGER_UPDATE_WHEN_PARENT_DELETED => trigger = true,
                         }
@@ -1138,37 +1047,49 @@ pub fn ParametricStateSystem(
             release_dependant_node_chain(meta.first_dep);
             meta.first_dep = null;
             meta.last_dep = null;
-            set_meta_at(ref.category, ref.index, meta);
+            set_meta_at(val.category, val.index, meta);
 
-            release_pool_key_for_category(ref.category, .{ .idx = ref.index, .gen = ref.generation });
-            if (category_counts[ref.category] > 0) category_counts[ref.category] -= 1;
-            update_meta_for_category(ref.category);
+            release_pool_key_for_category(val.category, .{ .idx = val.index, .gen = val.generation });
+            if (category_counts[val.category] > 0) category_counts[val.category] -= 1;
+            update_meta_for_category(val.category);
         }
 
-        fn process_all_deletes_if_needed(mutex_key: MutexKey, comptime SKIP_FIRST_GEN_CHECK: bool) void {
-            if (deletes_in_progress) return;
-            _ = SKIP_FIRST_GEN_CHECK;
-            deletes_in_progress = true;
-            defer deletes_in_progress = false;
-            var cursor: usize = 0;
-            while (cursor < delete_queue.get_len()) : (cursor += 1) {
-                process_one_delete(delete_queue.get_ptr(@intCast(cursor)).*, mutex_key);
+        fn process_all_deletes_if_needed(opt_lock: LockOptPtr) void {
+            if (opt_lock) |l| {
+                PSS_LOCK_KIND.lock_for_write_io(LOCK_ASSERT, l, pss.io);
             }
-            delete_queue.clear();
-            process_all_updates_if_needed(mutex_key);
+            defer if (opt_lock) |l| {
+                PSS_LOCK_KIND.unlock_for_write_io(LOCK_ASSERT, l, pss.io);
+            };
+            if (pss.deletes_in_progress) return;
+            pss.deletes_in_progress = true;
+            defer pss.deletes_in_progress = false;
+            var cursor: usize = 0;
+            for (pss.delete_queue.zig_slice_entire_const()) |val| {
+                process_one_delete(val, opt_lock);
+            }
+            while (cursor < pss.delete_queue.get_len()) : (cursor += 1) {
+                process_one_delete(pss.delete_queue.get(@intCast(cursor)), opt_lock);
+            }
+            pss.delete_queue.clear();
+            process_all_updates_if_needed(opt_lock);
             try_end_cascade();
         }
 
-        fn delete_param_internal(ref: ParamRef, mutex_key: MutexKey, comptime SKIP_FIRST_GEN_CHECK: bool, comptime SKIP_PROCESS: bool) void {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
-            defer mk.unlock_if_needed(owns);
+        fn delete_param_internal(val: OpaqueVal, opt_lock: LockOptPtr, comptime SKIP_PROCESS: bool) void {
+            if (opt_lock) |l| {
+                PSS_LOCK_KIND.lock_for_write_io(LOCK_ASSERT, l, pss.io);
+            }
+            defer if (opt_lock) |l| {
+                PSS_LOCK_KIND.unlock_for_write_io(LOCK_ASSERT, l, pss.io);
+            };
             begin_cascade();
-            delete_queue.append_one(ref, system_allocator);
-            if (!SKIP_PROCESS) process_all_deletes_if_needed(mk, SKIP_FIRST_GEN_CHECK);
+            pss.delete_queue.append_one(val, system_allocator);
+            if (!SKIP_PROCESS) process_all_deletes_if_needed(opt_lock);
         }
 
-        fn create_root_with_key(cat: CategoryId, key: PoolKey, initial_val: anytype, settings: ParamReadWriteSettings, mutex_key: MutexKey, comptime SKIP_PROCESS: bool) ParamRef {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn create_root_with_key(cat: CategoryId, key: PoolKey, initial_val: anytype, settings: ParamReadWriteSettings, mutex_key: LockOptPtr, comptime SKIP_PROCESS: bool) OpaqueVal {
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             ensure_meta_index(cat, key.idx);
             const meta = ParamMeta{
@@ -1179,7 +1100,7 @@ pub fn ParametricStateSystem(
                 .generation = key.gen,
             };
             set_meta_at(cat, key.idx, meta);
-            const ref = ParamRef{ .category = cat, .index = key.idx, .generation = key.gen };
+            const ref = OpaqueVal{ .category = cat, .index = key.idx, .generation = key.gen };
             set_value_bytes(ref, std.mem.asBytes(&initial_val));
             category_counts[cat] += 1;
             update_meta_for_category(cat);
@@ -1187,8 +1108,8 @@ pub fn ParametricStateSystem(
             return ref;
         }
 
-        fn create_root_internal(comptime category: CategoryName, initial_val: CategoryType(category), settings: ParamReadWriteSettings, mutex_key: MutexKey) ParamRef {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn create_root_internal(comptime category: CategoryName, initial_val: CategoryType(category), settings: ParamReadWriteSettings, mutex_key: LockOptPtr) OpaqueVal {
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const cat: CategoryId = @intCast(@backingInt(category));
             const key = claim_pool_key_for_category(cat);
@@ -1197,23 +1118,23 @@ pub fn ParametricStateSystem(
 
         fn create_derived_set_internal(
             func_name: FuncName,
-            inputs: []const ParamRef,
+            inputs: []const OpaqueVal,
             output_defs: []const ParamReadOnlyDef,
-            output_refs: []ParamRef,
+            output_refs: []OpaqueVal,
             preclaimed_first: ?PoolKey,
             preclaimed_offset: usize,
-            mutex_key: MutexKey,
+            mutex_key: LockOptPtr,
             comptime SKIP_PROCESS: bool,
         ) void {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const func_idx: FuncId = @intCast(@backingInt(func_name));
-            assert_with_reason(funcs_init[func_idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
-            assert_with_reason(output_defs.len == output_refs.len, @src(), "`output_defs.len` must equal `output_refs.len`, got {d} != {d}", .{ output_defs.len, output_refs.len });
-            assert_with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
-            assert_with_reason(output_defs.len <= MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum ({d})", .{ output_defs.len, MAX_OUTPUTS });
+            Assert._with_reason(funcs_init[func_idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
+            Assert._with_reason(output_defs.len == output_refs.len, @src(), "`output_defs.len` must equal `output_refs.len`, got {d} != {d}", .{ output_defs.len, output_refs.len });
+            Assert._with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
+            Assert._with_reason(output_defs.len <= MAX_OUTPUTS, @src(), "the number of outputs ({d}) exceeds the maximum ({d})", .{ output_defs.len, MAX_OUTPUTS });
             for (inputs) |input| {
-                assert_with_reason(key_is_valid(input.category, .{ .idx = input.index, .gen = input.generation }), @src(), "an input parameter was not in a used state", .{});
+                Assert._with_reason(key_is_valid(input.category, .{ .idx = input.index, .gen = input.generation }), @src(), "an input parameter was not in a used state", .{});
             }
 
             var touched_categories: [MAX_OUTPUTS]CategoryId = undefined;
@@ -1268,7 +1189,7 @@ pub fn ParametricStateSystem(
             inputs: anytype,
             output_defs: anytype,
             comptime OUTPUT_STRUCT: type,
-            mutex_key: MutexKey,
+            mutex_key: LockOptPtr,
             comptime SKIP_PROCESS: bool,
         ) OUTPUT_STRUCT {
             const INS = @TypeOf(inputs);
@@ -1279,11 +1200,11 @@ pub fn ParametricStateSystem(
             ct_assert_with_reason(Types.type_is_struct(OUTPUT_STRUCT), @src(), "`OUTPUT_STRUCT` must be a struct type", .{});
             ct_assert_with_reason(Types.two_structs_have_exact_same_field_names_and_order(DEFS, OUTPUT_STRUCT), @src(), "`OUTPUT_STRUCT` and `output_defs` must have the same field names in the same order", .{});
 
-            var input_refs: [@typeInfo(INS).@"struct".field_names.len]ParamRef = undefined;
+            var input_refs: [@typeInfo(INS).@"struct".field_names.len]OpaqueVal = undefined;
             inline for (@typeInfo(INS).@"struct".field_names, @typeInfo(INS).@"struct".field_types, 0..) |field_name, field_type, i| {
                 ct_assert_with_reason(@hasDecl(field_type, "TYPE"), @src(), "field `{s}` on the input struct has no `TYPE` declaration (expected ParamReadOnly/ParamReadWrite/ParamUpdateInput)", .{field_name});
                 const value = @field(inputs, field_name);
-                input_refs[i] = ParamRef.from_opaque_read_only(value.to_opaque_read_only());
+                input_refs[i] = OpaqueVal.from_opaque_read_only(value.to_opaque_read_only());
             }
 
             var defs_flat: [@typeInfo(DEFS).@"struct".field_names.len]ParamReadOnlyDef = undefined;
@@ -1292,7 +1213,7 @@ pub fn ParametricStateSystem(
                 defs_flat[i] = @field(output_defs, field_name);
             }
 
-            var output_refs: [@typeInfo(OUTPUT_STRUCT).@"struct".field_names.len]ParamRef = undefined;
+            var output_refs: [@typeInfo(OUTPUT_STRUCT).@"struct".field_names.len]OpaqueVal = undefined;
             create_derived_set_internal(func_name, input_refs[0..], defs_flat[0..], output_refs[0..], null, 0, mutex_key, SKIP_PROCESS);
 
             var out_struct: OUTPUT_STRUCT = undefined;
@@ -1304,8 +1225,8 @@ pub fn ParametricStateSystem(
             return out_struct;
         }
 
-        fn create_consecutive_internal(comptime category: CategoryName, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category)), mutex_key: MutexKey) void {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn create_consecutive_internal(comptime category: CategoryName, defs: []const ParamDefConsecutive(type_for_category(category)), outputs: []Param(type_for_category(category)), mutex_key: LockOptPtr) void {
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const cat: CategoryId = @intCast(@backingInt(category));
             const T = CategoryType(category);
@@ -1321,7 +1242,7 @@ pub fn ParametricStateSystem(
                 }
                 break :build @intCast(c);
             };
-            assert_with_reason(count == outputs.len, @src(), "the total number of parameter outputs ({d}) must equal `outputs.len` ({d})", .{ count, outputs.len });
+            Assert._with_reason(count == outputs.len, @src(), "the total number of parameter outputs ({d}) must equal `outputs.len` ({d})", .{ count, outputs.len });
             if (count == 0) return;
             const first_key = claim_pool_key_consecutive(cat, count);
 
@@ -1348,22 +1269,22 @@ pub fn ParametricStateSystem(
                             .get_deleted_mode = d.output_def.get_deleted_mode,
                             .set_deleted_mode = d.output_def.set_deleted_mode,
                         }};
-                        var out_refs: [1]ParamRef = undefined;
-                        var in_refs: [MAX_INPUTS]ParamRef = undefined;
-                        assert_with_reason(d.inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ d.inputs.len, MAX_INPUTS });
-                        for (d.inputs, 0..) |in, i| in_refs[i] = ParamRef.from_opaque_read_only(in);
+                        var out_refs: [1]OpaqueVal = undefined;
+                        var in_refs: [MAX_INPUTS]OpaqueVal = undefined;
+                        Assert._with_reason(d.inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ d.inputs.len, MAX_INPUTS });
+                        for (d.inputs, 0..) |in, i| in_refs[i] = OpaqueVal.from_opaque_read_only(in);
                         create_derived_set_internal(d.update_function, in_refs[0..d.inputs.len], defs_arr[0..1], out_refs[0..1], first_key, param_offset, mk, true);
                         outputs[out_idx] = Param(T).derived(out_refs[0].to_read_only(T));
                         param_offset += 1;
                         out_idx += 1;
                     },
                     .DERIVED_GROUP => |d| {
-                        assert_with_reason(d.output_defs.len <= MAX_OUTPUTS, @src(), "group output count {d} exceeds maximum {d}", .{ d.output_defs.len, MAX_OUTPUTS });
+                        Assert._with_reason(d.output_defs.len <= MAX_OUTPUTS, @src(), "group output count {d} exceeds maximum {d}", .{ d.output_defs.len, MAX_OUTPUTS });
                         var defs_arr: [MAX_OUTPUTS]ParamReadOnlyDef = undefined;
-                        var out_refs: [MAX_OUTPUTS]ParamRef = undefined;
-                        var in_refs: [MAX_INPUTS]ParamRef = undefined;
-                        assert_with_reason(d.inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ d.inputs.len, MAX_INPUTS });
-                        for (d.inputs, 0..) |in, i| in_refs[i] = ParamRef.from_opaque_read_only(in);
+                        var out_refs: [MAX_OUTPUTS]OpaqueVal = undefined;
+                        var in_refs: [MAX_INPUTS]OpaqueVal = undefined;
+                        Assert._with_reason(d.inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ d.inputs.len, MAX_INPUTS });
+                        for (d.inputs, 0..) |in, i| in_refs[i] = OpaqueVal.from_opaque_read_only(in);
                         for (d.output_defs, 0..) |out_def, i| {
                             defs_arr[i] = .{
                                 .category = category,
@@ -1385,21 +1306,21 @@ pub fn ParametricStateSystem(
             process_all_updates_if_needed(mk);
         }
 
-        fn initialize_function_internal(comptime func_name: FuncName, func: *const UpdateFunction, mutex_key: MutexKey) void {
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn initialize_function_internal(comptime func_name: FuncName, func: *const UpdateFunction, mutex_key: LockOptPtr) void {
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const idx: usize = @intCast(@backingInt(func_name));
-            assert_with_reason(!funcs_init[idx], @src(), "function `{s}` was already initialized. Use `replace_update_function` to replace it", .{@tagName(func_name)});
+            Assert._with_reason(!funcs_init[idx], @src(), "function `{s}` was already initialized. Use `replace_update_function` to replace it", .{@tagName(func_name)});
             funcs_init[idx] = true;
             funcs[idx] = func;
         }
 
-        fn delete_function_internal(comptime func_name: FuncName, mutex_key: MutexKey) void {
-            comptime assert_with_reason(SETTINGS.ALLOW_FUNCTION_DELETION, @src(), "cannot call this function if `ALLOW_FUNCTION_DELETION` is false", .{});
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn delete_function_internal(comptime func_name: FuncName, mutex_key: LockOptPtr) void {
+            comptime Assert._with_reason(DEF.ALLOW_FUNCTION_DELETION, @src(), "cannot call this function if `ALLOW_FUNCTION_DELETION` is false", .{});
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const idx: usize = @intCast(@backingInt(func_name));
-            assert_with_reason(funcs_init[idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
+            Assert._with_reason(funcs_init[idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
             const list = &func_packages[idx];
             var li: u32 = 0;
             while (li < list.get_len()) : (li += 1) {
@@ -1411,7 +1332,7 @@ pub fn ParametricStateSystem(
                     const out_ref = block.refs[in_count + i];
                     if (!key_is_valid(out_ref.category, .{ .idx = out_ref.index, .gen = out_ref.generation })) continue;
                     const out_meta = get_meta_at(out_ref.category, out_ref.index);
-                    if (SETTINGS.DELETE_DEPENDANT_PARAMETERS_WHEN_FUNCTION_DELETED) {
+                    if (DEF.DELETE_DEPENDANT_PARAMETERS_WHEN_FUNCTION_DELETED) {
                         switch (out_meta.parent_delete_behavior) {
                             .DELETE_WHEN_PARENT_IS_DELETED => delete_queue.append_one(out_ref, system_allocator),
                             .SET_DEFAULT_VALUE_WHEN_PARENT_IS_DELETED => set_default_locked(out_ref, mk, true),
@@ -1428,12 +1349,12 @@ pub fn ParametricStateSystem(
             process_all_deletes_if_needed(mk, false);
         }
 
-        fn replace_function_internal(comptime func_name: FuncName, new_func: *const UpdateFunction, mutex_key: MutexKey) void {
-            comptime assert_with_reason(SETTINGS.ALLOW_FUNCTION_REPLACEMENT, @src(), "cannot call this function if `ALLOW_FUNCTION_REPLACEMENT` is false", .{});
-            var mk: MutexKey, const owns = mutex_key.lock_if_needed(&access_lock);
+        fn replace_function_internal(comptime func_name: FuncName, new_func: *const UpdateFunction, mutex_key: LockOptPtr) void {
+            comptime Assert._with_reason(DEF.ALLOW_FUNCTION_REPLACEMENT, @src(), "cannot call this function if `ALLOW_FUNCTION_REPLACEMENT` is false", .{});
+            var mk: LockOptPtr, const owns = mutex_key.lock_if_needed(&access_lock);
             defer mk.unlock_if_needed(owns);
             const idx: usize = @intCast(@backingInt(func_name));
-            assert_with_reason(funcs_init[idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
+            Assert._with_reason(funcs_init[idx], @src(), "function `{s}` was not initialized", .{@tagName(func_name)});
             funcs[idx] = new_func;
             const list = &func_packages[idx];
             var li: u32 = 0;
@@ -1447,92 +1368,92 @@ pub fn ParametricStateSystem(
             capacity: usize,
         };
 
-        /// Initialize the system.  `io` is accepted for parity with the pool
-        /// types; the state system uses its own `KeyedMutex` for synchronization.
-        /// `category_capacities` may be null; omitted categories start at zero
-        /// capacity and grow on demand.
-        pub fn init(allocator: Allocator, io: Io, category_capacities: ?[]const CategoryCapacity) void {
-            var mk: MutexKey, const owns = (MutexKey{}).lock_if_needed(&access_lock);
-            defer mk.unlock_if_needed(owns);
-            assert_with_reason(!initialized, @src(), "`init` was called twice without `deinit`", .{});
-            _ = io;
+        // /// Initialize the system.  `io` is accepted for parity with the pool
+        // /// types; the state system uses its own `KeyedMutex` for synchronization.
+        // /// `category_capacities` may be null; omitted categories start at zero
+        // /// capacity and grow on demand.
+        // pub fn init(allocator: Allocator, io: Io, category_capacities: ?[]const CategoryCapacity) void {
+        //     var mk: LockOptPtr, const owns = (LockOptPtr{}).lock_if_needed(&access_lock);
+        //     defer mk.unlock_if_needed(owns);
+        //     Assert._with_reason(!initialized, @src(), "`init` was called twice without `deinit`", .{});
+        //     _ = io;
 
-            var caps: [NUM_CATEGORIES]usize = @splat(0);
-            if (category_capacities) |list| {
-                var seen: [NUM_CATEGORIES]bool = @splat(false);
-                for (list) |cc| {
-                    const cat: usize = @intCast(@backingInt(cc.category));
-                    assert_with_reason(!seen[cat], @src(), "category `{s}` was provided more than once", .{@tagName(cc.category)});
-                    seen[cat] = true;
-                    caps[cat] = cc.capacity;
-                }
-            }
+        //     var caps: [NUM_CATEGORIES]usize = @splat(0);
+        //     if (category_capacities) |list| {
+        //         var seen: [NUM_CATEGORIES]bool = @splat(false);
+        //         for (list) |cc| {
+        //             const cat: usize = @intCast(@backingInt(cc.category));
+        //             Assert._with_reason(!seen[cat], @src(), "category `{s}` was provided more than once", .{@tagName(cc.category)});
+        //             seen[cat] = true;
+        //             caps[cat] = cc.capacity;
+        //         }
+        //     }
 
-            inline for (0..NUM_CATEGORIES) |c| {
-                const P = CATEGORY_POOLS[c];
-                P.init(@intCast(caps[c]), allocator, {});
-                metas[c] = MetaList.allocate_new(@intCast(caps[c]), allocator);
-            }
+        //     inline for (0..NUM_CATEGORIES) |c| {
+        //         const P = CATEGORY_POOLS[c];
+        //         P.init(@intCast(caps[c]), allocator, {});
+        //         metas[c] = MetaList.allocate_new(@intCast(caps[c]), allocator);
+        //     }
 
-            system_allocator = allocator;
-            payload_pool.init(0, allocator, {});
-            package_pool.init(0, allocator, {});
-            dep_pool.init(0, allocator, {});
-            update_queue = QueueList.allocate_new(0, allocator);
-            delete_queue = DeleteList.allocate_new(0, allocator);
-            for (0..NUM_FUNCTIONS) |f| {
-                func_packages[f] = FuncList.allocate_new(0, allocator);
-                func_packages_init[f] = true;
-            }
+        //     system_allocator = allocator;
+        //     payload_pool.init(0, allocator, {});
+        //     package_pool.init(0, allocator, {});
+        //     dep_pool.init(0, allocator, {});
+        //     update_queue = QueueList.allocate_new(0, allocator);
+        //     delete_queue = DeleteList.allocate_new(0, allocator);
+        //     for (0..NUM_FUNCTIONS) |f| {
+        //         func_packages[f] = FuncList.allocate_new(0, allocator);
+        //         func_packages_init[f] = true;
+        //     }
 
-            for (0..NUM_USER_CATEGORIES) |cat| {
-                meta_values[cat] = 0;
-                meta_first_deps[cat] = null;
-                meta_last_deps[cat] = null;
-                meta_metas[cat] = .{
-                    .update_mode = if (SETTINGS.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE)
-                        .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED
-                    else
-                        .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
-                    .parent_delete_behavior = .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED,
-                };
-            }
-            category_counts = @splat(0);
-            current_epoch = 0;
-            cascade_active = false;
-            updates_in_progress = false;
-            deletes_in_progress = false;
-            update_queue_cursor = 0;
-            initialized = true;
-        }
+        //     for (0..NUM_USER_CATEGORIES) |cat| {
+        //         meta_values[cat] = 0;
+        //         meta_first_deps[cat] = null;
+        //         meta_last_deps[cat] = null;
+        //         meta_metas[cat] = .{
+        //             .update_mode = if (DEF.INCLUDE_META_CATEGORY == .META_CATEGORY_LENGTH_AND_VALUE_CHANGE)
+        //                 .ALWAYS_TRIGGER_UPDATES_EVEN_IF_VALUE_UNCHANGED
+        //             else
+        //                 .ONLY_TRIGGER_UPDATES_ON_VALUE_CHANGE,
+        //             .parent_delete_behavior = .RETAIN_LAST_VALUE_WHEN_PARENT_DELETED,
+        //         };
+        //     }
+        //     category_counts = @splat(0);
+        //     current_epoch = 0;
+        //     cascade_active = false;
+        //     updates_in_progress = false;
+        //     deletes_in_progress = false;
+        //     update_queue_cursor = 0;
+        //     initialized = true;
+        // }
 
-        pub fn deinit() void {
-            var mk: MutexKey, const owns = (MutexKey{}).lock_if_needed(&access_lock);
-            defer mk.unlock_if_needed(owns);
-            if (!initialized) return;
+        // pub fn deinit() void {
+        //     var mk: LockOptPtr, const owns = (LockOptPtr{}).lock_if_needed(&access_lock);
+        //     defer mk.unlock_if_needed(owns);
+        //     if (!initialized) return;
 
-            inline for (0..NUM_CATEGORIES) |c| {
-                const P = CATEGORY_POOLS[c];
-                P.uninit();
-                metas[c].free_if_non_zero(system_allocator);
-            }
-            payload_pool.uninit(system_allocator);
-            package_pool.uninit(system_allocator);
-            dep_pool.uninit(system_allocator);
+        //     inline for (0..NUM_CATEGORIES) |c| {
+        //         const P = CATEGORY_POOLS[c];
+        //         P.uninit();
+        //         metas[c].free_if_non_zero(system_allocator);
+        //     }
+        //     payload_pool.uninit(system_allocator);
+        //     package_pool.uninit(system_allocator);
+        //     dep_pool.uninit(system_allocator);
 
-            update_queue.free_if_non_zero(system_allocator);
-            delete_queue.free_if_non_zero(system_allocator);
-            for (0..NUM_FUNCTIONS) |f| {
-                func_packages[f].free_if_non_zero(system_allocator);
-                func_packages_init[f] = false;
-            }
+        //     update_queue.free_if_non_zero(system_allocator);
+        //     delete_queue.free_if_non_zero(system_allocator);
+        //     for (0..NUM_FUNCTIONS) |f| {
+        //         func_packages[f].free_if_non_zero(system_allocator);
+        //         func_packages_init[f] = false;
+        //     }
 
-            funcs_init = @splat(false);
-            funcs = @splat(Utils.invalid_ptr_const(UpdateFunction));
-            category_counts = @splat(0);
-            system_allocator = DummyAllocator.allocator_panic_free_noop;
-            initialized = false;
-        }
+        //     funcs_init = @splat(false);
+        //     funcs = @splat(Utils.invalid_ptr_const(UpdateFunction));
+        //     category_counts = @splat(0);
+        //     system_allocator = DummyAllocator.allocator_panic_free_noop;
+        //     initialized = false;
+        // }
 
         // ---- public types ---------------------------------------------------
         pub const CategoryName = PARAM_CATEGORIES;
@@ -1557,10 +1478,10 @@ pub fn ParametricStateSystem(
                 delete_param_internal(.{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false, false);
             }
             fn with_type(self: ParamReadWriteOpaque, comptime T: type) ParamReadWrite(T) {
-                assert_with_reason(CATEGORY_TYPE_IDS[self.category] == id_for_type(T), @src(), "invalid category for converting to param with type `{s}`", .{@typeName(T)});
+                Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == id_for_type(T), @src(), "invalid category for converting to param with type `{s}`", .{@typeName(T)});
                 return .{ .category = self.category, .index = self.index, .generation = self.generation };
             }
-            fn as_update_output(self: ParamReadWriteOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
+            fn as_update_output(self: ParamReadWriteOpaque, key: LockOptPtr, comptime T: type) ParamUpdateOutput(T) {
                 return self.with_type(T).as_update_output(key);
             }
         };
@@ -1574,13 +1495,13 @@ pub fn ParametricStateSystem(
                 delete_param_internal(.{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false, false);
             }
             fn with_type(self: ParamReadOnlyOpaque, comptime T: type) ParamReadOnly(T) {
-                assert_with_reason(CATEGORY_TYPE_IDS[self.category] == id_for_type(T), @src(), "invalid category for converting to param with type `{s}`", .{@typeName(T)});
+                Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == id_for_type(T), @src(), "invalid category for converting to param with type `{s}`", .{@typeName(T)});
                 return .{ .category = self.category, .index = self.index, .generation = self.generation };
             }
-            fn as_update_input(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateInput(T) {
+            fn as_update_input(self: ParamReadOnlyOpaque, key: LockOptPtr, comptime T: type) ParamUpdateInput(T) {
                 return self.with_type(T).as_update_input(key);
             }
-            fn as_update_output(self: ParamReadOnlyOpaque, key: MutexKey, comptime T: type) ParamUpdateOutput(T) {
+            fn as_update_output(self: ParamReadOnlyOpaque, key: LockOptPtr, comptime T: type) ParamUpdateOutput(T) {
                 return ParamUpdateOutput(T){
                     .param = self.with_type(T),
                     .key = key,
@@ -1613,18 +1534,18 @@ pub fn ParametricStateSystem(
                 fn to_read_write(self: ParamSelf) ParamSelf {
                     return self;
                 }
-                fn as_update_input(self: ParamSelf, key: MutexKey) ParamUpdateInput(T) {
+                fn as_update_input(self: ParamSelf, key: LockOptPtr) ParamUpdateInput(T) {
                     return .{ .param = self.to_read_only(), .key = key };
                 }
-                fn as_update_output(self: ParamSelf, key: MutexKey) ParamUpdateOutput(T) {
+                fn as_update_output(self: ParamSelf, key: LockOptPtr) ParamUpdateOutput(T) {
                     return .{ .param = self.to_read_only(), .key = key };
                 }
                 pub fn delete(self: ParamSelf) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     delete_param_internal(.{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false, false);
                 }
                 pub fn set(self: ParamSelf, val: T) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     set_typed_locked(T, .{ .category = self.category, .index = self.index, .generation = self.generation }, val, .{}, false);
                 }
                 pub fn set_and_get_old(self: ParamSelf, val: T) T {
@@ -1633,7 +1554,7 @@ pub fn ParametricStateSystem(
                     return old;
                 }
                 pub fn get(self: ParamSelf) T {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return get_typed_locked(T, .{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false);
                 }
             };
@@ -1661,15 +1582,15 @@ pub fn ParametricStateSystem(
                 fn to_read_write(self: ParamSelf) ParamReadWrite(T) {
                     return .{ .category = self.category, .index = self.index, .generation = self.generation };
                 }
-                fn as_update_input(self: ParamSelf, key: MutexKey) ParamUpdateInput(T) {
+                fn as_update_input(self: ParamSelf, key: LockOptPtr) ParamUpdateInput(T) {
                     return .{ .param = self, .key = key };
                 }
                 pub fn delete(self: ParamSelf) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     delete_param_internal(.{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false, false);
                 }
                 pub fn get(self: ParamSelf) T {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return get_typed_locked(T, .{ .category = self.category, .index = self.index, .generation = self.generation }, .{}, false);
                 }
             };
@@ -1682,14 +1603,14 @@ pub fn ParametricStateSystem(
                 const ParamSelf = @This();
 
                 param: ParamReadOnly(T),
-                key: MutexKey,
+                key: LockOptPtr,
 
                 pub fn delete(self: ParamSelf) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     delete_param_internal(.{ .category = self.param.category, .index = self.param.index, .generation = self.param.generation }, self.key, false, true);
                 }
                 pub fn get(self: ParamSelf) T {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return get_typed_locked(T, .{ .category = self.param.category, .index = self.param.index, .generation = self.param.generation }, self.key, false);
                 }
                 fn to_opaque_read_only(self: ParamSelf) ParamReadOnlyOpaque {
@@ -1711,14 +1632,14 @@ pub fn ParametricStateSystem(
                 const ParamSelf = @This();
 
                 param: ParamReadOnly(T),
-                key: MutexKey,
+                key: LockOptPtr,
 
                 pub fn delete(self: ParamSelf) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     delete_param_internal(.{ .category = self.param.category, .index = self.param.index, .generation = self.param.generation }, self.key, false, true);
                 }
                 pub fn set(self: ParamSelf, val: T) void {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     set_typed_locked(T, .{ .category = self.param.category, .index = self.param.index, .generation = self.param.generation }, val, self.key, true);
                 }
                 pub fn set_and_get_old(self: ParamSelf, val: T) T {
@@ -1727,7 +1648,7 @@ pub fn ParametricStateSystem(
                     return old;
                 }
                 pub fn get(self: ParamSelf) T {
-                    assert_with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
+                    Assert._with_reason(CATEGORY_TYPE_IDS[self.param.category] == THIS_TYPE_ID, @src(), "category type does not match the parameter type", .{});
                     return get_typed_locked(T, .{ .category = self.param.category, .index = self.param.index, .generation = self.param.generation }, self.key, false);
                 }
                 fn to_opaque_read_only(self: ParamSelf) ParamReadOnlyOpaque {
@@ -1944,7 +1865,7 @@ pub fn ParametricStateSystem(
             assert_initialized();
             initialize_function_internal(func_name, func, .{});
         }
-        pub fn initialize_update_function_during_update(comptime func_name: FuncName, func: *const UpdateFunction, mutex_key: MutexKey) void {
+        pub fn initialize_update_function_during_update(comptime func_name: FuncName, func: *const UpdateFunction, mutex_key: LockOptPtr) void {
             assert_initialized();
             initialize_function_internal(func_name, func, mutex_key);
         }
@@ -1952,7 +1873,7 @@ pub fn ParametricStateSystem(
             assert_initialized();
             delete_function_internal(func_name, .{});
         }
-        pub fn delete_update_function_during_update(comptime func_name: FuncName, mutex_key: MutexKey) void {
+        pub fn delete_update_function_during_update(comptime func_name: FuncName, mutex_key: LockOptPtr) void {
             assert_initialized();
             delete_function_internal(func_name, mutex_key);
         }
@@ -1960,7 +1881,7 @@ pub fn ParametricStateSystem(
             assert_initialized();
             replace_function_internal(func_name, new_func, .{});
         }
-        pub fn replace_update_function_during_update(comptime func_name: FuncName, new_func: *const UpdateFunction, mutex_key: MutexKey) void {
+        pub fn replace_update_function_during_update(comptime func_name: FuncName, new_func: *const UpdateFunction, mutex_key: LockOptPtr) void {
             assert_initialized();
             replace_function_internal(func_name, new_func, mutex_key);
         }
@@ -2005,22 +1926,22 @@ pub fn ParametricStateSystem(
 
         pub fn create_new_derived_param_set(update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque) void {
             assert_initialized();
-            assert_with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
-            assert_with_reason(outputs.len <= MAX_OUTPUTS and output_defs.len == outputs.len, @src(), "the number of outputs ({d}) must match `output_defs.len` ({d}) and be at most {d}", .{ outputs.len, output_defs.len, MAX_OUTPUTS });
-            var in_refs: [MAX_INPUTS]ParamRef = undefined;
-            for (inputs, 0..) |in, i| in_refs[i] = ParamRef.from_opaque_read_only(in);
-            var out_refs: [MAX_OUTPUTS]ParamRef = undefined;
+            Assert._with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
+            Assert._with_reason(outputs.len <= MAX_OUTPUTS and output_defs.len == outputs.len, @src(), "the number of outputs ({d}) must match `output_defs.len` ({d}) and be at most {d}", .{ outputs.len, output_defs.len, MAX_OUTPUTS });
+            var in_refs: [MAX_INPUTS]OpaqueVal = undefined;
+            for (inputs, 0..) |in, i| in_refs[i] = OpaqueVal.from_opaque_read_only(in);
+            var out_refs: [MAX_OUTPUTS]OpaqueVal = undefined;
             create_derived_set_internal(update_function, in_refs[0..inputs.len], output_defs, out_refs[0..outputs.len], null, 0, .{}, false);
             for (out_refs[0..outputs.len], outputs) |ref, *out| out.* = ref.to_opaque_read_only();
         }
 
         pub fn create_new_derived_param(update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
             assert_initialized();
-            assert_with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
-            var in_refs: [MAX_INPUTS]ParamRef = undefined;
-            for (inputs, 0..) |in, i| in_refs[i] = ParamRef.from_opaque_read_only(in);
+            Assert._with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
+            var in_refs: [MAX_INPUTS]OpaqueVal = undefined;
+            for (inputs, 0..) |in, i| in_refs[i] = OpaqueVal.from_opaque_read_only(in);
             const defs: [1]ParamReadOnlyDef = .{output_def};
-            var out_refs: [1]ParamRef = undefined;
+            var out_refs: [1]OpaqueVal = undefined;
             create_derived_set_internal(update_function, in_refs[0..inputs.len], defs[0..1], out_refs[0..1], null, 0, .{}, false);
             return out_refs[0].to_read_only(OUTPUT_TYPE);
         }
@@ -2031,7 +1952,7 @@ pub fn ParametricStateSystem(
         }
 
         pub fn get_meta_param(comptime category: CategoryName) ParamReadOnly(IndexType) {
-            comptime assert_with_reason(INCLUDE_META, @src(), "meta category is not enabled", .{});
+            comptime Assert._with_reason(INCLUDE_META, @src(), "meta category is not enabled", .{});
             return .{
                 .category = @intCast(META_CAT_IDX),
                 .index = @intCast(@backingInt(category)),
@@ -2045,7 +1966,7 @@ pub fn ParametricStateSystem(
             const meta = get_meta_at(cat, index);
             return get_typed_locked(CategoryType(category), .{ .category = cat, .index = index, .generation = meta.generation }, .{}, true);
         }
-        pub fn get_param_in_category_during_update(comptime category: CategoryName, index: IndexType, mutex_key: MutexKey) CategoryType(category) {
+        pub fn get_param_in_category_during_update(comptime category: CategoryName, index: IndexType, mutex_key: LockOptPtr) CategoryType(category) {
             assert_initialized();
             const cat: CategoryId = @intCast(@backingInt(category));
             const meta = get_meta_at(cat, index);
@@ -2057,7 +1978,7 @@ pub fn ParametricStateSystem(
             const meta = get_meta_at(cat, index);
             set_typed_locked(CategoryType(category), .{ .category = cat, .index = index, .generation = meta.generation }, val, .{}, false);
         }
-        pub fn set_param_in_category_during_update(comptime category: CategoryName, index: IndexType, val: CategoryType(category), mutex_key: MutexKey) void {
+        pub fn set_param_in_category_during_update(comptime category: CategoryName, index: IndexType, val: CategoryType(category), mutex_key: LockOptPtr) void {
             assert_initialized();
             const cat: CategoryId = @intCast(@backingInt(category));
             const meta = get_meta_at(cat, index);
@@ -2068,7 +1989,7 @@ pub fn ParametricStateSystem(
             set_param_in_category(category, index, val);
             return old;
         }
-        pub fn set_param_get_old_in_category_during_update(comptime category: CategoryName, index: IndexType, val: CategoryType(category), mutex_key: MutexKey) CategoryType(category) {
+        pub fn set_param_get_old_in_category_during_update(comptime category: CategoryName, index: IndexType, val: CategoryType(category), mutex_key: LockOptPtr) CategoryType(category) {
             const old = get_param_in_category_during_update(category, index, mutex_key);
             set_param_in_category_during_update(category, index, val, mutex_key);
             return old;
@@ -2079,7 +2000,7 @@ pub fn ParametricStateSystem(
             const meta = get_meta_at(cat, index);
             delete_param_internal(.{ .category = cat, .index = index, .generation = meta.generation }, .{}, true, false);
         }
-        pub fn delete_param_in_category_during_update(comptime category: CategoryName, index: IndexType, mutex_key: MutexKey) void {
+        pub fn delete_param_in_category_during_update(comptime category: CategoryName, index: IndexType, mutex_key: LockOptPtr) void {
             assert_initialized();
             const cat: CategoryId = @intCast(@backingInt(category));
             const meta = get_meta_at(cat, index);
@@ -2106,61 +2027,6 @@ pub fn ParametricStateSystem(
             }
             return object;
         }
-
-        pub const UpdateInterface = struct {
-            inputs: []const ParamRef,
-            outputs: []const ParamRef,
-            key: MutexKey,
-
-            pub fn create_new_root_param_during_update(self: UpdateInterface, comptime category: CategoryName, initial_val: CategoryType(category), update_mode: UpdateMode) ParamReadWrite(CategoryType(category)) {
-                const ref = create_root_internal(category, initial_val, .{ .update_mode = update_mode }, self.key);
-                return ref.to_read_write(CategoryType(category));
-            }
-            pub fn create_new_derived_param_set_from_struct_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_defs: anytype, comptime OUTPUT_STRUCT: type) OUTPUT_STRUCT {
-                return create_derived_set_from_struct(update_function, inputs, output_defs, OUTPUT_STRUCT, self.key, false);
-            }
-            pub fn create_new_derived_param_set_during_update(self: UpdateInterface, update_function: FuncName, inputs: []const ParamReadOnlyOpaque, output_defs: []const ParamReadOnlyDef, outputs: []ParamReadOnlyOpaque) void {
-                assert_with_reason(inputs.len <= MAX_INPUTS, @src(), "the number of inputs ({d}) exceeds the maximum ({d})", .{ inputs.len, MAX_INPUTS });
-                assert_with_reason(outputs.len <= MAX_OUTPUTS and output_defs.len == outputs.len, @src(), "the number of outputs ({d}) must match `output_defs.len` ({d}) and be at most {d}", .{ outputs.len, output_defs.len, MAX_OUTPUTS });
-                var in_refs: [MAX_INPUTS]ParamRef = undefined;
-                for (inputs, 0..) |in, i| in_refs[i] = ParamRef.from_opaque_read_only(in);
-                var out_refs: [MAX_OUTPUTS]ParamRef = undefined;
-                create_derived_set_internal(update_function, in_refs[0..inputs.len], output_defs, out_refs[0..outputs.len], null, 0, self.key, false);
-                for (out_refs[0..outputs.len], outputs) |ref, *out| out.* = ref.to_opaque_read_only();
-            }
-            pub fn create_new_derived_param_during_update(self: UpdateInterface, update_function: FuncName, inputs: anytype, output_def: ParamReadOnlyDef, comptime OUTPUT_TYPE: type) ParamReadOnly(OUTPUT_TYPE) {
-                const DefsStruct = struct { param: ParamReadOnlyDef };
-                const OutStruct = struct { param: ParamReadOnly(OUTPUT_TYPE) };
-                const out = create_derived_set_from_struct(update_function, inputs, DefsStruct{ .param = output_def }, OutStruct, self.key, false);
-                return out.param;
-            }
-
-            pub fn make_input_struct(self: UpdateInterface, comptime IN_STRUCT: type) IN_STRUCT {
-                ct_assert_with_reason(Types.type_is_struct(IN_STRUCT), @src(), "type `IN_STRUCT` must be a struct type", .{});
-                ct_assert_with_reason(self.inputs.len == @typeInfo(IN_STRUCT).@"struct".field_names.len, @src(), "field count mismatch", .{});
-                var object: IN_STRUCT = undefined;
-                inline for (@typeInfo(IN_STRUCT).@"struct".field_names, @typeInfo(IN_STRUCT).@"struct".field_types, 0..) |field_name, field_type, f| {
-                    const T = @field(field_type, "TYPE");
-                    @field(object, field_name) = self.inputs[f].as_update_input(self.key, T);
-                }
-                return object;
-            }
-            pub fn make_output_struct(self: UpdateInterface, comptime OUT_STRUCT: type) OUT_STRUCT {
-                ct_assert_with_reason(Types.type_is_struct(OUT_STRUCT), @src(), "type `OUT_STRUCT` must be a struct type", .{});
-                ct_assert_with_reason(self.outputs.len == @typeInfo(OUT_STRUCT).@"struct".field_names.len, @src(), "field count mismatch", .{});
-                var object: OUT_STRUCT = undefined;
-                inline for (@typeInfo(OUT_STRUCT).@"struct".field_names, @typeInfo(OUT_STRUCT).@"struct".field_types, 0..) |field_name, field_type, f| {
-                    const T = @field(field_type, "TYPE");
-                    @field(object, field_name) = self.outputs[f].as_update_output(self.key, T);
-                }
-                return object;
-            }
-
-            pub fn commit_deletions_and_changes(self: UpdateInterface) void {
-                process_all_deletes_if_needed(self.key, false);
-                process_all_updates_if_needed(self.key);
-            }
-        };
     };
 }
 
@@ -2301,7 +2167,7 @@ test "ParametricStateSystem - main test" {
             const vec_out = vec_in.add(Vec{ .x = scalar, .y = scalar });
 
             out.vec.set(vec_out);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
         fn half_vec_minus_2_scalar(iface: CalcIface) void {
             const in = iface.make_input_struct(VecAndScalar_UpdateIn);
@@ -2310,7 +2176,7 @@ test "ParametricStateSystem - main test" {
             const scalar = in.scalar.get();
             const vec_out = vec_in.scale(0.5).subtract_scale(Vec{ .x = scalar, .y = scalar }, 2);
             out.vec.set(vec_out);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
         fn linked_area_parent_and_button(iface: CalcIface) void {
             const in = iface.make_input_struct(ParentSizeButtonSize_UpdateIn);
@@ -2323,7 +2189,7 @@ test "ParametricStateSystem - main test" {
             out.parent_area.set(parent_area);
             out.button_area.set(button_area);
             out.total_area.set(total_area);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
         fn vec_plus_vec_plus_margin_out_vec_0y_and_vec_xy(iface: CalcIface) void {
             const in = iface.make_input_struct(PosSizeMargin_UpdateIn);
@@ -2335,7 +2201,7 @@ test "ParametricStateSystem - main test" {
             const bot_left = Vec{ .x = 0, .y = far_corner.y };
             out.vec_1.set(bot_left);
             out.vec_2.set(far_corner);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
         fn vec_plus_vec_plus_margin_out_vec_x0(iface: CalcIface) void {
             const in = iface.make_input_struct(PosSizeMargin_UpdateIn);
@@ -2346,7 +2212,7 @@ test "ParametricStateSystem - main test" {
             const far_corner = pos.add(size).add(Vec{ .x = margin, .y = margin });
             const top_right = Vec{ .x = far_corner.x, .y = 0 };
             out.vec.set(top_right);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
     };
 
@@ -2556,13 +2422,13 @@ test "ParametricStateSystem - function lifecycle" {
             const in = iface.make_input_struct(In);
             const out = iface.make_output_struct(Out);
             out.y.set(in.x.get() + 1);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
         fn add_ten(iface: Iface) void {
             const in = iface.make_input_struct(In);
             const out = iface.make_output_struct(Out);
             out.y.set(in.x.get() + 10);
-            iface.commit_deletions_and_changes();
+            iface.commit_changes();
         }
     };
     PSS.initialize_update_function(.ADD_ONE, CALC.add_one);

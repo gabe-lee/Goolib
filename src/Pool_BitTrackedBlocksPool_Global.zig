@@ -177,7 +177,7 @@ pub const SubPoolDef = struct {
     /// The number of bits in each state-tracking integer,
     /// where each bit represents the used/free state
     /// of one of the elements. Must be >= 8 and <= `ELEMENTS_PER_BLOCK`
-    ELEMENTS_PER_STATE_GROUP: PowerOf2 = .USIZE_POWER,
+    ELEMENTS_PER_STATE_GROUP: PowerOf2 = .USIZE_BITS_VAL,
     /// The number of elements per block. MUST be >= `ELEMENTS_PER_STATE_GROUP`
     ELEMENTS_PER_BLOCK: PowerOf2 = ._64,
 };
@@ -200,6 +200,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
     return struct {
         const Global = @This();
         pub const UNIQUE_NAME = GDEF.UNIQUE_NAME;
+        pub const NEED_IO = !NONE_IO;
         const ElemIdx = GDEF.MAX_NUM_ELEMS.unsigned_integer_type_that_holds_all_values_less_than();
         const INVALID_IDX = math.maxInt(ElemIdx);
         const GenId = GDEF.MAX_GENERATION.unsigned_integer_type_that_holds_all_values_less_than();
