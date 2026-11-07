@@ -36,8 +36,10 @@ const PowerOf2 = Root.Math.PowerOf2;
 const Types = Root.Types;
 const Cast = Root.Cast;
 const Log2Usize = math.Log2Int(usize);
+const Utils = Root.Utils;
 
 const assert_with_reason = Assert.assert_with_reason;
+const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_always_panic = Assert.assert_unreachable_always_panic;
 const assert_allocation_failure = Assert.assert_allocation_failure;
@@ -60,26 +62,11 @@ pub const Def = struct {
     /// - all slab sizes >= their respective block sizes
     /// - all slab sizes >= std.heap.page_size_min
     BUCKETS: []const BucketDef,
-    /// The unsigned integer type to use for indexing.
-    ///
-    /// This type places a maximum limit on how many total blocks any single bucket can have. A smaller integer type will save
-    /// a small amount of memory footprint. Choosing `usize` is effectively the same as `unlimited` blocks, as
-    /// the system will run out of address space long before it runs out of block indexes to use
-    ///
-    /// For most use cases, `u16` (65536 maximum blocks per bucket) or `u32` (4294967296 maximum blocks per bucket) are good choices
-    INDEX_UINT_TYPE: type = u32,
-    /// The unsigned integer type to use for block/slab sizes.
-    ///
-    /// This type places a maximum limit on the largest block/slab size. A smaller integer type will save
-    /// a small amount of memory footprint. Choosing `usize` is effectively the same as `unlimited` block/slab size, as
-    /// any block or slab size of the maximum value of `usize` would completely exhaust the system address space anyway
-    ///
-    /// For most use cases, `u16` (max block/slab size of 32 kilobytes) or `u32` (max block/slab size of 2 gigabytes) are good choices
-    SIZE_UINT_TYPE: type = u32,
     /// If a requested allocation exceeds the maximum block size, how should this allocator respond
     ///
     /// the `.UNREACHABLE` option will slightly reduce the processing overhead of checking whether a
-    /// requested allocation does or does not fall into the 'large' category and prevent branching
+    /// requested allocation does or does not fall into the 'large' category and prevent branching,
+    /// but '.USE_PAGE_ALLOCATOR' is the safest and most-prefered option
     LARGE_ALLOCATION_BEHAVIOR: LargeAllocBehavior = LargeAllocBehavior.USE_PAGE_ALLOCATOR,
     /// Enable additional tracking for allocation usage.
     ///
@@ -89,6 +76,16 @@ pub const Def = struct {
     ///
     /// It provides no additional behavioral functionality or performance.
     TRACK_ALLOCATION_STATS: bool = false,
+    /// If true, when attempting to resize from a larger bucket size to a smaller bucket size,
+    /// the larger bucket will be binary sub-divided into a series of 'one-size-smaller' buckets starting from
+    /// its end and the new sub-divided buckets will be added to their respective free lists
+    /// until only one bucket of the specified smaller size exists in-place at the same original
+    /// memory location.
+    ///
+    /// This setting reduces memory reallocs when shrinking memory, but also has the side-effect of
+    /// slowly tending to decrease the total available larger bucket slots and increase the total
+    /// available smaller bucket slots
+    ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET: bool = true,
 };
 
 pub const BucketDef = struct {
@@ -99,7 +96,7 @@ pub const BucketDef = struct {
     /// This value must follow the following rules:
     /// - SLAB_SIZE >= BUCKET_SIZE
     /// - SLAB_SIZE >= std.heap.page_size_min
-    SLAB_SIZE: PowerOf2,
+    SLAB_SIZE: PowerOf2 = PowerOf2.STD_HEAP_MIN_PAGE_SIZE,
     /// The size of individiual memory blocks for this bucket. The slab_size is divided into individual blocks
     /// for this bucket to use, but it WILL NOT use multiple blocks for a single allocation.
     ///
@@ -112,6 +109,7 @@ pub const BucketDef = struct {
 };
 
 const BucketSlice = List(BucketDef, usize, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
+const SlabList = List([]u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
 
 fn bucket_greater(slice: BucketSlice, idx_a: usize, val_b: BucketDef, _: void, comptime _: void) bool {
     return slice.get(idx_a).BUCKET_SIZE.greater_than(val_b.BUCKET_SIZE);
@@ -121,6 +119,7 @@ pub fn ComptimeAllocInfo(comptime N: usize) type {
     return struct {
         min_bucket_power: PowerOf2,
         max_bucket_power: PowerOf2,
+        largest_blocks_per_slab: usize,
         ordered_block_sizes: [N]usize,
         ordered_slab_sizes: [N]usize,
         ordered_blocks_per_slab: [N]usize,
@@ -149,6 +148,7 @@ fn eval_def(comptime DEF: Def) ComptimeAllocInfo(DEF.BUCKETS.len) {
     comptime var ordered_slab_masks: [DEF.BUCKETS.len]usize = undefined;
     comptime var ordered_leftover_blocks_after_new_alloc: [DEF.BUCKETS.len]usize = undefined;
     comptime var ordered_slab_alignments: [DEF.BUCKETS.len]mem.Alignment = undefined;
+    comptime var largest_blocks_per_slab: usize = 0;
     for (ordered_bucket_defs, 0..) |def, i| {
         assert_with_reason(def.BUCKET_SIZE.less_than_or_equal(def.SLAB_SIZE), "BUCKET_SIZE ({d}) mus be <= SLAB_SIZE ({d})", .{ def.BUCKET_SIZE.value(), def.SLAB_SIZE.value() });
         assert_with_reason(def.BUCKET_SIZE.greater_than_or_equal(PowerOf2.USIZE_BYTES), "BUCKET_SIZE ({d}) mus be >= USIZE_BYTES ({d})", .{ def.BUCKET_SIZE.value(), PowerOf2.USIZE_BYTES.value() });
@@ -159,6 +159,7 @@ fn eval_def(comptime DEF: Def) ComptimeAllocInfo(DEF.BUCKETS.len) {
         ordered_slab_sizes[i] = def.SLAB_SIZE.value();
         ordered_slab_masks[i] = def.SLAB_SIZE.value() - 1;
         ordered_blocks_per_slab[i] = def.SLAB_SIZE.divide_value(def.BUCKET_SIZE).value();
+        largest_blocks_per_slab = @max(largest_blocks_per_slab, ordered_blocks_per_slab[i]);
         ordered_leftover_blocks_after_new_alloc[i] = def.SLAB_SIZE.divide_value(def.BUCKET_SIZE).value() - 1;
         ordered_slab_alignments[i] = def.BUCKET_SIZE.to_alloc_align();
     }
@@ -177,6 +178,7 @@ fn eval_def(comptime DEF: Def) ComptimeAllocInfo(DEF.BUCKETS.len) {
         .ordered_slab_masks = ordered_slab_masks,
         .ordered_slab_sizes = ordered_slab_sizes,
         .ordered_slab_alignments = ordered_slab_alignments,
+        .largest_blocks_per_slab = largest_blocks_per_slab,
     };
 }
 
@@ -184,11 +186,13 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
     const INFO = eval_def(DEF);
     return struct {
         const Self = @This();
-        const Idx = DEF.INDEX_UINT_TYPE;
 
-        first_free_block: [NUM_BUCKETS]?[*]u8 = @splat(0),
-        first_untouched_block: [NUM_BUCKETS]?[*]u8 = @splat(0),
+        first_free_block: [NUM_BUCKETS]?*FreeSlot = @splat(null),
+        first_untouched_block: [NUM_BUCKETS]?[*]u8 = @splat(null),
         remaining_untouched_blocks: [NUM_BUCKETS]DEF.INDEX_UINT_TYPE = @splat(0),
+        slab_tracker_ptr: [*][]u8 = Utils.invalid_ptr_many([]u8),
+        slab_tracker_len: usize = 0,
+        slab_tracker_cap: usize = 0,
         stats: if (TRACK_STATS) AllocStats else void = if (TRACK_STATS) AllocStats{} else {},
 
         const NUM_BUCKETS = INFO.num_buckets;
@@ -207,11 +211,14 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
         const LARGE_ALLOC_BEHAVIOR = DEF.LARGE_ALLOCATION_BEHAVIOR;
         const LARGE_ALLOC: bool = LARGE_ALLOC_BEHAVIOR == .USE_PAGE_ALLOCATOR;
         const TRACK_STATS = DEF.TRACK_ALLOCATION_STATS;
+        const RESIZE_SHRINK = DEF.ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET;
         const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the requested allocation would require a bucket size of {s}";
         const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
         const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the memory provided to free exceeds this limit: {s}";
+        const MEM_ALIGN_BYTE_SLICE = mem.Alignment.fromByteUnits(@alignOf([]u8));
 
         pub const AllocStats = struct {
+            const BlockIdx = PowerOf2.round_up_to_power_of_2(INFO.largest_blocks_per_slab).unsigned_integer_type_that_holds_all_values_less_than();
             num_free_blocks: [NUM_BUCKETS]DEF.INDEX_UINT_TYPE = @splat(0),
             current_total_memory_allocated: usize = 0,
             largest_total_memory_allocated: usize = 0,
@@ -219,10 +226,11 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             largest_allocation_request_ever: usize = 0,
             largest_allocation_request_by_bucket: [NUM_BUCKETS]usize = @splat(0),
             smallest_allocation_request_by_bucket: [NUM_BUCKETS]usize = @splat(math.maxInt(usize)),
-            most_blocks_ever_used_by_bucket: [NUM_BUCKETS]Idx = @splat(0),
-            num_used_blocks: [NUM_BUCKETS]Idx = @splat(0),
-            most_slabs_ever_used_by_bucket: [NUM_BUCKETS]Idx = @splat(0),
-            current_slabs_used_by_bucket: [NUM_BUCKETS]Idx = @splat(0),
+            most_blocks_ever_used_by_bucket: [NUM_BUCKETS]BlockIdx = @splat(0),
+            num_used_blocks: [NUM_BUCKETS]BlockIdx = @splat(0),
+            most_slabs_ever_used_by_bucket: [NUM_BUCKETS]BlockIdx = @splat(0),
+            current_slabs_used_by_bucket: [NUM_BUCKETS]BlockIdx = @splat(0),
+            number_of_attempted_resizes_to_smaller_buckets_by_bucket: [NUM_BUCKETS]u64 = @splat(0),
             number_of_attempted_resizes_to_larger_buckets_by_bucket: [NUM_BUCKETS]u64 = @splat(0),
             largest_page_allocator_fallback_request_ever: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
             smallest_page_allocator_fallback_request_ever: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) math.maxInt(usize) else {},
@@ -232,6 +240,21 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             current_number_of_page_allocator_fallback_allocations: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
             largest_attempted_page_allocator_fallback_resize_delta_grow: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
             largest_attempted_page_allocator_fallback_resize_delta_shrink: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
+        };
+
+        const FreeSlot = struct {
+            next_free: ?*FreeSlot = null,
+
+            inline fn to_raw(self: *FreeSlot) [*]u8 {
+                return @ptrCast(@alignCast(self));
+            }
+            inline fn from_raw(raw: [*]u8) *FreeSlot {
+                return @ptrCast(@alignCast(raw));
+            }
+
+            comptime {
+                assert_with_reason(@sizeOf(FreeSlot) == @sizeOf(usize), null, "`FreeSlot` was not `usize` sized, {d} != {d}", .{ @sizeOf(FreeSlot), @sizeOf(usize) });
+            }
         };
 
         pub const VTABLE: Allocator.VTable = .{
@@ -287,14 +310,13 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     self.stats.smallest_allocation_request_by_bucket[bucket_idx] = @min(self.stats.smallest_allocation_request_by_bucket[bucket_idx], size);
                     self.stats.most_blocks_ever_used_by_bucket[bucket_idx] = @max(self.stats.most_blocks_ever_used_by_bucket[bucket_idx], self.stats.num_used_blocks[bucket_idx]);
                 }
-                if (self.first_free_block[bucket_idx]) |block_ptr| {
-                    const next_free_block_ptr: *(?[*]u8) = @ptrCast(@alignCast(block_ptr));
-                    self.first_free_block[bucket_idx] = next_free_block_ptr.*;
+                if (self.first_free_block[bucket_idx]) |free_slot| {
+                    self.first_free_block[bucket_idx] = free_slot.next_free;
                     if (comptime TRACK_STATS) {
                         self.stats.num_free_blocks[bucket_idx] -= 1;
                         self.stats.num_used_blocks[bucket_idx] += 1;
                     }
-                    return block_ptr[0..size];
+                    return free_slot.to_raw()[0..size];
                 }
                 if (self.first_untouched_block[bucket_idx]) |block_ptr| {
                     self.remaining_untouched_blocks[bucket_idx] -= 1;
@@ -309,8 +331,30 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     }
                     return block_ptr[0..size];
                 }
+                if (self.slab_tracker_len == self.slab_tracker_cap) {
+                    const old_tracker_raw_size = self.slab_tracker_cap * @sizeOf([]u8);
+                    var new_tracker_raw_size = old_tracker_raw_size + @sizeOf([]u8);
+                    new_tracker_raw_size = std.mem.alignForward(usize, new_tracker_raw_size, std.heap.pageSize());
+                    const old_tracker_raw_ptr: [*]u8 = @ptrCast(self.slab_tracker_ptr);
+                    const old_tracker_raw_slice = old_tracker_raw_ptr[0..old_tracker_raw_size];
+                    if (PageAllocator.realloc(old_tracker_raw_slice, MEM_ALIGN_BYTE_SLICE, new_tracker_raw_size, true)) |new_tracker_raw_ptr| {
+                        const new_tracker_cap = @divExact(new_tracker_raw_size, @sizeOf([]u8));
+                        const new_tracker_ptr: [*][]u8 = @ptrCast(@alignCast(new_tracker_raw_ptr));
+                    } else if (PageAllocator.map(new_tracker_raw_size, MEM_ALIGN_BYTE_SLICE)) |new_tracker_raw_ptr| {
+                        const new_tracker_cap = @divExact(new_tracker_raw_size, @sizeOf([]u8));
+                        const new_tracker_ptr: [*][]u8 = @ptrCast(@alignCast(new_tracker_raw_ptr));
+                        @memcpy(new_tracker_ptr[0..self.slab_tracker_len], self.slab_tracker_ptr[0..self.slab_tracker_len]);
+                        PageAllocator.unmap(old_tracker_raw_slice);
+                        self.slab_tracker_ptr = new_tracker_ptr;
+                        self.slab_tracker_cap = new_tracker_cap;
+                    } else {
+                        return null;
+                    }
+                }
                 const block_size = BLOCK_BYTES[bucket_idx];
                 const new_slab_ptr = PageAllocator.map(SLAB_BYTES[bucket_idx], SLAB_ALIGNS[bucket_idx]) orelse return null;
+                self.slab_tracker_ptr[self.slab_tracker_len] = new_slab_ptr[0..SLAB_BYTES[bucket_idx]];
+                self.slab_tracker_len += 1;
                 self.first_untouched_block[bucket_idx] = @intFromPtr(new_slab_ptr) + block_size;
                 self.brand_new_block_count_by_bucket[bucket_idx] = LEFTOVER_BLOCKS_AFTER_NEW_SLAB_ALLOC[bucket_idx];
                 if (comptime TRACK_STATS) {
@@ -342,58 +386,65 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                 LargeAllocBehavior.UNREACHABLE => assert_unreachable(@src(), "Large allocation: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the requested allocation would require a bucket size of {s}", .{@tagName(@as(PowerOf2, @fromBackingInt(bucket_idx + MIN_BUCKET_RAW)))}),
             }
         }
-        //CHECKPOINT
         fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
-            _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            const old_alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
-            const new_alloc_size_log2 = get_bytes_log2_with_align(new_len, alignment);
-            switch (LARGE_ALLOC_BEHAVIOR) {
-                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(LARGE_ALLOC_HINT);
-                    if (TRACK_STATS) {
-                        if (old_alloc_size_log2 <= MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
-                            self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
-                        } else if (old_alloc_size_log2 > MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                            if (new_len > memory.len) {
-                                const delta = new_len - memory.len;
-                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow) self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow = delta;
-                            }
-                            if (new_len < memory.len) {
-                                const delta = memory.len - new_len;
-                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink) self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink = delta;
-                            }
-                            if (new_len < self.stats.smallest_page_allocator_fallback_request_ever) self.stats.smallest_page_allocator_fallback_request_ever = new_len;
-                            if (new_len > self.stats.largest_page_allocator_fallback_request_ever) self.stats.largest_page_allocator_fallback_request_ever = new_len;
-                            const resize_result = PageAllocator.realloc(memory, new_len, false);
-                            if (resize_result != null) {
-                                if (new_len > memory.len) self.stats.current_total_memory_allocated += (new_len - memory.len);
-                                if (new_len < memory.len) self.stats.current_total_memory_allocated -= (memory.len - new_len);
-                            }
-                            return resize_result != null;
-                        }
-                        return false;
-                    }
-                    if (old_alloc_size_log2 > MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) return PageAllocator.realloc(memory, new_len, false) != null;
-                    return false;
-                },
-                LargeAllocBehavior.PANIC => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(.cold);
-                    std.debug.panic(MSG_LARGE_RESIZE, .{ AllocSize.get_name_from_bytes_log2(old_alloc_size_log2), AllocSize.get_name_from_bytes_log2(new_alloc_size_log2) });
-                },
-                LargeAllocBehavior.UNREACHABLE => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) unreachable,
-            }
-            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
-            const new_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[new_alloc_size_log2];
-            if (TRACK_STATS) {
-                if (old_bucket < new_bucket) self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
-                if (old_bucket == new_bucket and new_len > self.stats.largest_allocation_request_by_bucket[old_bucket]) self.stats.largest_allocation_request_by_bucket[old_bucket] = new_len;
-                if (old_bucket >= new_bucket and new_len < self.stats.smallest_allocation_request_by_bucket[old_bucket]) self.stats.smallest_allocation_request_by_bucket[old_bucket] = new_len;
-            }
-            return old_bucket >= new_bucket;
+            return resize_bytes_advanced(self, memory, alignment, new_len, ret_addr);
         }
+        pub inline fn resize_bytes(self: *Self, memory: []u8, alignment: mem.Alignment, new_len: usize) bool {
+            self.resize_bytes_advanced(memory, alignment, new_len, @returnAddress());
+        }
+        pub inline fn resize_type_advanced(self: *Self, comptime T: type, memory: []T, new_count: usize, alignment: mem.Alignment, ret_addr: usize) bool {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            return self.resize_bytes_advanced(raw_ptr[0 .. @sizeOf(T) * memory.len], alignment, @sizeOf(T) * new_count, ret_addr);
+        }
+        pub inline fn resize_type(self: *Self, comptime T: type, memory: []T, new_count: usize) bool {
+            return self.resize_type_advanced(T, memory, new_count, .fromByteUnits(@alignOf(T)), @returnAddress());
+        }
+        pub fn resize_bytes_advanced(self: *Self, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
+            _ = ret_addr;
+            const old_bucket = bucket_index_from_size_align(memory.len, alignment);
+            const new_bucket = bucket_index_from_size_align(new_len, alignment);
+            if (old_bucket == new_bucket) {
+                if (comptime TRACK_STATS) {
+                    self.stats.largest_allocation_request_by_bucket[old_bucket] = @max(self.stats.largest_allocation_request_by_bucket[old_bucket], new_len);
+                    self.stats.smallest_allocation_request_by_bucket[old_bucket] = @min(self.stats.smallest_allocation_request_by_bucket[old_bucket], new_len);
+                }
+                return true;
+            }
+            if (new_bucket < old_bucket) {
+                if (comptime TRACK_STATS) {
+                    self.stats.number_of_attempted_resizes_to_smaller_buckets_by_bucket[old_bucket] += 1;
+                }
+                if (comptime RESIZE_SHRINK) {
+                    // Since (new_bucket + MIN_BUCKET_RAW) and (old_bucket + MIN_BUCKET_RAW) is the Log2 of their true sizes,
+                    // subtracting the larger and the smaller yields the Log2 differance between them,
+                    // Which is the number of times the bucket can be sub-divided into two smaller buckets
+                    // one-size-smaller.
+                    var num_subdivisions = old_bucket - new_bucket;
+                    var subdiv_bucket = old_bucket;
+                    var bucket_end: [*]u8 = memory.ptr + BLOCK_BYTES[old_bucket];
+                    while (num_subdivisions > 0) {
+                        num_subdivisions -= 1;
+                        subdiv_bucket -= 1;
+                        bucket_end -= BLOCK_BYTES[subdiv_bucket];
+                        const old_first_free_in_bucket = self.first_free_block[subdiv_bucket];
+                        const new_bucket_next_free_ptr: *FreeSlot = @ptrCast(@alignCast(bucket_end));
+                        new_bucket_next_free_ptr.next_free = old_first_free_in_bucket;
+                        self.first_free_block[subdiv_bucket] = new_bucket_next_free_ptr;
+                    }
+                    assert_with_reason_debug_only(bucket_end == memory.ptr + BLOCK_BYTES[new_bucket], @src(), "bucket shrink subdivision algorithm failed", .{});
+                    return true;
+                } else {
+                    return false;
+                }
+            }
 
+            if (comptime TRACK_STATS) {
+                self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
+            }
+            return false;
+        }
+        //CHECKPOINT
         fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
