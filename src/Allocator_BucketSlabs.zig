@@ -27,7 +27,8 @@ const Root = @import("./_root.zig");
 const Assert = Root.Assert;
 const mem = std.mem;
 const math = std.math;
-const Allocator = std.mem.Allocator;
+const Allocator = mem.Allocator;
+const Alignment = mem.Alignment;
 const PageAllocator = std.heap.PageAllocator;
 const List = Root.ListSlice.ListFullDefinition;
 const BranchHint = std.builtin.BranchHint;
@@ -45,10 +46,9 @@ const assert_unreachable_always_panic = Assert.assert_unreachable_always_panic;
 const assert_allocation_failure = Assert.assert_allocation_failure;
 const num_cast = Cast.num_cast;
 
-pub const LargeAllocBehavior = enum {
-    USE_PAGE_ALLOCATOR,
-    PANIC,
-    UNREACHABLE,
+pub const BackingAllocatorMode = enum {
+    DIRECT_PAGE_ALLOCATE,
+    USE_BACKING_ALLOCATOR,
 };
 
 pub const Def = struct {
@@ -62,12 +62,9 @@ pub const Def = struct {
     /// - all slab sizes >= their respective block sizes
     /// - all slab sizes >= std.heap.page_size_min
     BUCKETS: []const BucketDef,
-    /// If a requested allocation exceeds the maximum block size, how should this allocator respond
-    ///
-    /// the `.UNREACHABLE` option will slightly reduce the processing overhead of checking whether a
-    /// requested allocation does or does not fall into the 'large' category and prevent branching,
-    /// but '.USE_PAGE_ALLOCATOR' is the safest and most-prefered option
-    LARGE_ALLOCATION_BEHAVIOR: LargeAllocBehavior = LargeAllocBehavior.USE_PAGE_ALLOCATOR,
+    /// Whether to use the `std.heap.PageAllocator` class directly for the backing allocator,
+    /// or to use a provided backing allocator.
+    BACKING_ALLOCATOR_MODE: BackingAllocatorMode = BackingAllocatorMode.DIRECT_PAGE_ALLOCATE,
     /// Enable additional tracking for allocation usage.
     ///
     /// This option allows logging functions to report additional statistics,
@@ -126,7 +123,7 @@ pub fn ComptimeAllocInfo(comptime N: usize) type {
         ordered_slab_masks: [N]usize,
         ordered_leftover_blocks_after_new_alloc: [N]usize,
         num_buckets: usize,
-        ordered_slab_alignments: [N]mem.Alignment,
+        ordered_slab_alignments: [N]Alignment,
     };
 }
 
@@ -147,7 +144,7 @@ fn eval_def(comptime DEF: Def) ComptimeAllocInfo(DEF.BUCKETS.len) {
     comptime var ordered_blocks_per_slab: [DEF.BUCKETS.len]usize = undefined;
     comptime var ordered_slab_masks: [DEF.BUCKETS.len]usize = undefined;
     comptime var ordered_leftover_blocks_after_new_alloc: [DEF.BUCKETS.len]usize = undefined;
-    comptime var ordered_slab_alignments: [DEF.BUCKETS.len]mem.Alignment = undefined;
+    comptime var ordered_slab_alignments: [DEF.BUCKETS.len]Alignment = undefined;
     comptime var largest_blocks_per_slab: usize = 0;
     for (ordered_bucket_defs, 0..) |def, i| {
         assert_with_reason(def.BUCKET_SIZE.less_than_or_equal(def.SLAB_SIZE), "BUCKET_SIZE ({d}) mus be <= SLAB_SIZE ({d})", .{ def.BUCKET_SIZE.value(), def.SLAB_SIZE.value() });
@@ -194,6 +191,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
         slab_tracker_len: usize = 0,
         slab_tracker_cap: usize = 0,
         stats: if (TRACK_STATS) AllocStats else void = if (TRACK_STATS) AllocStats{} else {},
+        back_alloc: if (BACKING_ALLOC) Allocator else void = if (BACKING_ALLOC) std.heap.page_allocator else {},
 
         const NUM_BUCKETS = INFO.num_buckets;
         const BLOCK_BYTES = INFO.ordered_block_sizes;
@@ -208,14 +206,12 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
         const MIN_BUCKET_POWER = INFO.max_bucket_power;
         const MIN_BUCKET_SIZE = MIN_BUCKET_POWER.value_as_type(usize);
         const MIN_BUCKET_RAW = MIN_BUCKET_POWER.raw_int();
-        const LARGE_ALLOC_BEHAVIOR = DEF.LARGE_ALLOCATION_BEHAVIOR;
-        const LARGE_ALLOC: bool = LARGE_ALLOC_BEHAVIOR == .USE_PAGE_ALLOCATOR;
+        const LARGE_ALLOC_BEHAVIOR = DEF.BACKING_ALLOCATOR_MODE;
+        const LARGE_ALLOC: bool = LARGE_ALLOC_BEHAVIOR == .DIRECT_PAGE_ALLOCATE;
         const TRACK_STATS = DEF.TRACK_ALLOCATION_STATS;
         const RESIZE_SHRINK = DEF.ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET;
-        const MSG_LARGE_ALLOCATION = "Large allocation: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the requested allocation would require a bucket size of {s}";
-        const MSG_LARGE_RESIZE = "Large resize/remap: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but either the old memory allocation ({s}) or the new memory allocation ({s}) would exceed this limit";
-        const MSG_LARGE_FREE = "Large free: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the memory provided to free exceeds this limit: {s}";
-        const MEM_ALIGN_BYTE_SLICE = mem.Alignment.fromByteUnits(@alignOf([]u8));
+        const MEM_ALIGN_BYTE_SLICE = Alignment.fromByteUnits(@alignOf([]u8));
+        const BACKING_ALLOC = DEF.BACKING_ALLOCATOR_MODE == .USE_BACKING_ALLOCATOR;
 
         pub const AllocStats = struct {
             const BlockIdx = PowerOf2.round_up_to_power_of_2(INFO.largest_blocks_per_slab).unsigned_integer_type_that_holds_all_values_less_than();
@@ -232,14 +228,14 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             current_slabs_used_by_bucket: [NUM_BUCKETS]BlockIdx = @splat(0),
             number_of_attempted_resizes_to_smaller_buckets_by_bucket: [NUM_BUCKETS]u64 = @splat(0),
             number_of_attempted_resizes_to_larger_buckets_by_bucket: [NUM_BUCKETS]u64 = @splat(0),
-            largest_page_allocator_fallback_request_ever: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            smallest_page_allocator_fallback_request_ever: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) math.maxInt(usize) else {},
-            largest_total_bytes_allocated_from_page_allocator_fallback: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            current_total_bytes_allocated_from_page_allocator_fallback: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            largest_number_of_page_allocator_fallback_allocations: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            current_number_of_page_allocator_fallback_allocations: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            largest_attempted_page_allocator_fallback_resize_delta_grow: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
-            largest_attempted_page_allocator_fallback_resize_delta_shrink: if (LARGE_ALLOC) usize else void = if (LARGE_ALLOC) 0 else {},
+            largest_fallback_request_ever: usize = 0,
+            smallest_fallback_request_ever: usize = math.maxInt(usize),
+            largest_total_bytes_allocated_from_fallback: usize = 0,
+            current_total_bytes_allocated_from_fallback: usize = 0,
+            largest_number_of_fallback_allocations: usize = 0,
+            current_number_of_fallback_allocations: usize = 0,
+            largest_attempted_fallback_resize_delta_grow: usize = 0,
+            largest_attempted_fallback_resize_delta_shrink: usize = 0,
         };
 
         const FreeSlot = struct {
@@ -264,11 +260,69 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             .free = free_impl,
         };
 
+        pub inline fn init(back_alloc: if (BACKING_ALLOC) Allocator else void) Self {
+            if (comptime BACKING_ALLOC) {
+                return Self{ .back_alloc = back_alloc };
+            } else {
+                return Self{};
+            }
+        }
+
         pub inline fn allocator(self: *Self) Allocator {
             return Allocator{ .ptr = @ptrCast(@alignCast(self)), .vtable = &VTABLE };
         }
 
-        inline fn bucket_index_from_size_align(size: usize, alignment: mem.Alignment) u8 {
+        fn backing_alloc(self: *Self, len: usize, alignment: Alignment) ?[*]u8 {
+            switch (comptime DEF.BACKING_ALLOCATOR_MODE) {
+                .DIRECT_PAGE_ALLOCATE => {
+                    return PageAllocator.map(len, MEM_ALIGN_BYTE_SLICE);
+                },
+                .USE_BACKING_ALLOCATOR => {
+                    return self.back_alloc.rawAlloc(len, alignment, @returnAddress());
+                },
+            }
+        }
+        fn backing_realloc(self: *Self, memory: []u8, old_len: usize, new_cap: usize, alignment: Alignment) ?[*]u8 {
+            switch (comptime DEF.BACKING_ALLOCATOR_MODE) {
+                .DIRECT_PAGE_ALLOCATE => {
+                    if (PageAllocator.realloc(memory, alignment, new_cap, true)) |new_mem| {
+                        return new_mem;
+                    }
+                    if (PageAllocator.map(new_cap, alignment)) |new_mem| {
+                        const copy_len = @min(old_len, new_cap);
+                        @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
+                        PageAllocator.unmap(memory);
+                        return new_mem;
+                    }
+                    return null;
+                },
+                .USE_BACKING_ALLOCATOR => {
+                    if (self.back_alloc.rawResize(memory, alignment, new_cap, @returnAddress())) return memory[0..new_cap];
+                    if (self.back_alloc.rawRemap(memory, alignment, new_cap, @returnAddress())) |new_mem| {
+                        return new_mem;
+                    }
+                    if (self.back_alloc.rawAlloc(new_cap, alignment, @returnAddress())) |new_mem| {
+                        const copy_len = @min(memory.len, new_cap);
+                        @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
+                        self.back_alloc.rawFree(memory, alignment, @returnAddress());
+                        return new_mem;
+                    }
+                    return null;
+                },
+            }
+        }
+        fn backing_free(self: *Self, memory: []u8, alignment: Alignment) void {
+            switch (comptime DEF.BACKING_ALLOCATOR_MODE) {
+                .DIRECT_PAGE_ALLOCATE => {
+                    PageAllocator.unmap(memory);
+                },
+                .USE_BACKING_ALLOCATOR => {
+                    self.back_alloc.rawFree(memory, alignment, @returnAddress());
+                },
+            }
+        }
+
+        inline fn bucket_index_from_size_align(size: usize, alignment: Alignment) u8 {
             const clamped = @max(size, MIN_BUCKET_SIZE);
             const clamped_alignment = PowerOf2.from_alloc_align(alignment).max(MIN_BUCKET_POWER).raw_int();
             const biased_index_from_size = num_cast(std.math.log2_int_ceil(usize, clamped), u8) - MIN_BUCKET_RAW;
@@ -281,25 +335,31 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             return biased_index_from_size;
         }
 
-        fn alloc_impl(self_opaque: *anyopaque, len: usize, alignment: mem.Alignment, ret_addr: usize) ?[*]u8 {
-            const self: *Self = @ptrCast(@alignCast(self_opaque));
-            const slice = self.alloc_bytes_advanced(len, alignment, ret_addr) orelse return null;
-            return slice.ptr;
-        }
-        pub inline fn alloc_bytes(self: *Self, size: usize, alignment: mem.Alignment) ?[]u8 {
-            self.alloc_bytes_advanced(size, alignment, @returnAddress());
-        }
-        pub inline fn alloc_type_advanced(self: *Self, comptime T: type, count: usize, alignment: mem.Alignment, ret_addr: usize) ?[]T {
-            const slice = self.alloc_bytes_advanced(@sizeOf(T) * count, alignment, ret_addr) orelse return null;
-            return @as([*]T, @ptrCast(@alignCast(slice.ptr)))[0..count];
-        }
-        pub inline fn alloc_type(self: *Self, comptime T: type, count: usize) ?[]T {
-            const slice = self.alloc_bytes_advanced(@sizeOf(T) * count, mem.Alignment.fromByteUnits(@alignOf(T)), @returnAddress()) orelse return null;
-            return @as([*]T, @ptrCast(@alignCast(slice.ptr)))[0..count];
-        }
-        pub fn alloc_bytes_advanced(self: *Self, size: usize, alignment: mem.Alignment, ret_addr: usize) ?[]u8 {
+        fn alloc_impl(self_opaque: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
             _ = ret_addr;
-            const bucket_idx = bucket_index_from_size_align(size, alignment);
+            const self: *Self = @ptrCast(@alignCast(self_opaque));
+            return self.alloc_internal(len, alignment);
+        }
+        pub inline fn alloc_types(self: *Self, comptime T: type, count: usize) ?[]T {
+            const ptr = self.alloc_internal(@sizeOf(T) * count, Alignment.fromByteUnits(@alignOf(T))) orelse return null;
+            const t_ptr: [*]T = @ptrCast(@alignCast(ptr));
+            return t_ptr[0..count];
+        }
+        pub inline fn alloc_types_with_align(self: *Self, comptime T: type, count: usize, comptime alignment: Alignment) ?[]align(alignment.toByteUnits()) T {
+            const ptr = self.alloc_internal(@sizeOf(T) * count, alignment) orelse return null;
+            const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(ptr));
+            return t_ptr[0..count];
+        }
+        pub inline fn alloc_bytes(self: *Self, size: usize) ?[]u8 {
+            const ptr = self.alloc_internal(size, null) orelse return null;
+            return ptr[0..size];
+        }
+        pub inline fn alloc_bytes_with_align(self: *Self, size: usize, comptime alignment: Alignment) ?[]align(alignment.toByteUnits()) u8 {
+            const ptr: [*]align(alignment.toByteUnits()) u8 = @alignCast(self.alloc_internal(size, null) orelse return null);
+            return ptr[0..size];
+        }
+        fn alloc_internal(self: *Self, size: usize, alignment: ?Alignment) ?[*]u8 {
+            const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
                 self.stats.smallest_allocation_request_ever = @min(self.stats.smallest_allocation_request_ever, size);
                 self.stats.largest_allocation_request_ever = @max(self.stats.largest_allocation_request_ever, size);
@@ -316,7 +376,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                         self.stats.num_free_blocks[bucket_idx] -= 1;
                         self.stats.num_used_blocks[bucket_idx] += 1;
                     }
-                    return free_slot.to_raw()[0..size];
+                    return free_slot.to_raw();
                 }
                 if (self.first_untouched_block[bucket_idx]) |block_ptr| {
                     self.remaining_untouched_blocks[bucket_idx] -= 1;
@@ -329,7 +389,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                         self.stats.num_free_blocks[bucket_idx] -= 1;
                         self.stats.num_used_blocks[bucket_idx] += 1;
                     }
-                    return block_ptr[0..size];
+                    return block_ptr;
                 }
                 if (self.slab_tracker_len == self.slab_tracker_cap) {
                     const old_tracker_raw_size = self.slab_tracker_cap * @sizeOf([]u8);
@@ -337,14 +397,9 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     new_tracker_raw_size = std.mem.alignForward(usize, new_tracker_raw_size, std.heap.pageSize());
                     const old_tracker_raw_ptr: [*]u8 = @ptrCast(self.slab_tracker_ptr);
                     const old_tracker_raw_slice = old_tracker_raw_ptr[0..old_tracker_raw_size];
-                    if (PageAllocator.realloc(old_tracker_raw_slice, MEM_ALIGN_BYTE_SLICE, new_tracker_raw_size, true)) |new_tracker_raw_ptr| {
+                    if (self.backing_realloc(old_tracker_raw_slice, self.slab_tracker_len * @sizeOf([]u8), new_tracker_raw_size, .fromByteUnits(@alignOf([]u8)))) |new_tracker_raw_ptr| {
                         const new_tracker_cap = @divExact(new_tracker_raw_size, @sizeOf([]u8));
                         const new_tracker_ptr: [*][]u8 = @ptrCast(@alignCast(new_tracker_raw_ptr));
-                    } else if (PageAllocator.map(new_tracker_raw_size, MEM_ALIGN_BYTE_SLICE)) |new_tracker_raw_ptr| {
-                        const new_tracker_cap = @divExact(new_tracker_raw_size, @sizeOf([]u8));
-                        const new_tracker_ptr: [*][]u8 = @ptrCast(@alignCast(new_tracker_raw_ptr));
-                        @memcpy(new_tracker_ptr[0..self.slab_tracker_len], self.slab_tracker_ptr[0..self.slab_tracker_len]);
-                        PageAllocator.unmap(old_tracker_raw_slice);
                         self.slab_tracker_ptr = new_tracker_ptr;
                         self.slab_tracker_cap = new_tracker_cap;
                     } else {
@@ -352,7 +407,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     }
                 }
                 const block_size = BLOCK_BYTES[bucket_idx];
-                const new_slab_ptr = PageAllocator.map(SLAB_BYTES[bucket_idx], SLAB_ALIGNS[bucket_idx]) orelse return null;
+                const new_slab_ptr = self.backing_alloc(SLAB_BYTES[bucket_idx], SLAB_ALIGNS[bucket_idx]) orelse return null;
                 self.slab_tracker_ptr[self.slab_tracker_len] = new_slab_ptr[0..SLAB_BYTES[bucket_idx]];
                 self.slab_tracker_len += 1;
                 self.first_untouched_block[bucket_idx] = @intFromPtr(new_slab_ptr) + block_size;
@@ -365,50 +420,49 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     self.stats.current_total_memory_allocated += SLAB_BYTES[bucket_idx];
                     self.stats.largest_total_memory_allocated = @max(self.stats.largest_total_memory_allocated, self.stats.current_total_memory_allocated);
                 }
-                return new_slab_ptr[0..size];
+                return new_slab_ptr;
             }
-            switch (LARGE_ALLOC_BEHAVIOR) {
-                LargeAllocBehavior.USE_PAGE_ALLOCATOR => {
-                    if (comptime TRACK_STATS) {
-                        self.stats.largest_page_allocator_fallback_request_ever = @max(self.stats.largest_page_allocator_fallback_request_ever, size);
-                        self.stats.smallest_page_allocator_fallback_request_ever = @min(self.stats.smallest_page_allocator_fallback_request_ever, size);
-                        self.stats.current_number_of_page_allocator_fallback_allocations += 1;
-                        self.stats.largest_number_of_page_allocator_fallback_allocations = @max(self.stats.largest_number_of_page_allocator_fallback_allocations, self.stats.current_number_of_page_allocator_fallback_allocations);
-                        self.stats.current_total_bytes_allocated_from_page_allocator_fallback += size;
-                        self.stats.largest_total_bytes_allocated_from_page_allocator_fallback = @max(self.stats.largest_total_bytes_allocated_from_page_allocator_fallback, self.stats.current_total_bytes_allocated_from_page_allocator_fallback);
-                        self.stats.current_total_memory_allocated += size;
-                        self.stats.largest_total_memory_allocated = @max(self.stats.largest_total_memory_allocated, self.stats.current_total_memory_allocated);
-                    }
-                    const ptr = PageAllocator.map(size, alignment) orelse return null;
-                    return ptr[0..size];
-                },
-                LargeAllocBehavior.PANIC => assert_unreachable_always_panic(@src(), "Large allocation: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the requested allocation would require a bucket size of {s}", .{@tagName(@as(PowerOf2, @fromBackingInt(bucket_idx + MIN_BUCKET_RAW)))}),
-                LargeAllocBehavior.UNREACHABLE => assert_unreachable(@src(), "Large allocation: largest bucket size is " ++ @tagName(MAX_BUCKET_POWER) ++ ", but the requested allocation would require a bucket size of {s}", .{@tagName(@as(PowerOf2, @fromBackingInt(bucket_idx + MIN_BUCKET_RAW)))}),
+            if (comptime TRACK_STATS) {
+                self.stats.largest_fallback_request_ever = @max(self.stats.largest_fallback_request_ever, size);
+                self.stats.smallest_fallback_request_ever = @min(self.stats.smallest_fallback_request_ever, size);
+                self.stats.current_number_of_fallback_allocations += 1;
+                self.stats.largest_number_of_fallback_allocations = @max(self.stats.largest_number_of_fallback_allocations, self.stats.current_number_of_fallback_allocations);
+                self.stats.current_total_bytes_allocated_from_fallback += size;
+                self.stats.largest_total_bytes_allocated_from_fallback = @max(self.stats.largest_total_bytes_allocated_from_fallback, self.stats.current_total_bytes_allocated_from_fallback);
+                self.stats.current_total_memory_allocated += size;
+                self.stats.largest_total_memory_allocated = @max(self.stats.largest_total_memory_allocated, self.stats.current_total_memory_allocated);
             }
+            const ptr = self.backing_alloc(size, alignment orelse Alignment.@"1") orelse return null;
+            return ptr;
         }
-        fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
+
+        fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            return resize_bytes_advanced(self, memory, alignment, new_len, ret_addr);
-        }
-        pub inline fn resize_bytes(self: *Self, memory: []u8, alignment: mem.Alignment, new_len: usize) bool {
-            self.resize_bytes_advanced(memory, alignment, new_len, @returnAddress());
-        }
-        pub inline fn resize_type_advanced(self: *Self, comptime T: type, memory: []T, new_count: usize, alignment: mem.Alignment, ret_addr: usize) bool {
-            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
-            return self.resize_bytes_advanced(raw_ptr[0 .. @sizeOf(T) * memory.len], alignment, @sizeOf(T) * new_count, ret_addr);
-        }
-        pub inline fn resize_type(self: *Self, comptime T: type, memory: []T, new_count: usize) bool {
-            return self.resize_type_advanced(T, memory, new_count, .fromByteUnits(@alignOf(T)), @returnAddress());
-        }
-        pub fn resize_bytes_advanced(self: *Self, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) bool {
             _ = ret_addr;
-            const old_bucket = bucket_index_from_size_align(memory.len, alignment);
-            const new_bucket = bucket_index_from_size_align(new_len, alignment);
+            return self.resize_internal(memory, new_len, alignment);
+        }
+        pub inline fn resize_types(self: *Self, comptime T: type, memory: []T, new_count: usize) bool {
+            return self.resize_internal(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)));
+        }
+        pub inline fn resize_types_with_align(self: *Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) bool {
+            return self.resize_internal(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment);
+        }
+        pub inline fn resize_bytes(self: *Self, memory: []u8, new_len: usize) bool {
+            return self.resize_internal(memory, new_len, null);
+        }
+        pub inline fn resize_bytes_with_align(self: *Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) bool {
+            return self.resize_internal(@alignCast(memory), new_len, alignment);
+        }
+        fn resize_internal(self: *Self, memory: []u8, new_len: usize, alignment: ?Alignment) bool {
+            const old_bucket, const new_bucket = get: {
+                if (alignment) |a| break :get .{ bucket_index_from_size_align(memory.len, a), bucket_index_from_size_align(new_len, a) };
+                break :get .{ bucket_index_from_size(memory.len), bucket_index_from_size(new_len) };
+            };
+            if (comptime TRACK_STATS) {
+                self.stats.largest_allocation_request_by_bucket[old_bucket] = @max(self.stats.largest_allocation_request_by_bucket[old_bucket], new_len);
+                self.stats.smallest_allocation_request_by_bucket[old_bucket] = @min(self.stats.smallest_allocation_request_by_bucket[old_bucket], new_len);
+            }
             if (old_bucket == new_bucket) {
-                if (comptime TRACK_STATS) {
-                    self.stats.largest_allocation_request_by_bucket[old_bucket] = @max(self.stats.largest_allocation_request_by_bucket[old_bucket], new_len);
-                    self.stats.smallest_allocation_request_by_bucket[old_bucket] = @min(self.stats.smallest_allocation_request_by_bucket[old_bucket], new_len);
-                }
                 return true;
             }
             if (new_bucket < old_bucket) {
@@ -431,6 +485,15 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                         const new_bucket_next_free_ptr: *FreeSlot = @ptrCast(@alignCast(bucket_end));
                         new_bucket_next_free_ptr.next_free = old_first_free_in_bucket;
                         self.first_free_block[subdiv_bucket] = new_bucket_next_free_ptr;
+                        if (comptime TRACK_STATS) {
+                            self.stats.num_free_blocks[subdiv_bucket] += 1;
+                        }
+                    }
+                    if (comptime TRACK_STATS) {
+                        self.stats.num_used_blocks[old_bucket] -= 1;
+                        self.stats.num_used_blocks[new_bucket] += 1;
+                        self.stats.current_total_memory_allocated -= BLOCK_BYTES[old_bucket];
+                        self.stats.current_total_memory_allocated += BLOCK_BYTES[new_bucket];
                     }
                     assert_with_reason_debug_only(bucket_end == memory.ptr + BLOCK_BYTES[new_bucket], @src(), "bucket shrink subdivision algorithm failed", .{});
                     return true;
@@ -438,95 +501,107 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                     return false;
                 }
             }
-
             if (comptime TRACK_STATS) {
                 self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
             }
             return false;
         }
-        //CHECKPOINT
-        fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+
+        fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            const old_alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
-            const new_alloc_size_log2 = get_bytes_log2_with_align(new_len, alignment);
-            switch (LARGE_ALLOC_BEHAVIOR) {
-                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(LARGE_ALLOC_HINT);
-                    if (TRACK_STATS) {
-                        if (old_alloc_size_log2 <= MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
-                            self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
-                        } else if (old_alloc_size_log2 > MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                            if (new_len > memory.len) {
-                                const delta = new_len - memory.len;
-                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow) self.stats.largest_attempted_page_allocator_fallback_resize_delta_grow = delta;
-                            }
-                            if (new_len < memory.len) {
-                                const delta = memory.len - new_len;
-                                if (delta > self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink) self.stats.largest_attempted_page_allocator_fallback_resize_delta_shrink = delta;
-                            }
-                            if (new_len < self.stats.smallest_page_allocator_fallback_request_ever) self.stats.smallest_page_allocator_fallback_request_ever = new_len;
-                            if (new_len > self.stats.largest_page_allocator_fallback_request_ever) self.stats.largest_page_allocator_fallback_request_ever = new_len;
-                            const resize_result = PageAllocator.realloc(memory, new_len, true);
-                            if (resize_result != null) {
-                                if (new_len > memory.len) self.stats.current_total_memory_allocated += (new_len - memory.len);
-                                if (new_len < memory.len) self.stats.current_total_memory_allocated -= (memory.len - new_len);
-                            }
-                            return resize_result;
-                        }
-                        return null;
-                    }
-                    if (old_alloc_size_log2 > MAX_BUCKET_POWER and new_alloc_size_log2 > MAX_BUCKET_POWER) return PageAllocator.realloc(memory, new_len, true);
-                    return null;
-                },
-                LargeAllocBehavior.PANIC => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(.cold);
-                    std.debug.panic(MSG_LARGE_RESIZE, .{ AllocSize.get_name_from_bytes_log2(old_alloc_size_log2), AllocSize.get_name_from_bytes_log2(new_alloc_size_log2) });
-                },
-                LargeAllocBehavior.UNREACHABLE => if (old_alloc_size_log2 > MAX_BUCKET_POWER or new_alloc_size_log2 > MAX_BUCKET_POWER) unreachable,
+            if (self.resize_internal(memory, new_len, alignment)) {
+                return memory.ptr;
             }
-            const old_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[old_alloc_size_log2];
-            const new_bucket = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[new_alloc_size_log2];
-            if (TRACK_STATS) {
-                if (old_bucket < new_bucket) self.stats.number_of_attempted_resizes_to_larger_buckets_by_bucket[old_bucket] += 1;
-                if (old_bucket == new_bucket and new_len > self.stats.largest_allocation_request_by_bucket[old_bucket]) self.stats.largest_allocation_request_by_bucket[old_bucket] = new_len;
-                if (old_bucket >= new_bucket and new_len < self.stats.smallest_allocation_request_by_bucket[old_bucket]) self.stats.smallest_allocation_request_by_bucket[old_bucket] = new_len;
+            return null;
+        }
+        pub inline fn remap_bytes(self: *Self, memory: []u8, new_len: usize) ?[]u8 {
+            if (self.resize_bytes(memory, new_len)) {
+                return memory.ptr[0..new_len];
             }
-            if (old_bucket >= new_bucket) return memory.ptr;
+            return null;
+        }
+        pub inline fn remap_bytes_with_align(self: *Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
+            if (self.resize_bytes_with_align(alignment, memory, new_len)) {
+                return memory.ptr[0..new_len];
+            }
+            return null;
+        }
+        pub fn remap_types(self: *Self, comptime T: type, memory: []T, new_count: usize) ?[]T {
+            if (self.resize_types(T, memory, new_count)) {
+                return memory.ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn remap_types_with_align(self: *Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+            if (self.resize_types_with_align(alignment, T, memory, new_count)) {
+                return memory.ptr[0..new_count];
+            }
             return null;
         }
 
-        fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: mem.Alignment, ret_addr: usize) void {
+        fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            const alloc_size_log2 = get_bytes_log2_with_align(memory.len, alignment);
-            switch (LARGE_ALLOC_BEHAVIOR) {
-                LargeAllocBehavior.USE_PAGE_ALLOCATOR => if (alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(LARGE_ALLOC_HINT);
-                    if (TRACK_STATS) {
-                        self.stats.current_number_of_page_allocator_fallback_allocations -= 1;
-                        self.stats.current_total_bytes_allocated_from_page_allocator_fallback -= memory.len;
-                        self.stats.current_total_memory_allocated -= memory.len;
-                    }
-                    return PageAllocator.unmap(@alignCast(memory));
-                },
-                LargeAllocBehavior.PANIC => if (alloc_size_log2 > MAX_BUCKET_POWER) {
-                    @branchHint(.cold);
-                    std.debug.panic(MSG_LARGE_FREE, .{AllocSize.get_name_from_bytes_log2(alloc_size_log2)});
-                },
-                LargeAllocBehavior.UNREACHABLE => if (alloc_size_log2 > MAX_BUCKET_POWER) unreachable,
+            self.free_internal(memory, alignment);
+        }
+
+        pub inline fn free_types(self: *Self, comptime T: type, memory: []T) void {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len = memory.len * @sizeOf(T);
+            self.free_internal(raw_ptr[0..raw_len], null);
+        }
+        pub inline fn free_types_with_align(self: *Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T) void {
+            const raw_ptr: [*]u8 = @ptrCast(@alignCast(memory.ptr));
+            const raw_len = memory.len * @sizeOf(T);
+            self.free_internal(raw_ptr[0..raw_len], alignment);
+        }
+        pub inline fn free_bytes(self: *Self, memory: []u8) void {
+            self.free_internal(memory, null);
+        }
+        pub inline fn free_bytes_with_align(self: *Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8) void {
+            self.free_internal(@alignCast(memory), null);
+        }
+        fn free_internal(self: *Self, memory: []u8, alignment: ?Alignment) void {
+            const bucket_idx = if (alignment) |a| bucket_index_from_size_align(memory.len, a) else bucket_index_from_size(memory.len);
+            if (bucket_idx < NUM_BUCKETS) {
+                const prev_first_free = self.first_free_block[bucket_idx];
+                const this_ptr_as_free_block: *FreeSlot = @ptrCast(@alignCast(memory.ptr));
+                this_ptr_as_free_block.next_free = prev_first_free;
+                self.first_free_block[bucket_idx] = this_ptr_as_free_block;
+                if (comptime TRACK_STATS) {
+                    self.stats.num_free_blocks[bucket_idx] += 1;
+                    self.stats.num_used_blocks[bucket_idx] -= 1;
+                    self.stats.current_total_memory_allocated -= BLOCK_BYTES[bucket_idx];
+                }
+                return;
             }
-            const bucket_idx = ALLOC_SIZE_LOG2_TO_BUCKET_IDX[alloc_size_log2];
-            const prev_first_free_address = self.first_recycled_block_by_bucket[bucket_idx];
-            const curr_first_free_addr: usize = @intFromPtr(memory.ptr);
-            const curr_first_free_ptr: *usize = @ptrFromInt(curr_first_free_addr);
-            curr_first_free_ptr.* = prev_first_free_address;
-            self.first_recycled_block_by_bucket[bucket_idx] = curr_first_free_addr;
-            self.recycled_block_count_by_bucket[bucket_idx] += 1;
-            if (TRACK_STATS) {
-                self.stats.num_used_blocks[bucket_idx] -= 1;
+            self.backing_free(memory, alignment orelse Alignment.@"1");
+            if (comptime TRACK_STATS) {
+                self.stats.current_number_of_fallback_allocations -= 1;
+                self.stats.current_total_bytes_allocated_from_fallback -= memory.len;
             }
+        }
+
+        pub inline fn create_with_align(self: *Self, comptime T: type, comptime alignment: Alignment) ?*align(alignment.toByteUnits()) T {
+            if (self.alloc_types_with_align(T, 1, alignment)) |slice| {
+                return @ptrCast(slice.ptr);
+            }
+            return null;
+        }
+        pub inline fn create(self: *Self, comptime T: type) ?*T {
+            if (self.alloc_types(T, 1)) |slice| {
+                return @ptrCast(slice.ptr);
+            }
+            return null;
+        }
+        pub inline fn destroy_with_align(self: *Self, comptime alignment: Alignment, comptime T: type, ptr: *align(alignment.toByteUnits()) T) void {
+            const slice = @as([*]align(alignment.toByteUnits()) T, @ptrCast(ptr))[0..1];
+            self.free_types_with_align(alignment, T, slice);
+        }
+        pub inline fn destroy(self: *Self, comptime T: type, ptr: *T) void {
+            const slice = @as([*]T, @ptrCast(ptr))[0..1];
+            self.free_types(T, slice);
         }
 
         // pub fn log_usage_statistics(self: *const QuickAlloc, log_buffer: *List(u8), log_alloc: Allocator, comptime log_name: []const u8) void {
@@ -570,21 +645,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
     };
 }
 
-const FAILED_TO_LOG = "failed to allocate memory for logging: ";
-
-inline fn get_bytes_log2_with_align(len: usize, alignment: mem.Alignment) Log2Usize {
-    const size_log2 = @max(@bitSizeOf(usize) - @clz(len - 1), @backingInt(alignment));
-    return @intCast(size_log2);
-}
-
-inline fn get_bytes_log2(len: usize) Log2Usize {
-    const size_log2 = @bitSizeOf(usize) - @clz(len - 1);
-    return @intCast(size_log2);
-}
-
-inline fn bytes_log2_to_alignment(val: Log2Usize) mem.Alignment {
-    return @fromBackingInt(@intCast(val));
-}
+// const FAILED_TO_LOG = "failed to allocate memory for logging: ";
 
 //FIXME
 // test "Does it basically work?" {
