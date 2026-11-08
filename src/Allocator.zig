@@ -38,11 +38,14 @@ const DummyAlloc = Root.Allocator.Dummy;
 pub const Infallible = @import("./Allocator_Infallible.zig");
 pub const Dummy = @import("./Allocator_Dummy.zig");
 pub const QuickBucketAlloc = @import("./Allocator_QuickBucket.zig");
+pub const BucketSlabs = @import("./Allocator_BucketSlabs.zig");
 
 comptime {
     if (build.is_test) {
         _ = @import("./Allocator_Dummy.zig");
         _ = @import("./Allocator_Infallible.zig");
         _ = @import("./Allocator_QuickBucket.zig");
+        _ = @import("./Allocator_BucketSlabs.zig");
+        _ = @import("./Allocator_Tests.zig");
     }
 }

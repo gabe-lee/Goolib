@@ -37,7 +37,6 @@ pub const Bezier = @import("./Bezier.zig");
 pub const Assert = @import("./Assert.zig");
 pub const BinarySearch = @import("./BinarySearch.zig");
 pub const BitList = @import("./BitList.zig");
-pub const BucketAllocator = @import("./BucketAllocator.zig");
 pub const Bytes = @import("./Bytes.zig");
 // pub const ByteWriter = @import("./ByteWriter.zig");
 pub const C_Allocator = @import("./C_Allocator.zig");
@@ -114,7 +113,6 @@ comptime {
         _ = @import("./Assert.zig");
         _ = @import("./BinarySearch.zig");
         _ = @import("./BitList.zig");
-        _ = @import("./BucketAllocator.zig");
         _ = @import("./Bytes.zig");
         // _ = @import("./ByteWriter.zig");
         _ = @import("./C_Allocator.zig");

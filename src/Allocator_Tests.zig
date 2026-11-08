@@ -1,0 +1,625 @@
+//! //TODO Documentation
+//! #### License: Zlib
+
+// zlib license
+//
+// Copyright (c) 2025-2026, Gabriel Lee Anderson <gla.ander@gmail.com>
+//
+// This software is provided 'as-is', without any express or implied
+// warranty. In no event will the authors be held liable for any damages
+// arising from the use of this software.
+//
+// Permission is granted to anyone to use this software for any purpose,
+// including commercial applications, and to alter it and redistribute it
+// freely, subject to the following restrictions:
+//
+// 1. The origin of this software must not be misrepresented; you must not
+//    claim that you wrote the original software. If you use this software
+//    in a product, an acknowledgment in the product documentation would be
+//    appreciated but is not required.
+// 2. Altered source versions must be plainly marked as such, and must not be
+//    misrepresented as being the original software.
+// 3. This notice may not be removed or altered from any source distribution.
+
+const std = @import("std");
+const testing = std.testing;
+const Root = @import("./_root.zig");
+const Buckets = @import("./Allocator_BucketSlabs.zig");
+const QuickBucket = @import("./Allocator_QuickBucket.zig");
+const PowerOf2 = Root.Math.PowerOf2;
+const Alignment = std.mem.Alignment;
+const Test = Root.Testing;
+
+/// One bucket for every power-of-two block size from 8 bytes through 4 KiB.
+/// The power-of-two range must be contiguous because bucket indexes are derived
+/// from the log2 of the requested size.
+const TEST_BUCKETS = [_]Buckets.BucketDef{
+    .{ .BUCKET_SIZE = ._8, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._16, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._32, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._64, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._128, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._256, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._512, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._1_024, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._2_048, .SLAB_SIZE = ._4_096 },
+    .{ .BUCKET_SIZE = ._4_096, .SLAB_SIZE = ._4_096 },
+};
+
+/// Exactly one block fits in each slab. This exercises the `leftover == 0`
+/// path, where the "next untouched block" pointer must not be left dangling.
+const ONE_BLOCK_PER_SLAB_BUCKETS = [_]Buckets.BucketDef{
+    .{ .BUCKET_SIZE = ._4_096, .SLAB_SIZE = ._4_096 },
+};
+
+const TestAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+});
+
+const GrowOnlyAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+    .ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET = false,
+});
+
+const TrackedAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = true,
+});
+
+const OneBlockPerSlabAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &ONE_BLOCK_PER_SLAB_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+});
+
+const DirectPageAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .DIRECT_PAGE_ALLOCATE,
+    .TRACK_ALLOCATION_STATS = false,
+});
+
+const DirectOneBlockPerSlabAlloc = Buckets.BucketSlabAlloc(.{
+    .BUCKETS = &ONE_BLOCK_PER_SLAB_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .DIRECT_PAGE_ALLOCATE,
+    .TRACK_ALLOCATION_STATS = false,
+});
+
+const QuickDefault = QuickBucket.QuickBucketAllocator(.{
+    .LARGEST_BUCKET_SIZE = ._4_096,
+    .BACKING_BLOCK_SIZE = ._65_536,
+    .BACKING_META_BLOCK_SIZE = ._4_096,
+});
+
+/// One 4 KiB block per allocation, plus a tiny metadata block so that a handful
+/// of allocations is enough to force the block list to grow repeatedly.
+const QuickTinyMeta = QuickBucket.QuickBucketAllocator(.{
+    .LARGEST_BUCKET_SIZE = ._4_096,
+    .BACKING_BLOCK_SIZE = ._4_096,
+    .BACKING_META_BLOCK_SIZE = ._16,
+});
+
+const QuickVec32 = @Vector(4, u64);
+
+const QuickHugeAligned = struct {
+    value: u64 align(8_192),
+};
+
+fn fillSlice(memory: []u8, value: u8) void {
+    @memset(memory, value);
+}
+
+fn expectFilled(memory: []const u8, value: u8) !void {
+    for (memory) |byte| {
+        try testing.expectEqual(value, byte);
+    }
+}
+
+test "BucketSlabs -> freed block is reused from the free list" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const first = state.alloc_bytes(8) orelse return error.OutOfMemory;
+    fillSlice(first, 0xAB);
+    state.free_bytes(first);
+
+    const second = state.alloc_bytes(8) orelse return error.OutOfMemory;
+    defer state.free_bytes(second);
+
+    try testing.expectEqual(@intFromPtr(first.ptr), @intFromPtr(second.ptr));
+}
+
+test "BucketSlabs -> live blocks in one bucket never overlap" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const COUNT = 257;
+    var blocks: [COUNT][*]u8 = undefined;
+    for (&blocks, 0..) |*block, i| {
+        const memory = state.alloc_bytes(8) orelse return error.OutOfMemory;
+        block.* = memory.ptr;
+        fillSlice(memory, @intCast(i % 251));
+    }
+
+    for (blocks, 0..) |block, i| {
+        for (blocks[0..i]) |other| {
+            try testing.expect(@intFromPtr(block) != @intFromPtr(other));
+        }
+        try expectFilled(block[0..8], @intCast(i % 251));
+    }
+
+    for (blocks) |block| state.free_bytes(block[0..8]);
+}
+
+test "BucketSlabs -> allocations spanning many slabs and tracker growth stay valid" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    // 8-byte blocks with 4 KiB slabs means 512 blocks per slab. Using 9000
+    // blocks forces 18 slabs, which grows the internal slab tracker more than
+    // once (its initial capacity is 16 records).
+    const COUNT = 9_000;
+    const blocks = try testing.allocator.alloc([]u8, COUNT);
+    defer testing.allocator.free(blocks);
+
+    for (blocks, 0..) |*block, i| {
+        block.* = state.alloc_bytes(8) orelse return error.OutOfMemory;
+        std.mem.writeInt(u64, block.*[0..8], @intCast(i), .little);
+    }
+
+    for (blocks, 0..) |block, i| {
+        try testing.expectEqual(@as(u64, @intCast(i)), std.mem.readInt(u64, block[0..8], .little));
+    }
+
+    for (blocks) |block| state.free_bytes(block);
+}
+
+test "BucketSlabs -> alignment requests select a suitably aligned bucket" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const bytes = state.alloc_bytes_with_align(1, Alignment.fromByteUnits(64)) orelse return error.OutOfMemory;
+    defer state.free_bytes_with_align(Alignment.fromByteUnits(64), bytes);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(bytes.ptr) % 64);
+    fillSlice(bytes, 0xCD);
+    try expectFilled(bytes, 0xCD);
+
+    const Aligned = struct {
+        value: u64 align(64),
+    };
+    try testing.expectEqual(@as(usize, 64), @alignOf(Aligned));
+
+    const item = state.alloc_types(Aligned, 1) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(item.ptr) % 64);
+    item[0].value = 0x1234_5678_9ABC_DEF0;
+    state.free_types(Aligned, item);
+
+    // `free_types` must have used the type's alignment when choosing the free
+    // list; otherwise this next allocation would come from the wrong bucket.
+    const again = state.alloc_types(Aligned, 1) orelse return error.OutOfMemory;
+    defer state.free_types(Aligned, again);
+    try testing.expectEqual(@intFromPtr(item.ptr), @intFromPtr(again.ptr));
+}
+
+test "BucketSlabs -> shrink in place subdivides the block and preserves data" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const memory = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    fillSlice(memory, 0x5A);
+
+    try testing.expect(state.resize_bytes(memory, 64));
+    const shrunk = memory.ptr[0..64];
+    try expectFilled(shrunk, 0x5A);
+
+    // The freed 64-byte block should be at the head of its free list.
+    state.free_bytes(shrunk);
+    const reused = state.alloc_bytes(64) orelse return error.OutOfMemory;
+    defer state.free_bytes(reused);
+    try testing.expectEqual(@intFromPtr(memory.ptr), @intFromPtr(reused.ptr));
+
+    // The blocks carved out of the original 4 KiB block must also be usable.
+    const carved_2k = state.alloc_bytes(2_048) orelse return error.OutOfMemory;
+    fillSlice(carved_2k, 0x11);
+    try expectFilled(carved_2k, 0x11);
+    state.free_bytes(carved_2k);
+
+    const carved_1k = state.alloc_bytes(1_024) orelse return error.OutOfMemory;
+    fillSlice(carved_1k, 0x22);
+    try expectFilled(carved_1k, 0x22);
+    state.free_bytes(carved_1k);
+}
+
+test "BucketSlabs -> growing resize is refused" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const memory = state.alloc_bytes(64) orelse return error.OutOfMemory;
+    defer state.free_bytes(memory);
+
+    try testing.expect(!state.resize_bytes(memory, 128));
+    try testing.expect(!state.resize_bytes(memory, 4_096));
+    // Still within the same 64-byte bucket, so this is a no-op success.
+    try testing.expect(state.resize_bytes(memory, 63));
+}
+
+test "BucketSlabs -> shrink is refused when the option is disabled" {
+    var state = GrowOnlyAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const memory = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    fillSlice(memory, 0x77);
+    defer state.free_bytes(memory);
+
+    try testing.expect(!state.resize_bytes(memory, 64));
+    try expectFilled(memory, 0x77);
+}
+
+test "BucketSlabs -> slabs with a single block do not expose a dangling next block" {
+    var state = OneBlockPerSlabAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const a = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    const b = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    const c = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+
+    fillSlice(a, 0xA1);
+    fillSlice(b, 0xB2);
+    fillSlice(c, 0xC3);
+
+    try expectFilled(a, 0xA1);
+    try expectFilled(b, 0xB2);
+    try expectFilled(c, 0xC3);
+
+    state.free_bytes(a);
+    state.free_bytes(b);
+    state.free_bytes(c);
+}
+
+test "BucketSlabs -> allocations larger than the largest bucket use the fallback" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const large = state.alloc_bytes(4_097) orelse return error.OutOfMemory;
+    fillSlice(large, 0x99);
+    try expectFilled(large, 0x99);
+    state.free_bytes(large);
+
+    const allocator = state.allocator();
+    // Both the size and the alignment are outside the bucket range.
+    const aligned = try allocator.alignedAlloc(u8, Alignment.fromByteUnits(8_192), 100);
+    defer allocator.free(aligned);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 8_192);
+    fillSlice(aligned, 0x42);
+    try expectFilled(aligned, 0x42);
+}
+
+test "BucketSlabs -> generic allocator resize and realloc work end to end" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+    const allocator = state.allocator();
+
+    var memory = try allocator.alloc(u8, 64);
+    for (memory, 0..) |*byte, i| byte.* = @intCast(i);
+
+    // Growing crosses bucket boundaries and must fall back to alloc + copy.
+    memory = try allocator.realloc(memory, 4_096);
+    for (memory[0..64], 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    }
+
+    // Shrinking is done in place; the pointer must not move.
+    const grown_ptr = memory.ptr;
+    memory = try allocator.realloc(memory, 128);
+    try testing.expectEqual(@intFromPtr(grown_ptr), @intFromPtr(memory.ptr));
+    for (memory[0..64], 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    }
+
+    allocator.free(memory);
+}
+
+test "BucketSlabs -> generic allocator realloc across the fallback boundary" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+    const allocator = state.allocator();
+
+    var memory = try allocator.alloc(u8, 5_000);
+    for (memory, 0..) |*byte, i| byte.* = @intCast(i % 251);
+
+    // Fallback -> bucket: must allocate the bucket block and copy only what fits.
+    memory = try allocator.realloc(memory, 64);
+    for (memory, 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i % 251)), byte);
+    }
+
+    // Bucket -> fallback: same deal in the other direction.
+    memory = try allocator.realloc(memory, 9_000);
+    for (memory[0..64], 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i % 251)), byte);
+    }
+
+    allocator.free(memory);
+}
+
+test "BucketSlabs -> direct page slab tracker grows across a page boundary" {
+    // One block per slab means one tracker record per allocation. The tracker
+    // starts with 16 records and doubles, so 130 allocations force it past the
+    // first page-sized resize.
+    var state = DirectOneBlockPerSlabAlloc.init({});
+    defer state.deinit();
+
+    const COUNT = 130;
+    const blocks = try testing.allocator.alloc([]u8, COUNT);
+    defer testing.allocator.free(blocks);
+
+    for (blocks, 0..) |*block, i| {
+        block.* = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+        fillSlice(block.*, @intCast(i % 251));
+    }
+    for (blocks, 0..) |block, i| {
+        try expectFilled(block, @intCast(i % 251));
+    }
+    for (blocks) |block| state.free_bytes(block);
+}
+
+test "BucketSlabs -> statistics track used and free blocks" {
+    var state = TrackedAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const first = state.alloc_bytes(8) orelse return error.OutOfMemory;
+    const second = state.alloc_bytes(8) orelse return error.OutOfMemory;
+    const third = state.alloc_bytes(8) orelse return error.OutOfMemory;
+
+    try testing.expectEqual(@as(usize, 3), state.stats.num_used_blocks[0]);
+    try testing.expectEqual(@as(usize, 509), state.stats.num_free_blocks[0]);
+    try testing.expectEqual(@as(usize, 3), state.stats.most_blocks_ever_used_by_bucket[0]);
+    try testing.expectEqual(@as(usize, 24), state.stats.current_total_memory_allocated);
+    try testing.expectEqual(@as(usize, 24), state.stats.largest_total_memory_allocated);
+    try testing.expectEqual(@as(usize, 8), state.stats.smallest_allocation_request_ever);
+    try testing.expectEqual(@as(usize, 8), state.stats.largest_allocation_request_ever);
+    try testing.expectEqual(@as(usize, 1), state.stats.current_slabs_used_by_bucket[0]);
+
+    state.free_bytes(first);
+    state.free_bytes(second);
+    state.free_bytes(third);
+
+    try testing.expectEqual(@as(usize, 0), state.stats.num_used_blocks[0]);
+    try testing.expectEqual(@as(usize, 512), state.stats.num_free_blocks[0]);
+    try testing.expectEqual(@as(usize, 0), state.stats.current_total_memory_allocated);
+
+    // Fallback allocation statistics.
+    const large = state.alloc_bytes(5_000) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 1), state.stats.current_number_of_fallback_allocations);
+    try testing.expectEqual(@as(usize, 5_000), state.stats.current_total_bytes_allocated_from_fallback);
+    try testing.expectEqual(@as(usize, 5_000), state.stats.current_total_memory_allocated);
+    state.free_bytes(large);
+    try testing.expectEqual(@as(usize, 0), state.stats.current_number_of_fallback_allocations);
+    try testing.expectEqual(@as(usize, 0), state.stats.current_total_bytes_allocated_from_fallback);
+    try testing.expectEqual(@as(usize, 0), state.stats.current_total_memory_allocated);
+}
+
+test "BucketSlabs -> direct page backing allocator works and deinits" {
+    var state = DirectPageAlloc.init({});
+    defer state.deinit();
+
+    const small = state.alloc_bytes(8) orelse return error.OutOfMemory;
+    const medium = state.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    const large = state.alloc_bytes(9_000) orelse return error.OutOfMemory;
+
+    fillSlice(small, 0x01);
+    fillSlice(medium, 0x02);
+    fillSlice(large, 0x03);
+
+    try expectFilled(small, 0x01);
+    try expectFilled(medium, 0x02);
+    try expectFilled(large, 0x03);
+
+    state.free_bytes(small);
+    state.free_bytes(medium);
+    state.free_bytes(large);
+}
+
+test "BucketSlabs -> zero byte internal allocation round trips" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const empty = state.alloc_bytes(0) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), empty.len);
+    state.free_bytes(empty);
+}
+
+test "BucketSlabs -> log_usage_statistics formats a report" {
+    const SKIP = true;
+    try Test.skip_if(SKIP);
+    var log_buffer: std.ArrayList(u8) = .empty;
+    defer log_buffer.deinit(testing.allocator);
+
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const memory = state.alloc_bytes(32) orelse return error.OutOfMemory;
+    state.free_bytes(memory);
+
+    state.log_usage_statistics(&log_buffer, testing.allocator, "bucket-slabs-no-stats");
+    try testing.expect(log_buffer.items.len > 0);
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "bucket-slabs-no-stats") != null);
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "Buckets: 10") != null);
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "In-use bytes:") == null);
+
+    var tracked_state = TrackedAlloc.init(testing.allocator);
+    defer tracked_state.deinit();
+
+    const tracked_memory = tracked_state.alloc_bytes(32) orelse return error.OutOfMemory;
+    tracked_state.log_usage_statistics(&log_buffer, testing.allocator, "bucket-slabs-stats");
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "bucket-slabs-stats") != null);
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "In-use bytes:") != null);
+    try testing.expect(std.mem.indexOf(u8, log_buffer.items, "Fallback allocations") != null);
+    tracked_state.free_bytes(tracked_memory);
+}
+
+test "QuickBucket -> free list reuse and bump coalescing" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    const first = try state.alloc(u8, 100);
+    const second = try state.alloc(u8, 100);
+    fillSlice(first, 0xA1);
+    fillSlice(second, 0xB2);
+
+    // The first slot is not adjacent to the bump pointer, so it goes on the
+    // 128-byte free list and comes back out unchanged.
+    state.free(u8, first);
+    const from_free_list = try state.alloc(u8, 100);
+    try testing.expectEqual(@intFromPtr(first.ptr), @intFromPtr(from_free_list.ptr));
+    fillSlice(from_free_list, 0xC3);
+    try expectFilled(from_free_list, 0xC3);
+
+    // The second slot is adjacent to the bump pointer, so freeing it returns
+    // the space to the bump region and the next allocation reuses that address.
+    state.free(u8, second);
+    const from_bump = try state.alloc(u8, 100);
+    try testing.expectEqual(@intFromPtr(second.ptr), @intFromPtr(from_bump.ptr));
+    try expectFilled(from_bump, 0xB2);
+
+    state.free(u8, from_free_list);
+    state.free(u8, from_bump);
+}
+
+test "QuickBucket -> data survives many allocations across classes" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    const COUNT = 300;
+    const blocks = try testing.allocator.alloc([]u8, COUNT);
+    defer testing.allocator.free(blocks);
+
+    for (blocks, 0..) |*block, i| {
+        const size = 1 + (i * 97) % 4_096;
+        block.* = try state.alloc(u8, size);
+        fillSlice(block.*, @intCast(i % 251));
+    }
+    for (blocks, 0..) |block, i| {
+        try expectFilled(block, @intCast(i % 251));
+    }
+    for (blocks) |block| state.free(u8, block);
+}
+
+test "QuickBucket -> respects type alignment and falls back for huge alignment" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    try testing.expect(@alignOf(QuickVec32) > 16);
+    const vectors = try state.alloc(QuickVec32, 4);
+    defer state.free(QuickVec32, vectors);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(vectors.ptr) % @alignOf(QuickVec32));
+    for (vectors) |*vector| vector.* = @splat(0x0102_0304_0506_0708);
+    for (vectors) |vector| try testing.expectEqual(@as(u64, 0x0102_0304_0506_0708), vector[0]);
+
+    // Larger than the biggest class, so this must go to the backing allocator
+    // with the full requested alignment.
+    const huge = try state.alloc(QuickHugeAligned, 1);
+    defer state.free(QuickHugeAligned, huge);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(huge.ptr) % 8_192);
+    huge[0].value = 42;
+    try testing.expectEqual(@as(u64, 42), huge[0].value);
+}
+
+test "QuickBucket -> resize and realloc preserve data" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    var memory = try state.alloc(u8, 17);
+    for (memory, 0..) |*byte, i| byte.* = @intCast(i);
+    const initial_ptr = memory.ptr;
+    try testing.expectEqual(@as(u8, 16), memory[16]);
+
+    // Same class and then a larger class while this is the last bump slot.
+    try testing.expect(state.resize(u8, memory, 32));
+    memory = memory.ptr[0..32];
+    try testing.expect(state.resize(u8, memory, 100));
+    memory = memory.ptr[0..100];
+    try testing.expectEqual(@intFromPtr(initial_ptr), @intFromPtr(memory.ptr));
+    for (memory[0..17], 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    }
+
+    // Shrinking to a smaller class cannot stay in place.
+    try testing.expect(!state.resize(u8, memory, 10));
+    memory = try state.realloc(u8, memory, 10);
+    for (memory, 0..) |byte, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    }
+    try testing.expectEqual(@as(usize, 10), memory.len);
+
+    memory = try state.realloc(u8, memory, 0);
+    try testing.expectEqual(@as(usize, 0), memory.len);
+}
+
+test "QuickBucket -> growing a non-last slot is refused" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    const first = try state.alloc(u8, 100);
+    const second = try state.alloc(u8, 100);
+    defer state.free(u8, second);
+    defer state.free(u8, first);
+
+    try testing.expect(!state.resize(u8, first, 200));
+    try testing.expect(state.resize(u8, second, 128));
+}
+
+test "QuickBucket -> allocations larger than the largest class use the backing allocator" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    const large = try state.alloc(u8, 9_000);
+    defer state.free(u8, large);
+    fillSlice(large, 0x99);
+    try expectFilled(large, 0x99);
+}
+
+test "QuickBucket -> zero-length allocations do not consume slots" {
+    var state = QuickDefault.init(testing.allocator);
+    defer state.uninit();
+
+    const empty = try state.alloc(u8, 0);
+    try testing.expectEqual(@as(usize, 0), empty.len);
+    state.free(u8, empty);
+    state.free(u8, empty);
+
+    // A void slice owns no slot, so growing it must allocate real storage.
+    try testing.expect(!state.resize(u8, empty, 16));
+    const grown = try state.realloc(u8, empty, 16);
+    defer state.free(u8, grown);
+    try testing.expectEqual(@as(usize, 16), grown.len);
+    fillSlice(grown, 0x55);
+    try expectFilled(grown, 0x55);
+
+    const non_empty = try state.alloc(u8, 16);
+    fillSlice(non_empty, 0x44);
+    try expectFilled(non_empty, 0x44);
+    state.free(u8, non_empty);
+}
+
+test "QuickBucket -> block metadata grows and deinit releases every block" {
+    var state = QuickTinyMeta.init(testing.allocator);
+    defer state.uninit();
+
+    const COUNT = 10;
+    const blocks = try testing.allocator.alloc([]u8, COUNT);
+    defer testing.allocator.free(blocks);
+
+    for (blocks, 0..) |*block, i| {
+        block.* = try state.alloc(u8, 4_096);
+        fillSlice(block.*, @intCast(i % 251));
+    }
+    for (blocks, 0..) |block, i| {
+        try expectFilled(block, @intCast(i % 251));
+    }
+    for (blocks) |block| state.free(u8, block);
+}

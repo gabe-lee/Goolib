@@ -29,6 +29,7 @@ const Math = Root.Math;
 const PowerOf2 = Math.PowerOf2;
 const Assert = Root.Assert;
 const ListSliceModule = Root.ListSlice;
+const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_allocation_failure = Assert.assert_allocation_failure;
@@ -42,11 +43,12 @@ pub const Def = struct {
 pub fn QuickBucketAllocator(comptime DEF: Def) type {
     assert_with_reason(@backingInt(DEF.LARGEST_BUCKET_SIZE) >= @backingInt(PowerOf2._16), @src(), "`LARGEST_BUCKET_SIZE` ({d}) must be at least 16", .{DEF.LARGEST_BUCKET_SIZE.value()});
     assert_with_reason(@backingInt(DEF.LARGEST_BUCKET_SIZE) <= @backingInt(DEF.BACKING_BLOCK_SIZE), @src(), "`LARGEST_BUCKET_SIZE` ({d}) must be <= `BACKING_BLOCK_SIZE` ({d})", .{ DEF.LARGEST_BUCKET_SIZE.value(), DEF.BACKING_BLOCK_SIZE.value() });
+    assert_with_reason(@backingInt(DEF.BACKING_META_BLOCK_SIZE) >= @backingInt(PowerOf2._16), @src(), "`BACKING_META_BLOCK_SIZE` ({d}) must be at least 16", .{DEF.BACKING_META_BLOCK_SIZE.value()});
     return struct {
         const Self = @This();
 
-        pub const MIN_CLASS_POWER = PowerOf2._16;
-        pub const MIN_CLASS_RAW = PowerOf2._16.raw_int_as(usize);
+        pub const MIN_CLASS_POWER = PowerOf2.USIZE_BYTES;
+        pub const MIN_CLASS_RAW = PowerOf2.USIZE_BYTES.raw_int_as(usize);
         pub const MIN_CLASS_SIZE = MIN_CLASS_POWER.value_as_type(usize);
         pub const MAX_CLASS_POWER = DEF.LARGEST_BUCKET_SIZE;
         pub const MAX_CLASS_RAW = MAX_CLASS_POWER.raw_int_as(usize);
@@ -56,7 +58,8 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         pub const BACKING_BLOCK_SIZE = BACKING_BLOCK_POWER.value_as_type(usize);
         pub const META_BACKING_BLOCK_POWER = DEF.BACKING_META_BLOCK_SIZE;
         pub const META_BACKING_BLOCK_SIZE = META_BACKING_BLOCK_POWER.value_as_type(usize);
-        pub const META_PTRS_PER_BLOCK = META_BACKING_BLOCK_SIZE / @sizeOf([*]u8);
+        pub const META_PTRS_PER_BLOCK: u32 = @intCast(META_BACKING_BLOCK_SIZE / @sizeOf([*]u8));
+        pub const BACKING_BLOCK_ALIGN = MAX_CLASS_POWER.to_alloc_align();
 
         const FreeNode = struct {
             next: ?*FreeNode,
@@ -74,28 +77,30 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
             };
         }
 
-        pub fn deinit(self: *Self) void {
+        pub fn uninit(self: *Self) void {
+            const back_alloc = self.backing_alloc;
             for (self.allocated_blocks.zig_slice_entire_const()) |block_ptr| {
-                self.backing_alloc.free(block_ptr[0..BACKING_BLOCK_SIZE]);
+                back_alloc.rawFree(block_ptr[0..BACKING_BLOCK_SIZE], BACKING_BLOCK_ALIGN, @returnAddress());
             }
-            self.allocated_blocks.free_if_non_zero(self.backing_alloc);
-            self.* = .{};
+            self.allocated_blocks.free_if_non_zero(back_alloc);
+            self.* = .{ .backing_alloc = back_alloc };
         }
 
-        inline fn bucket_index(size: usize) ?usize {
-            if (size == 0) return 0;
-            if (size > MAX_CLASS_SIZE) return null;
-            const clamped = @max(size, MIN_CLASS_SIZE);
+        inline fn bucket_index_size_align(byte_size: usize, alignment: usize) ?usize {
+            const needed = @max(byte_size, alignment);
+            if (needed > MAX_CLASS_SIZE) return null;
+            const clamped = @max(needed, MIN_CLASS_SIZE);
             return std.math.log2_int_ceil(usize, clamped) - MIN_CLASS_RAW;
         }
 
         inline fn slot_size_for_bucket(bucket: usize) usize {
-            return @as(usize, 1) << (bucket + MIN_CLASS_RAW);
+            return @as(usize, 1) << @intCast(bucket + MIN_CLASS_RAW);
         }
 
         pub fn alloc(self: *Self, comptime T: type, count: usize) ![]T {
-            const byte_size = count * @sizeOf(T);
-            const possible_class_bucket = bucket_index(byte_size);
+            if (count == 0) return Utils.invalid_ptr_many(T)[0..0];
+            const byte_size = std.math.mul(usize, @sizeOf(T), count) catch return error.OutOfMemory;
+            const possible_class_bucket = bucket_index_size_align(byte_size, @alignOf(T));
 
             if (possible_class_bucket) |b| {
                 const slot_size = slot_size_for_bucket(b);
@@ -107,13 +112,14 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
                 }
 
                 if (self.remaining_block == null or slot_size > self.remaining_block.?.len) {
-                    const new_block = try self.backing_alloc.alignedAlloc(u8, 16, BACKING_BLOCK_SIZE);
                     if (self.allocated_blocks.get_unused_space() == 0) {
-                        try self.allocated_blocks.resize_capacity_exact_might_error(self.allocated_blocks.get_cap() + META_PTRS_PER_BLOCK, self.backing_alloc);
+                        const new_cap = self.allocated_blocks.get_cap() + META_PTRS_PER_BLOCK;
+                        try self.allocated_blocks.resize_capacity_exact_might_error(new_cap, self.backing_alloc);
                     }
+                    const new_block_ptr = self.backing_alloc.rawAlloc(BACKING_BLOCK_SIZE, BACKING_BLOCK_ALIGN, @returnAddress()) orelse return error.OutOfMemory;
+                    const new_block = new_block_ptr[0..BACKING_BLOCK_SIZE];
                     self.allocated_blocks.append_one_assume_cap(new_block);
                     self.remaining_block = new_block;
-                    self.bump_offset = 0;
                 }
 
                 const raw_ptr = self.remaining_block.?.ptr;
@@ -132,17 +138,13 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         pub fn realloc(self: *Self, comptime T: type, slice: []T, new_count: usize) ![]T {
             if (new_count == 0) {
                 self.free(T, slice);
-                return slice.ptr[0..0];
+                return Utils.invalid_ptr_many(T)[0..0];
             }
-            if (new_count < slice.len) {
-                const new_mem = try self.alloc(T, new_count);
-                @memset(new_mem, slice[0..new_mem.len]);
-                self.free(T, slice);
-                return new_mem;
-            }
+            if (slice.len == 0) return self.alloc(T, new_count);
             if (self.resize(T, slice, new_count)) return slice.ptr[0..new_count];
             const new_mem = try self.alloc(T, new_count);
-            @memset(new_mem[0..slice.len], slice);
+            const copy_count = @min(new_mem.len, slice.len);
+            @memcpy(new_mem[0..copy_count], slice[0..copy_count]);
             self.free(T, slice);
             return new_mem;
         }
@@ -151,8 +153,9 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         }
 
         pub fn free(self: *Self, comptime T: type, slice: []T) void {
+            if (slice.len == 0) return;
             const byte_size = slice.len * @sizeOf(T);
-            const possible_class_bucket = bucket_index(byte_size);
+            const possible_class_bucket = bucket_index_size_align(byte_size, @alignOf(T));
 
             if (possible_class_bucket) |b| {
                 if (self.remaining_block != null) {
@@ -174,29 +177,34 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         }
 
         pub fn resize(self: *Self, comptime T: type, slice: []T, new_count: usize) bool {
-            const old_bytes = slice.len * @sizeOf(T);
-            const new_bytes = new_count * @sizeOf(T);
-
-            const old_b = bucket_index(old_bytes);
-            const new_b = bucket_index(new_bytes);
-
-            if (old_b != null and new_b != null and old_b.? == new_b.?) {
+            if (new_count == 0) {
+                self.free(T, slice);
                 return true;
             }
+            if (slice.len == 0) return false;
+            if (new_count == slice.len) return true;
 
-            const old_addr = @intFromPtr(slice.ptr);
+            const old_bytes = slice.len * @sizeOf(T);
+            const new_bytes = std.math.mul(usize, @sizeOf(T), new_count) catch return false;
+
+            const old_bucket = bucket_index_size_align(old_bytes, @alignOf(T));
+            const new_bucket = bucket_index_size_align(new_bytes, @alignOf(T));
+            if (old_bucket == null or new_bucket == null) return false;
+
+            const old_b = old_bucket.?;
+            const new_b = new_bucket.?;
+            if (old_b == new_b) return true;
+            if (new_b < old_b) return false;
+
+            const remaining = self.remaining_block orelse return false;
             const old_slot_size = slot_size_for_bucket(old_b);
-            const old_next_addr = old_addr + old_slot_size;
-
-            if (self.remaining_block != null and old_next_addr == @intFromPtr(self.remaining_block.?.ptr)) {
-                const new_slot_size = slot_size_for_bucket(new_b);
-                const slot_size_byte_delta = new_slot_size - old_slot_size;
-                if (slot_size_byte_delta <= self.remaining_block.?.len) {
-                    self.remaining_block.? = self.remaining_block.?[slot_size_byte_delta..];
-                    return true;
-                }
-            }
-            return false;
+            const new_slot_size = slot_size_for_bucket(new_b);
+            const slot_end_addr = @intFromPtr(slice.ptr) + old_slot_size;
+            if (slot_end_addr != @intFromPtr(remaining.ptr)) return false;
+            const slot_size_byte_delta = new_slot_size - old_slot_size;
+            if (slot_size_byte_delta > remaining.len) return false;
+            self.remaining_block.? = remaining[slot_size_byte_delta..];
+            return true;
         }
     };
 }

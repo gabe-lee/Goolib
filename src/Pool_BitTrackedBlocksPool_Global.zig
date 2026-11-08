@@ -177,7 +177,7 @@ pub const SubPoolDef = struct {
     /// The number of bits in each state-tracking integer,
     /// where each bit represents the used/free state
     /// of one of the elements. Must be >= 8 and <= `ELEMENTS_PER_BLOCK`
-    ELEMENTS_PER_STATE_GROUP: PowerOf2 = .USIZE_BITS_VAL,
+    ELEMENTS_PER_STATE_GROUP: PowerOf2 = .USIZE_BITS,
     /// The number of elements per block. MUST be >= `ELEMENTS_PER_STATE_GROUP`
     ELEMENTS_PER_BLOCK: PowerOf2 = ._64,
 };

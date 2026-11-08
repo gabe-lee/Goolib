@@ -30,6 +30,13 @@ const Utils = Root.Utils;
 const MathX = Root.Math;
 const SourceLocation = std.builtin.SourceLocation;
 
+pub inline fn skip_if(condition: bool) error{SkipZigTest}!void {
+    if (condition) {
+        return error.SkipZigTest;
+    }
+    return;
+}
+
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (@inComptime()) {
         @compileError(std.fmt.comptimePrint(fmt, args));
