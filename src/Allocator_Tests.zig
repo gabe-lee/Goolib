@@ -89,6 +89,73 @@ const DirectOneBlockPerSlabAlloc = Buckets.BucketSlabAlloc(.{
     .TRACK_ALLOCATION_STATS = false,
 });
 
+/// Global allocators share all of their state through the type, so every
+/// definition below needs its own `UNIQUE_NAME` except where a test is
+/// explicitly checking that two identical definitions share state.
+const GlobalTestAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = true,
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_ALLOC",
+});
+
+/// Same settings and `UNIQUE_NAME` as `GlobalTestAlloc`: this must resolve to
+/// the exact same type and therefore the exact same global state.
+const GlobalTestAllocClone = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = true,
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_ALLOC",
+});
+
+/// Same settings as `GlobalTestAlloc` but a different `UNIQUE_NAME`, so it must
+/// have completely separate global state.
+const GlobalOtherAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = true,
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_ALLOC_OTHER",
+});
+
+const GlobalGrowOnlyAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+    .ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET = false,
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_GROW_ONLY",
+});
+
+const GlobalDirectPageAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .DIRECT_PAGE_ALLOCATE,
+    .TRACK_ALLOCATION_STATS = false,
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_DIRECT_PAGE",
+});
+
+const GlobalThreadlocalAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+    .THREAD_SAFETY = .threadlocal_vars(),
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_THREADLOCAL",
+});
+
+const GlobalSpinLockedAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = true,
+    .THREAD_SAFETY = .data_locks(.SPIN_LOCK),
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_SPIN_LOCKED",
+});
+
+const GlobalMutexAlloc = Buckets.GlobalBucketSlabsAlloc(.{
+    .BUCKETS = &TEST_BUCKETS,
+    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
+    .TRACK_ALLOCATION_STATS = false,
+    .THREAD_SAFETY = .data_locks(.MUTEX),
+    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_MUTEX",
+});
+
 const QuickDefault = QuickBucket.QuickBucketAllocator(.{
     .LARGEST_BUCKET_SIZE = ._4_096,
     .BACKING_BLOCK_SIZE = ._65_536,
@@ -117,6 +184,58 @@ fn expectFilled(memory: []const u8, value: u8) !void {
     for (memory) |byte| {
         try testing.expectEqual(value, byte);
     }
+}
+
+fn globalBucketSlabsThreadlocalWorker(result: *bool) void {
+    const State = GlobalThreadlocalAlloc;
+    // Every thread owns a completely separate allocator, including its backing
+    // allocator, so this thread must initialize its own copy.
+    State.init(std.heap.page_allocator, {});
+    defer State.deinit();
+
+    const first = State.alloc_bytes(32) orelse {
+        result.* = false;
+        return;
+    };
+    fillSlice(first, 0x5A);
+    var ok = true;
+    for (first) |byte| {
+        ok = ok and byte == 0x5A;
+    }
+
+    // Exercise this thread's own free list.
+    State.free_bytes(first);
+    const second = State.alloc_bytes(32) orelse {
+        result.* = false;
+        return;
+    };
+    ok = ok and @intFromPtr(first.ptr) == @intFromPtr(second.ptr);
+    State.free_bytes(second);
+    result.* = ok;
+}
+
+fn globalBucketSlabsSpinWorker(result: *bool) void {
+    const State = GlobalSpinLockedAlloc;
+    const allocator = State.allocator();
+
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        const size = 1 + (i * 97) % 4_096;
+        const memory = allocator.alloc(u8, size) catch {
+            result.* = false;
+            return;
+        };
+        const value: u8 = @intCast(i % 251);
+        fillSlice(memory, value);
+        for (memory) |byte| {
+            if (byte != value) {
+                result.* = false;
+                return;
+            }
+        }
+        allocator.free(memory);
+    }
+    result.* = true;
 }
 
 test "BucketSlabs -> freed block is reused from the free list" {
@@ -460,6 +579,257 @@ test "BucketSlabs -> log_usage_statistics formats a report" {
     try testing.expect(std.mem.indexOf(u8, log_buffer.items, "In-use bytes:") != null);
     try testing.expect(std.mem.indexOf(u8, log_buffer.items, "Fallback allocations") != null);
     tracked_state.free_bytes(tracked_memory);
+}
+
+test "GlobalBucketSlabs -> allocator API reuses freed blocks and preserves data" {
+    const State = GlobalTestAlloc;
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const allocator = State.allocator();
+
+    const first = try allocator.alloc(u8, 8);
+    fillSlice(first, 0xAB);
+    allocator.free(first);
+
+    const second = try allocator.alloc(u8, 8);
+    defer allocator.free(second);
+    try testing.expectEqual(@intFromPtr(first.ptr), @intFromPtr(second.ptr));
+    fillSlice(second, 0xCD);
+    try expectFilled(second, 0xCD);
+
+    // Requests larger than the largest bucket use the fallback allocator.
+    const large = try allocator.alloc(u8, 9_000);
+    defer allocator.free(large);
+    fillSlice(large, 0x99);
+    try expectFilled(large, 0x99);
+}
+
+test "GlobalBucketSlabs -> direct API alignment, shrink, and grow behavior" {
+    const State = GlobalTestAlloc;
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const bytes = State.alloc_bytes_with_align(1, Alignment.fromByteUnits(64)) orelse return error.OutOfMemory;
+    defer State.free_bytes_with_align(Alignment.fromByteUnits(64), bytes);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(bytes.ptr) % 64);
+    fillSlice(bytes, 0xCD);
+    try expectFilled(bytes, 0xCD);
+
+    const memory = State.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    fillSlice(memory, 0x5A);
+
+    // Shrinking is done in place and leaves the leading bytes untouched.
+    try testing.expect(State.resize_bytes(memory, 64));
+    const shrunk = memory.ptr[0..64];
+    try expectFilled(shrunk, 0x5A);
+
+    // Growing across a bucket boundary must be refused.
+    try testing.expect(!State.resize_bytes(shrunk, 4_096));
+    State.free_bytes(shrunk);
+}
+
+test "GlobalBucketSlabs -> typed helpers, remap, create/destroy, and logging" {
+    const State = GlobalTestAlloc;
+    const AlignedU64 = struct {
+        value: u64 align(64),
+    };
+    const ALIGN_64 = comptime Alignment.fromByteUnits(64);
+
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const values = State.alloc_types(u32, 4) orelse return error.OutOfMemory;
+    values[0] = 1;
+    values[3] = 4;
+    State.free_types(u32, values);
+
+    const aligned = State.alloc_types_with_align(AlignedU64, 2, ALIGN_64) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
+    aligned[0].value = 7;
+    aligned[1].value = 8;
+    State.free_types_with_align(ALIGN_64, AlignedU64, aligned);
+
+    const aligned_bytes = State.alloc_bytes_with_align(64, ALIGN_64) orelse return error.OutOfMemory;
+    fillSlice(aligned_bytes, 0x44);
+    try testing.expect(State.resize_bytes_with_align(ALIGN_64, aligned_bytes, 32));
+    const shrunk = aligned_bytes.ptr[0..32];
+    try expectFilled(shrunk, 0x44);
+
+    const remapped = State.remap_bytes_with_align(ALIGN_64, shrunk, 16) orelse return error.OutOfMemory;
+    try expectFilled(remapped, 0x44);
+    State.free_bytes_with_align(ALIGN_64, remapped);
+
+    const items = State.alloc_types(u32, 4) orelse return error.OutOfMemory;
+    items[0] = 0xAAAA;
+    items[1] = 0xBBBB;
+    const fewer = State.remap_types(u32, items, 2) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u32, 0xAAAA), fewer[0]);
+    try testing.expectEqual(@as(u32, 0xBBBB), fewer[1]);
+    State.free_types(u32, fewer);
+
+    const raw = State.alloc_bytes(128) orelse return error.OutOfMemory;
+    fillSlice(raw, 0x55);
+    const raw_smaller = State.remap_bytes(raw, 32) orelse return error.OutOfMemory;
+    try expectFilled(raw_smaller, 0x55);
+    State.free_bytes(raw_smaller);
+
+    const created = State.create_with_align(u64, ALIGN_64) orelse return error.OutOfMemory;
+    created.* = 99;
+    try testing.expectEqual(@as(u64, 99), created.*);
+    State.destroy_with_align(ALIGN_64, u64, created);
+
+    const plain = State.create(u32) orelse return error.OutOfMemory;
+    plain.* = 123;
+    try testing.expectEqual(@as(u32, 123), plain.*);
+    State.destroy(u32, plain);
+}
+
+test "GlobalBucketSlabs -> identical definitions share type and global state" {
+    try testing.expect(GlobalTestAlloc == GlobalTestAllocClone);
+    try testing.expectEqual(GlobalTestAlloc.type_id(), GlobalTestAllocClone.type_id());
+    try testing.expectEqualStrings(GlobalTestAlloc.UNIQUE_NAME, GlobalTestAllocClone.UNIQUE_NAME);
+
+    GlobalTestAlloc.init(testing.allocator, {});
+    defer GlobalTestAlloc.deinit();
+
+    const first = GlobalTestAlloc.alloc_bytes(16) orelse return error.OutOfMemory;
+    fillSlice(first, 0x42);
+    GlobalTestAlloc.free_bytes(first);
+
+    // The clone is the same type, so it sees the same free list.
+    const second = GlobalTestAllocClone.alloc_bytes(16) orelse return error.OutOfMemory;
+    defer GlobalTestAllocClone.free_bytes(second);
+    try testing.expectEqual(@intFromPtr(first.ptr), @intFromPtr(second.ptr));
+    fillSlice(second, 0x43);
+    try expectFilled(second, 0x43);
+}
+
+test "GlobalBucketSlabs -> UNIQUE_NAME keeps global state separate" {
+    try testing.expect(GlobalTestAlloc != GlobalOtherAlloc);
+    try testing.expect(GlobalTestAlloc.type_id() != GlobalOtherAlloc.type_id());
+    try testing.expectEqual(GlobalTestAlloc.type_id_generic(), GlobalOtherAlloc.type_id_generic());
+
+    GlobalTestAlloc.init(testing.allocator, {});
+    defer GlobalTestAlloc.deinit();
+    GlobalOtherAlloc.init(testing.allocator, {});
+    defer GlobalOtherAlloc.deinit();
+
+    const first = GlobalTestAlloc.alloc_bytes(16) orelse return error.OutOfMemory;
+    fillSlice(first, 0xAA);
+    const second = GlobalOtherAlloc.alloc_bytes(16) orelse return error.OutOfMemory;
+    fillSlice(second, 0xBB);
+
+    // Unmapping the first allocator's slabs must not disturb the second one.
+    GlobalTestAlloc.deinit();
+    try expectFilled(second, 0xBB);
+
+    GlobalOtherAlloc.free_bytes(second);
+}
+
+test "GlobalBucketSlabs -> deinit resets state and allows re-initialization" {
+    const State = GlobalTestAlloc;
+
+    State.init(testing.allocator, {});
+    const first = State.alloc_bytes(32) orelse return error.OutOfMemory;
+    fillSlice(first, 0x77);
+    State.free_bytes(first);
+    State.deinit();
+
+    // Re-initializing must start from a clean slate rather than reusing the
+    // freed tracker or slab records.
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const second = State.alloc_bytes(32) orelse return error.OutOfMemory;
+    fillSlice(second, 0x88);
+    try expectFilled(second, 0x88);
+    State.free_bytes(second);
+}
+
+test "GlobalBucketSlabs -> shrink is refused when the option is disabled" {
+    const State = GlobalGrowOnlyAlloc;
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const memory = State.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    fillSlice(memory, 0x77);
+    defer State.free_bytes(memory);
+
+    try testing.expect(!State.resize_bytes(memory, 64));
+    try expectFilled(memory, 0x77);
+}
+
+test "GlobalBucketSlabs -> direct page backing allocator works and deinits" {
+    const State = GlobalDirectPageAlloc;
+    State.init({}, {});
+    defer State.deinit();
+
+    const small = State.alloc_bytes(8) orelse return error.OutOfMemory;
+    const medium = State.alloc_bytes(4_096) orelse return error.OutOfMemory;
+    const large = State.alloc_bytes(9_000) orelse return error.OutOfMemory;
+
+    fillSlice(small, 0x01);
+    fillSlice(medium, 0x02);
+    fillSlice(large, 0x03);
+
+    try expectFilled(small, 0x01);
+    try expectFilled(medium, 0x02);
+    try expectFilled(large, 0x03);
+
+    State.free_bytes(small);
+    State.free_bytes(medium);
+    State.free_bytes(large);
+}
+
+test "GlobalBucketSlabs -> mutex mode works with an Io" {
+    const State = GlobalMutexAlloc;
+
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+
+    State.init(testing.allocator, threaded.io());
+    defer State.deinit();
+
+    const memory = State.alloc_bytes(128) orelse return error.OutOfMemory;
+    fillSlice(memory, 0x33);
+    try expectFilled(memory, 0x33);
+    State.free_bytes(memory);
+}
+
+test "GlobalBucketSlabs -> threadlocal vars isolate state per thread" {
+    const State = GlobalThreadlocalAlloc;
+
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const main_memory = State.alloc_bytes(64) orelse return error.OutOfMemory;
+    fillSlice(main_memory, 0x11);
+
+    var worker_ok = false;
+    const thread = try std.Thread.spawn(.{}, globalBucketSlabsThreadlocalWorker, .{&worker_ok});
+    thread.join();
+
+    try testing.expect(worker_ok);
+    try expectFilled(main_memory, 0x11);
+    State.free_bytes(main_memory);
+}
+
+test "GlobalBucketSlabs -> spin locks serialize concurrent access" {
+    const State = GlobalSpinLockedAlloc;
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    const NUM_THREADS = 4;
+    var results: [NUM_THREADS]bool = @splat(false);
+    var threads: [NUM_THREADS]std.Thread = undefined;
+
+    for (&threads, 0..) |*thread, i| {
+        thread.* = try std.Thread.spawn(.{}, globalBucketSlabsSpinWorker, .{&results[i]});
+    }
+    for (&threads) |*thread| thread.join();
+
+    for (results) |result| try testing.expect(result);
 }
 
 test "QuickBucket -> free list reuse and bump coalescing" {

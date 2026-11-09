@@ -873,8 +873,12 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
     const INFO = eval_def(DEF.to_def());
     return struct {
         const Self = @This();
-        pub const TYPE_ID = Types.get_type_id(Self);
-        pub const TYPE_ID_GENERIC = Types.get_string_id("Goolib.Allocator.GlobalBucketSlabsAlloc");
+        pub inline fn type_id() usize {
+            return Types.get_type_id(Self);
+        }
+        pub inline fn type_id_generic() usize {
+            return Types.get_string_id("Goolib.Allocator.GlobalBucketSlabsAlloc");
+        }
         const THREADSAFETY = DEF.THREAD_SAFETY;
         const LOCK_KIND = THREADSAFETY.get_lock_kind();
         const Lock = LOCK_KIND.lock_type(true);
@@ -884,6 +888,23 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         const NEED_IO = IoType != void;
         const THREADLOCAL = DEF.THREAD_SAFETY.use_threadlocal();
         pub const UNIQUE_NAME = DEF.UNIQUE_NAME;
+
+        const NUM_BUCKETS = INFO.num_buckets;
+        const BLOCK_BYTES = INFO.ordered_block_sizes;
+        const SLAB_BYTES = INFO.ordered_slab_sizes;
+        const SLAB_ALIGNS = INFO.ordered_slab_alignments;
+        const SLAB_MASK = INFO.ordered_slab_masks;
+        const BLOCKS_PER_SLAB = INFO.ordered_blocks_per_slab;
+        const LEFTOVER_BLOCKS_AFTER_NEW_SLAB_ALLOC = INFO.ordered_leftover_blocks_after_new_alloc;
+        const MAX_BUCKET_POWER = INFO.max_bucket_power;
+        const MAX_BUCKET_SIZE = MAX_BUCKET_POWER.value_as_type(usize);
+        const MAX_BUCKET_RAW = MAX_BUCKET_POWER.raw_int();
+        const MIN_BUCKET_POWER = INFO.min_bucket_power;
+        const MIN_BUCKET_SIZE = MIN_BUCKET_POWER.value_as_type(usize);
+        const MIN_BUCKET_RAW = MIN_BUCKET_POWER.raw_int();
+        const TRACK_STATS = DEF.TRACK_ALLOCATION_STATS;
+        const RESIZE_SHRINK = DEF.ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET;
+        const BACKING_ALLOC = DEF.BACKING_ALLOCATOR_MODE == .USE_BACKING_ALLOCATOR;
 
         const gbsa = if (THREADLOCAL) struct {
             threadlocal var first_free_block: [NUM_BUCKETS]?*FreeSlot = @splat(null);
@@ -908,23 +929,6 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             var lock: Lock = LockInit;
             var io: IoType = IoInit;
         };
-
-        const NUM_BUCKETS = INFO.num_buckets;
-        const BLOCK_BYTES = INFO.ordered_block_sizes;
-        const SLAB_BYTES = INFO.ordered_slab_sizes;
-        const SLAB_ALIGNS = INFO.ordered_slab_alignments;
-        const SLAB_MASK = INFO.ordered_slab_masks;
-        const BLOCKS_PER_SLAB = INFO.ordered_blocks_per_slab;
-        const LEFTOVER_BLOCKS_AFTER_NEW_SLAB_ALLOC = INFO.ordered_leftover_blocks_after_new_alloc;
-        const MAX_BUCKET_POWER = INFO.max_bucket_power;
-        const MAX_BUCKET_SIZE = MAX_BUCKET_POWER.value_as_type(usize);
-        const MAX_BUCKET_RAW = MAX_BUCKET_POWER.raw_int();
-        const MIN_BUCKET_POWER = INFO.min_bucket_power;
-        const MIN_BUCKET_SIZE = MIN_BUCKET_POWER.value_as_type(usize);
-        const MIN_BUCKET_RAW = MIN_BUCKET_POWER.raw_int();
-        const TRACK_STATS = DEF.TRACK_ALLOCATION_STATS;
-        const RESIZE_SHRINK = DEF.ALLOW_RESIZE_IN_PLACE_TO_SMALLER_BUCKET;
-        const BACKING_ALLOC = DEF.BACKING_ALLOCATOR_MODE == .USE_BACKING_ALLOCATOR;
 
         pub const AllocStats = struct {
             num_free_blocks: [NUM_BUCKETS]usize = @splat(0),
@@ -1072,24 +1076,24 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         fn alloc_impl(self_opaque: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
             _ = ret_addr;
             _ = self_opaque;
-            return alloc_internal(len, alignment);
+            return alloc_raw(len, alignment);
         }
         pub inline fn alloc_types(comptime T: type, count: usize) ?[]T {
-            const ptr = alloc_internal(@sizeOf(T) * count, Alignment.fromByteUnits(@alignOf(T))) orelse return null;
+            const ptr = alloc_raw(@sizeOf(T) * count, Alignment.fromByteUnits(@alignOf(T))) orelse return null;
             const t_ptr: [*]T = @ptrCast(@alignCast(ptr));
             return t_ptr[0..count];
         }
         pub inline fn alloc_types_with_align(comptime T: type, count: usize, comptime alignment: Alignment) ?[]align(alignment.toByteUnits()) T {
-            const ptr = alloc_internal(@sizeOf(T) * count, alignment) orelse return null;
+            const ptr = alloc_raw(@sizeOf(T) * count, alignment) orelse return null;
             const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(ptr));
             return t_ptr[0..count];
         }
         pub inline fn alloc_bytes(size: usize) ?[]u8 {
-            const ptr = alloc_internal(size, null) orelse return null;
+            const ptr = alloc_raw(size, null) orelse return null;
             return ptr[0..size];
         }
         pub inline fn alloc_bytes_with_align(size: usize, comptime alignment: Alignment) ?[]align(alignment.toByteUnits()) u8 {
-            const ptr: [*]align(alignment.toByteUnits()) u8 = @alignCast(alloc_internal(size, alignment) orelse return null);
+            const ptr: [*]align(alignment.toByteUnits()) u8 = @alignCast(alloc_raw(size, alignment) orelse return null);
             return ptr[0..size];
         }
         inline fn note_block_used(bucket_idx: usize) void {
@@ -1100,7 +1104,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
                 gbsa.stats.largest_total_memory_allocated = @max(gbsa.stats.largest_total_memory_allocated, gbsa.stats.current_total_memory_allocated);
             }
         }
-        fn alloc_internal(size: usize, alignment: ?Alignment) ?[*]u8 {
+        pub fn alloc_raw(size: usize, alignment: ?Alignment) ?[*]u8 {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
@@ -1143,7 +1147,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
                     } else blk: {
                         const old_bytes = gbsa.slab_tracker_cap * @sizeOf(SlabRecord);
                         const old_raw = @as([*]u8, @ptrCast(gbsa.slab_tracker_ptr))[0..old_bytes];
-                        break :blk gbsa.backing_realloc(old_raw, gbsa.slab_tracker_len * @sizeOf(SlabRecord), new_bytes, record_align) orelse return null;
+                        break :blk backing_realloc(old_raw, gbsa.slab_tracker_len * @sizeOf(SlabRecord), new_bytes, record_align) orelse return null;
                     };
                     gbsa.slab_tracker_ptr = @ptrCast(@alignCast(new_raw));
                     gbsa.slab_tracker_cap = new_cap;
@@ -1183,21 +1187,21 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
             _ = self_opaque;
             _ = ret_addr;
-            return resize_internal(memory, new_len, alignment);
+            return resize_raw(memory, new_len, alignment);
         }
         pub inline fn resize_types(comptime T: type, memory: []T, new_count: usize) bool {
-            return resize_internal(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)));
+            return resize_raw(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)));
         }
         pub inline fn resize_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) bool {
-            return resize_internal(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment);
+            return resize_raw(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment);
         }
         pub inline fn resize_bytes(memory: []u8, new_len: usize) bool {
-            return resize_internal(memory, new_len, null);
+            return resize_raw(memory, new_len, null);
         }
         pub inline fn resize_bytes_with_align(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) bool {
-            return resize_internal(@alignCast(memory), new_len, alignment);
+            return resize_raw(@alignCast(memory), new_len, alignment);
         }
-        fn resize_internal(memory: []u8, new_len: usize, alignment: ?Alignment) bool {
+        pub fn resize_raw(memory: []u8, new_len: usize, alignment: ?Alignment) bool {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             const old_bucket, const new_bucket = get: {
@@ -1263,7 +1267,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
             _ = ret_addr;
             _ = self_opaque;
-            if (resize_internal(memory, new_len, alignment)) {
+            if (resize_raw(memory, new_len, alignment)) {
                 return memory.ptr;
             }
             return null;
@@ -1280,13 +1284,13 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             }
             return null;
         }
-        pub fn remap_types(comptime T: type, memory: []T, new_count: usize) ?[]T {
+        pub inline fn remap_types(comptime T: type, memory: []T, new_count: usize) ?[]T {
             if (resize_types(T, memory, new_count)) {
                 return memory.ptr[0..new_count];
             }
             return null;
         }
-        pub fn remap_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+        pub inline fn remap_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
             if (resize_types_with_align(alignment, T, memory, new_count)) {
                 return memory.ptr[0..new_count];
             }
@@ -1296,26 +1300,26 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             _ = ret_addr;
             _ = self_opaque;
-            free_internal(memory, alignment);
+            free_raw(memory, alignment);
         }
 
         pub inline fn free_types(comptime T: type, memory: []T) void {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len = memory.len * @sizeOf(T);
-            free_internal(raw_ptr[0..raw_len], Alignment.fromByteUnits(@alignOf(T)));
+            free_raw(raw_ptr[0..raw_len], Alignment.fromByteUnits(@alignOf(T)));
         }
         pub inline fn free_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T) void {
             const raw_ptr: [*]u8 = @ptrCast(@alignCast(memory.ptr));
             const raw_len = memory.len * @sizeOf(T);
-            free_internal(raw_ptr[0..raw_len], alignment);
+            free_raw(raw_ptr[0..raw_len], alignment);
         }
         pub inline fn free_bytes(memory: []u8) void {
-            free_internal(memory, null);
+            free_raw(memory, null);
         }
         pub inline fn free_bytes_with_align(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8) void {
-            free_internal(@alignCast(memory), alignment);
+            free_raw(@alignCast(memory), alignment);
         }
-        fn free_internal(memory: []u8, alignment: ?Alignment) void {
+        pub fn free_raw(memory: []u8, alignment: ?Alignment) void {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(memory.len, a) else bucket_index_from_size(memory.len);
@@ -1337,6 +1341,85 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
                 gbsa.stats.current_total_bytes_allocated_from_fallback -= memory.len;
                 gbsa.stats.current_total_memory_allocated -= memory.len;
             }
+        }
+
+        pub inline fn realloc_bytes(memory: []u8, new_len: usize) ?[]u8 {
+            if (realloc_raw(memory, memory.len, new_len, null)) |new_mem| {
+                return new_mem.ptr[0..new_len];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_with_align(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
+            if (realloc_raw(memory, memory.len, new_len, alignment)) |new_mem| {
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem.ptr)))[0..new_len];
+            }
+            return null;
+        }
+        pub fn realloc_types(comptime T: type, memory: []T, new_count: usize) ?[]T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+                const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn realloc_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_count * @sizeOf(T), alignment)) |new_mem| {
+                const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_custom_data_len(memory: []u8, data_len: usize, new_len: usize) ?[]u8 {
+            if (realloc_raw(memory, data_len, new_len, null)) |new_mem| {
+                return new_mem.ptr[0..new_len];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_with_align_custom_data_len(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
+            if (realloc_raw(memory, data_len, new_len, alignment)) |new_mem| {
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem.ptr)))[0..new_len];
+            }
+            return null;
+        }
+        pub fn realloc_types_custom_data_count(comptime T: type, memory: []T, data_count: usize, new_count: usize) ?[]T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const data_len = @sizeOf(T) * data_count;
+            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+                const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn realloc_types_with_align_custom_data_count(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const data_len = @sizeOf(T) * data_count;
+            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_count * @sizeOf(T), alignment)) |new_mem| {
+                const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn realloc_raw(memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment) ?[*]u8 {
+            if (memory.len == 0) return alloc_raw(new_len, alignment);
+            const real_align = if (alignment) |a| a.toByteUnits() else 1;
+            if (new_len == 0) {
+                free_raw(memory, alignment);
+                return Utils.invalid_ptr_many_align(u8, real_align);
+            }
+            if (resize_raw(memory, new_len, alignment)) return memory.ptr;
+            if (alloc_raw(new_len, alignment)) |new_mem| {
+                const min_copy = @min(data_len, new_len);
+                @memcpy(new_mem[0..min_copy], memory[0..min_copy]);
+                free_raw(memory, alignment);
+                return new_mem;
+            }
+            return null;
         }
 
         pub inline fn create_with_align(comptime T: type, comptime alignment: Alignment) ?*align(alignment.toByteUnits()) T {
@@ -1371,6 +1454,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             log_alloc: Allocator,
             comptime log_name: []const u8,
         ) void {
+            LOCK_KIND.lock_for_read(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            defer LOCK_KIND.unlock_for_read(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             log_buffer.clearRetainingCapacity();
 
             var total_slab_bytes: usize = 0;
