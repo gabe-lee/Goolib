@@ -117,6 +117,36 @@ pub fn TrySignedIntegerWithSameSize(comptime T: type) ?type {
     return INT;
 }
 
+/// Returns a unique identifier for the given type, which can be used at runtime.
+///
+/// This uses a trick where a unique phantom type is generated for every
+/// call of this function with a unique `T` value, then taking a pointer
+/// to a single const byte on the phantom type, and using the usize address
+/// of that byte pointer as the 'type id' for the original type
+pub fn get_type_id(comptime T: type) usize {
+    const UNIQUE_TYPE = struct {
+        const byte: u8 = 0;
+        const _ = T;
+    };
+    return @intFromPtr(&UNIQUE_TYPE.byte);
+}
+/// Returns a unique identifier for the given string, which can be used at runtime.
+///
+/// This uses a trick where a unique phantom type is generated for every
+/// call of this function with a unique `STR` value, then taking a pointer
+/// to a single const byte on the phantom type, and using the usize address
+/// of that byte pointer as the 'type id' for the original type
+pub fn get_string_id(comptime STR: []const u8) usize {
+    const UNIQUE_STR = struct {
+        const byte: u8 = 0;
+        const _ = STR;
+    };
+    return @intFromPtr(&UNIQUE_STR.byte);
+}
+pub fn assert_type_generic_id_matches(comptime T: type, comptime STR: []const u8) bool {
+    assert_with_reason(type_has_decl_with_type_and_val(T, "TYPE_ID_GENERIC", usize, get_string_id(STR)), @src(), "type `{s}` id not have a generic type ID that matched `{s}`", .{ @typeName(T), STR });
+}
+
 // DEPRECATE move to Cast.zig
 pub fn intcast(val: anytype, comptime T: type) T {
     assert_with_reason(type_is_int(T), @src(), "output type T must be an integer type, got type `{s}`", .{@typeName(T)});

@@ -26,6 +26,7 @@ const build = @import("builtin");
 
 /// std imports
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const math = std.math;
 const DEBUG = std.debug.print;
 
@@ -34,17 +35,18 @@ const Root = @import("./_root.zig");
 const Cast = Root.Cast;
 const Type = Root.Types;
 const Math = Root.Math;
-const KindInfo = Type.KindInfo;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
-const CommonTypes = Root.CommonTypes;
+const Common = Root.CommonTypes;
 const Test = Root.Testing;
-const DummyAlloc = Root.DummyAllocator.allocator_panic_free_noop;
+const AllocatorModule = Root.Allocator;
+const ListSlice = Root.ListSlice;
 
+const dummy_alloc = AllocatorModule.Dummy.allocator_panic_free_noop;
 const assert_with_reason = Assert.assert_with_reason;
+const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
 const assert_unreachable = Assert.assert_unreachable;
 const assert_unreachable_err = Assert.assert_unreachable_err;
 const num_cast = Cast.num_cast;
-const kind_info = KindInfo.get_kind_info;
 
-const DEBUG_VAL = Root.Uitls.DebugPrint.debug_val;
+const DEBUG_VAL = Utils.DebugPrint.debug_val;

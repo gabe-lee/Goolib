@@ -45,7 +45,7 @@ const Growth = Common.GrowthModel;
 const FuncParamType = Common.FuncParamType;
 const ErrorBehavior = Common.ErrorBehavior;
 const AllocErr = Utils.Alloc.AllocErr;
-const CachedAllocMode = Common.CachedAllocMode;
+const AllocSourceMode = Common.AllocSourceMode;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
@@ -255,7 +255,7 @@ pub const ListDefNoElem = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: CachedAllocMode = .MANUAL_ALLOC,
+    ALLOC: AllocSourceMode = .MANUAL_ALLOC,
 
     pub inline fn List(comptime self: ListDefNoElem, comptime T: type) type {
         return ListFullDefinition(T, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -286,7 +286,7 @@ pub const ListDef = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: CachedAllocMode = .MANUAL_ALLOC,
+    ALLOC: AllocSourceMode = .MANUAL_ALLOC,
 
     pub inline fn List(comptime self: ListDef) type {
         return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -344,7 +344,7 @@ pub fn ListFullDefinition(
     comptime FIELD_LAYOUT: FieldLayout,
     comptime INDEX_LAYOUT: IndexLayout,
     comptime OWNERSHIP: Ownership,
-    comptime ALLOC: CachedAllocMode,
+    comptime ALLOC: AllocSourceMode,
 ) type {
     assert_with_reason(Type.type_is_unsigned_int(IDX), @src(), "IDX type must be an unsigned integer, got type `{s}`", .{@typeName(IDX)});
     if (FIELD_LAYOUT == .SPLIT_FIELDS) {

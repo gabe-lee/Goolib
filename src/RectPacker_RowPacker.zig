@@ -37,7 +37,7 @@ const Vec2 = Root.Vec2;
 const Allocator = std.mem.Allocator;
 const DummyAlloc = Root.Allocator.Dummy;
 const Assert = Root.Assert;
-const CachedAllocMode = Root.CommonTypes.CachedAllocMode;
+const AllocSourceMode = Root.CommonTypes.AllocSourceMode;
 const HashMapModule = Root.HashMap.SwissTableHashMapModule;
 const HashMap = HashMapModule.SwissHashMap;
 const HashMapOverrides = HashMapModule.Overrides;
@@ -68,13 +68,13 @@ pub const PackerDef = struct {
     SIZE_TYPE: type,
     IDX: type = u32,
     RELEASE_MODE: ReleaseMode = .CLAIM_AND_RELEASE,
-    ALLOC: CachedAllocMode = .CACHED_ALLOC,
+    ALLOC: AllocSourceMode = .CACHED_ALLOC,
     LOCK_MODE: LockMode = .NO_LOCKS,
     HOLE_POOL_BACK_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
     HOLE_POOL_SLOTS_PER_BLOCK: comptime_int = 64,
     HOLE_POOL_STATE_UINT: type = usize,
 
-    pub fn with_alloc(comptime self: PackerDef, comptime ALLOC: CachedAllocMode) PackerDef {
+    pub fn with_alloc(comptime self: PackerDef, comptime ALLOC: AllocSourceMode) PackerDef {
         var out = self;
         out.ALLOC = ALLOC;
         return out;

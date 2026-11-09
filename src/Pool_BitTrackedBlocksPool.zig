@@ -30,7 +30,7 @@ const Utils = Root.Utils;
 const Growth = Root.CommonTypes.GrowthModel;
 const RwLock = std.Io.RwLock;
 const Io = std.Io;
-const CachedAllocMode = Root.CommonTypes.CachedAllocMode;
+const AllocSourceMode = Root.CommonTypes.AllocSourceMode;
 const ListSliceMoule = Root.ListSlice;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -55,7 +55,7 @@ pub const PoolDef = struct {
     /// Must be a positive multiple of `@bitSizeOf(STATE_UINT)` so that every state
     /// bit maps to a real slot.
     SLOTS_PER_BLOCK: comptime_int = 64,
-    ALLOC_MODE: CachedAllocMode = .MANUAL_ALLOC,
+    ALLOC_MODE: AllocSourceMode = .MANUAL_ALLOC,
     BACK_POINT_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
 };
 

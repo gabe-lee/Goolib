@@ -111,9 +111,9 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
-const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.Allocator.Dummy;
 const List = Root.ListSlice.ListAllocated;
+const ListSlice = Root.ListSlice;
 const Vec2 = Root.Vec2;
 const AABB2 = Root.AABB2;
 const MathX = Root.Math;
@@ -2032,3 +2032,8 @@ test "TrueTypeFont -> load and render chars" {
     defer text_shape_list.free_if_non_zero(alloc);
     try font.shape_text("ABcdEfGg&ć", 2.0, &text_shape_list, alloc);
 }
+
+// pub const TextList = ListSlice.ListFullDefinition(u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+// pub const SimpleTextRect = struct {
+//     text: , //CHECKPOINT
+// };

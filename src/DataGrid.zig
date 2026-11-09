@@ -28,7 +28,6 @@ const Types = Root.Types;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
-const AllocInfal = Root.AllocatorInfallible;
 const DummyAllocator = Root.Allocator.Dummy;
 const Flags = Root.Flags;
 // const IList = Root.IList.IList;

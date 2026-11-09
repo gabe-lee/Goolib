@@ -580,17 +580,18 @@ pub const FillRule = enum {
     }
 };
 
-pub const CachedAllocMode = enum {
+pub const AllocSourceMode = enum {
     MANUAL_ALLOC,
     CACHED_ALLOC,
+    // GLOBAL_ALLOC,
 
-    pub inline fn FuncParamAlloc(comptime mode: CachedAllocMode) type {
+    pub inline fn FuncParamAlloc(comptime mode: AllocSourceMode) type {
         return switch (comptime mode) {
             .MANUAL_ALLOC => Allocator,
             .CACHED_ALLOC => void,
         };
     }
-    pub inline fn FuncParamAllocIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+    pub inline fn FuncParamAllocIf(comptime mode: AllocSourceMode, comptime CONDITION: bool) type {
         if (comptime CONDITION) {
             return switch (comptime mode) {
                 .MANUAL_ALLOC => Allocator,
@@ -600,19 +601,19 @@ pub const CachedAllocMode = enum {
             return void;
         }
     }
-    pub inline fn Fn(comptime mode: CachedAllocMode) type {
+    pub inline fn Fn(comptime mode: AllocSourceMode) type {
         return FuncParamAlloc(mode);
     }
-    pub inline fn FnIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+    pub inline fn FnIf(comptime mode: AllocSourceMode, comptime CONDITION: bool) type {
         return FuncParamAllocIf(mode, CONDITION);
     }
-    pub inline fn CachedAlloc(comptime mode: CachedAllocMode) type {
+    pub inline fn CachedAlloc(comptime mode: AllocSourceMode) type {
         return switch (comptime mode) {
             .MANUAL_ALLOC => void,
             .CACHED_ALLOC => Allocator,
         };
     }
-    pub inline fn CachedAllocIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+    pub inline fn CachedAllocIf(comptime mode: AllocSourceMode, comptime CONDITION: bool) type {
         if (comptime CONDITION) {
             return switch (comptime mode) {
                 .MANUAL_ALLOC => void,
@@ -622,13 +623,13 @@ pub const CachedAllocMode = enum {
             return void;
         }
     }
-    pub inline fn Ch(comptime mode: CachedAllocMode) type {
+    pub inline fn Ch(comptime mode: AllocSourceMode) type {
         return CachedAlloc(mode);
     }
-    pub inline fn ChIf(comptime mode: CachedAllocMode, comptime CONDITION: bool) type {
+    pub inline fn ChIf(comptime mode: AllocSourceMode, comptime CONDITION: bool) type {
         return CachedAllocIf(mode, CONDITION);
     }
-    pub inline fn CACHED_ALLOC_DEFAULT_IF(comptime mode: CachedAllocMode, comptime CONDITION: bool) CachedAlloc(mode) {
+    pub inline fn CACHED_ALLOC_DEFAULT_IF(comptime mode: AllocSourceMode, comptime CONDITION: bool) CachedAlloc(mode) {
         if (comptime CONDITION) {
             return switch (comptime mode) {
                 .MANUAL_ALLOC => @as(void, {}),
@@ -638,43 +639,43 @@ pub const CachedAllocMode = enum {
             return @as(void, {});
         }
     }
-    pub inline fn CACHED_ALLOC_DEFAULT(comptime mode: CachedAllocMode) CachedAlloc(mode) {
+    pub inline fn CACHED_ALLOC_DEFAULT(comptime mode: AllocSourceMode) CachedAlloc(mode) {
         return switch (comptime mode) {
             .MANUAL_ALLOC => @as(void, {}),
             .CACHED_ALLOC => DummyAlloc.allocator_panic_free_noop,
         };
     }
-    pub inline fn get_alloc(comptime mode: CachedAllocMode, func_param: FuncParamAlloc(mode), cached: CachedAlloc(mode)) Allocator {
+    pub inline fn get_alloc(comptime mode: AllocSourceMode, func_param: FuncParamAlloc(mode), cached: CachedAlloc(mode)) Allocator {
         return switch (comptime mode) {
             .MANUAL_ALLOC => func_param,
             .CACHED_ALLOC => cached,
         };
     }
-    pub inline fn alloc_to_cached_alloc(comptime mode: CachedAllocMode, alloc: Allocator) CachedAlloc(mode) {
+    pub inline fn alloc_to_cached_alloc(comptime mode: AllocSourceMode, alloc: Allocator) CachedAlloc(mode) {
         return switch (comptime mode) {
             .MANUAL_ALLOC => @as(void, {}),
             .CACHED_ALLOC => alloc,
         };
     }
-    pub inline fn alloc_to_func_alloc(comptime mode: CachedAllocMode, alloc: Allocator) FuncParamAlloc(mode) {
+    pub inline fn alloc_to_func_alloc(comptime mode: AllocSourceMode, alloc: Allocator) FuncParamAlloc(mode) {
         return switch (comptime mode) {
             .MANUAL_ALLOC => alloc,
             .CACHED_ALLOC => @as(void, {}),
         };
     }
-    pub inline fn no_cached_alloc(comptime mode: CachedAllocMode) CachedAlloc(mode) {
+    pub inline fn no_cached_alloc(comptime mode: AllocSourceMode) CachedAlloc(mode) {
         return switch (comptime mode) {
             .MANUAL_ALLOC => @as(void, {}),
             .CACHED_ALLOC => DummyAlloc.allocator_panic_free_noop,
         };
     }
-    pub inline fn no_func_alloc(comptime mode: CachedAllocMode) FuncParamAlloc(mode) {
+    pub inline fn no_func_alloc(comptime mode: AllocSourceMode) FuncParamAlloc(mode) {
         return switch (comptime mode) {
             .MANUAL_ALLOC => DummyAlloc.allocator_panic_free_noop,
             .CACHED_ALLOC => @as(void, {}),
         };
     }
-    pub inline fn no_func_alloc_if(comptime mode: CachedAllocMode, comptime CONDITION: bool) FuncParamAllocIf(mode, CONDITION) {
+    pub inline fn no_func_alloc_if(comptime mode: AllocSourceMode, comptime CONDITION: bool) FuncParamAllocIf(mode, CONDITION) {
         if (comptime CONDITION) {
             return switch (comptime mode) {
                 .MANUAL_ALLOC => DummyAlloc.allocator_panic_free_noop,
@@ -685,6 +686,13 @@ pub const CachedAllocMode = enum {
         }
     }
 };
+
+// pub const AllocSource = union(AllocSourceMode) {
+//     MANUAL_ALLOC: void,
+//     CACHED_ALLOC: void,
+//     COMPTIME_ALLOC_POINTER: *const Allocator,
+
+// };
 
 pub const ThreadingMode = enum(u8) {
     SINGLE_THREADED,
