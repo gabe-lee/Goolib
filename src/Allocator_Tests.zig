@@ -465,6 +465,111 @@ test "BucketSlabs -> generic allocator realloc across the fallback boundary" {
     allocator.free(memory);
 }
 
+test "BucketSlabs -> direct realloc helpers preserve data across resize paths" {
+    var state = TestAlloc.init(testing.allocator);
+    defer state.deinit();
+
+    const ALIGN_64 = comptime Alignment.fromByteUnits(64);
+
+    // Grow across a bucket boundary: this must allocate a new block and copy.
+    var memory = state.alloc_bytes(32) orelse return error.OutOfMemory;
+    for (memory, 0..) |*byte, i| byte.* = @intCast(i);
+    memory = state.realloc_bytes(memory, 1_024) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 1_024), memory.len);
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+
+    // Resizing within a bucket is a no-op, and shrinking across buckets is
+    // sub-divided in place, so the pointer must not move either way.
+    const block_ptr = memory.ptr;
+    memory = state.realloc_bytes(memory, 600) orelse return error.OutOfMemory;
+    try testing.expectEqual(@intFromPtr(block_ptr), @intFromPtr(memory.ptr));
+    memory = state.realloc_bytes(memory, 64) orelse return error.OutOfMemory;
+    try testing.expectEqual(@intFromPtr(block_ptr), @intFromPtr(memory.ptr));
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+
+    // Bucket -> fallback -> bucket.
+    memory = state.realloc_bytes(memory, 9_000) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 9_000), memory.len);
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    memory = state.realloc_bytes(memory, 256) orelse return error.OutOfMemory;
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    state.free_bytes(memory);
+
+    // Typed helpers, including a custom data count that is smaller than the
+    // allocation, so only the meaningful prefix is copied.
+    var values = state.alloc_types(u32, 4) orelse return error.OutOfMemory;
+    values[0] = 0xAAAA_AAAA;
+    values[3] = 0xDDDD_DDDD;
+    values = state.realloc_types(u32, values, 64) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 64), values.len);
+    try testing.expectEqual(@as(u32, 0xAAAA_AAAA), values[0]);
+    try testing.expectEqual(@as(u32, 0xDDDD_DDDD), values[3]);
+    values = state.realloc_types(u32, values, 2) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u32, 0xAAAA_AAAA), values[0]);
+    state.free_types(u32, values);
+
+    var data = state.alloc_types(u16, 8) orelse return error.OutOfMemory;
+    data[0] = 0x1111;
+    data[2] = 0x3333;
+    data = state.realloc_types_custom_data_count(u16, data, 3, 32) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 32), data.len);
+    try testing.expectEqual(@as(u16, 0x1111), data[0]);
+    try testing.expectEqual(@as(u16, 0x3333), data[2]);
+    state.free_types(u16, data);
+
+    // Alignment must survive both growth and shrinking in place.
+    var aligned = state.alloc_bytes_with_align(33, ALIGN_64) orelse return error.OutOfMemory;
+    for (aligned, 0..) |*byte, i| byte.* = @intCast(i + 1);
+    aligned = state.realloc_bytes_with_align(ALIGN_64, aligned, 200) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
+    for (aligned[0..33], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i + 1)), byte);
+    aligned = state.realloc_bytes_with_align(ALIGN_64, aligned, 64) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
+    for (aligned[0..33], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i + 1)), byte);
+    state.free_bytes_with_align(ALIGN_64, aligned);
+
+    // Exercise the remaining helper variants so none can stay unanalyzed.
+    const custom = state.alloc_bytes(64) orelse return error.OutOfMemory;
+    fillSlice(custom, 0x2A);
+    const custom_grown = state.realloc_bytes_custom_data_len(custom, 16, 128) orelse return error.OutOfMemory;
+    try expectFilled(custom_grown[0..16], 0x2A);
+    state.free_bytes(custom_grown);
+
+    const custom_aligned = state.alloc_bytes_with_align(64, ALIGN_64) orelse return error.OutOfMemory;
+    fillSlice(custom_aligned, 0x3B);
+    const custom_aligned_grown = state.realloc_bytes_with_align_custom_data_len(ALIGN_64, custom_aligned, 8, 256) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(custom_aligned_grown.ptr) % 64);
+    try expectFilled(custom_aligned_grown[0..8], 0x3B);
+    state.free_bytes_with_align(ALIGN_64, custom_aligned_grown);
+
+    const AlignedU32 = struct { value: u32 align(64) };
+    var aligned_types = state.alloc_types_with_align(AlignedU32, 2, ALIGN_64) orelse return error.OutOfMemory;
+    aligned_types[0].value = 0x1122_3344;
+    aligned_types = state.realloc_types_with_align(ALIGN_64, AlignedU32, aligned_types, 8) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_types.ptr) % 64);
+    try testing.expectEqual(@as(u32, 0x1122_3344), aligned_types[0].value);
+    aligned_types = state.realloc_types_with_align_custom_data_count(ALIGN_64, AlignedU32, aligned_types, 1, 4) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u32, 0x1122_3344), aligned_types[0].value);
+    state.free_types_with_align(ALIGN_64, AlignedU32, aligned_types);
+
+    // Reallocating to zero frees the old block, which is then reusable.
+    const fresh = state.alloc_bytes(128) orelse return error.OutOfMemory;
+    fillSlice(fresh, 0x9C);
+    const emptied = state.realloc_bytes(fresh, 0) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), emptied.len);
+    const reused = state.alloc_bytes(128) orelse return error.OutOfMemory;
+    defer state.free_bytes(reused);
+    try testing.expectEqual(@intFromPtr(fresh.ptr), @intFromPtr(reused.ptr));
+
+    // A zero-length slice owns no storage, so growing it must allocate.
+    const empty = state.alloc_bytes(0) orelse return error.OutOfMemory;
+    const grown = state.realloc_bytes(empty, 48) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 48), grown.len);
+    fillSlice(grown, 0x1D);
+    try expectFilled(grown, 0x1D);
+    state.free_bytes(grown);
+}
+
 test "BucketSlabs -> direct page slab tracker grows across a page boundary" {
     // One block per slab means one tracker record per allocation. The tracker
     // starts with 16 records and doubles, so 130 allocations force it past the
@@ -627,6 +732,89 @@ test "GlobalBucketSlabs -> direct API alignment, shrink, and grow behavior" {
     // Growing across a bucket boundary must be refused.
     try testing.expect(!State.resize_bytes(shrunk, 4_096));
     State.free_bytes(shrunk);
+}
+
+test "GlobalBucketSlabs -> realloc helpers preserve data across resize paths" {
+    const State = GlobalTestAlloc;
+    const ALIGN_64 = comptime Alignment.fromByteUnits(64);
+    State.init(testing.allocator, {});
+    defer State.deinit();
+
+    // Grow across buckets, then shrink in place.
+    var memory = State.alloc_bytes(32) orelse return error.OutOfMemory;
+    for (memory, 0..) |*byte, i| byte.* = @intCast(i);
+
+    memory = State.realloc_bytes(memory, 2_048) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 2_048), memory.len);
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+
+    const block_ptr = memory.ptr;
+    memory = State.realloc_bytes(memory, 100) orelse return error.OutOfMemory;
+    try testing.expectEqual(@intFromPtr(block_ptr), @intFromPtr(memory.ptr));
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+
+    // Bucket -> fallback -> bucket.
+    memory = State.realloc_bytes(memory, 9_000) orelse return error.OutOfMemory;
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    memory = State.realloc_bytes(memory, 128) orelse return error.OutOfMemory;
+    for (memory[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    State.free_bytes(memory);
+
+    // Typed helpers, including reallocating to zero.
+    var values = State.alloc_types(u16, 4) orelse return error.OutOfMemory;
+    values[0] = 0xAAAA;
+    values[3] = 0xDDDD;
+    values = State.realloc_types(u16, values, 64) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u16, 0xAAAA), values[0]);
+    try testing.expectEqual(@as(u16, 0xDDDD), values[3]);
+    values = State.realloc_types(u16, values, 0) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), values.len);
+
+    // Aligned realloc that only copies an explicit valid prefix.
+    var aligned = State.alloc_bytes_with_align(16, ALIGN_64) orelse return error.OutOfMemory;
+    fillSlice(aligned, 0x6B);
+    aligned = State.realloc_bytes_with_align_custom_data_len(ALIGN_64, aligned, 16, 512) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 512), aligned.len);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
+    try expectFilled(aligned[0..16], 0x6B);
+    State.free_bytes_with_align(ALIGN_64, aligned);
+
+    // Exercise the remaining helper variants so none can stay unanalyzed.
+    var plain_aligned = State.alloc_bytes_with_align(32, ALIGN_64) orelse return error.OutOfMemory;
+    fillSlice(plain_aligned, 0x7F);
+    plain_aligned = State.realloc_bytes_with_align(ALIGN_64, plain_aligned, 96) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(plain_aligned.ptr) % 64);
+    try expectFilled(plain_aligned[0..32], 0x7F);
+    State.free_bytes_with_align(ALIGN_64, plain_aligned);
+
+    const custom = State.alloc_bytes(64) orelse return error.OutOfMemory;
+    fillSlice(custom, 0x5D);
+    const custom_grown = State.realloc_bytes_custom_data_len(custom, 16, 96) orelse return error.OutOfMemory;
+    try expectFilled(custom_grown[0..16], 0x5D);
+    State.free_bytes(custom_grown);
+
+    const AlignedU32 = struct { value: u32 align(64) };
+    var aligned_types = State.alloc_types_with_align(AlignedU32, 2, ALIGN_64) orelse return error.OutOfMemory;
+    aligned_types[0].value = 0x5566_7788;
+    aligned_types = State.realloc_types_with_align(ALIGN_64, AlignedU32, aligned_types, 6) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u32, 0x5566_7788), aligned_types[0].value);
+    aligned_types = State.realloc_types_with_align_custom_data_count(ALIGN_64, AlignedU32, aligned_types, 1, 3) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u32, 0x5566_7788), aligned_types[0].value);
+    State.free_types_with_align(ALIGN_64, AlignedU32, aligned_types);
+
+    const raw_memory = State.alloc_bytes(32) orelse return error.OutOfMemory;
+    fillSlice(raw_memory, 0x8A);
+    const raw_grown = State.realloc_raw(raw_memory, 32, 512, null) orelse return error.OutOfMemory;
+    try expectFilled(raw_grown[0..32], 0x8A);
+    State.free_raw(raw_grown[0..512], null);
+
+    // Reallocating to zero returns the block to the free list.
+    const fresh = State.alloc_bytes(64) orelse return error.OutOfMemory;
+    const emptied = State.realloc_bytes(fresh, 0) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), emptied.len);
+    const reused = State.alloc_bytes(64) orelse return error.OutOfMemory;
+    defer State.free_bytes(reused);
+    try testing.expectEqual(@intFromPtr(fresh.ptr), @intFromPtr(reused.ptr));
 }
 
 test "GlobalBucketSlabs -> typed helpers, remap, create/destroy, and logging" {

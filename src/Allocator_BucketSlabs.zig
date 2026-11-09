@@ -436,6 +436,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             }
         }
         fn alloc_internal(self: *Self, size: usize, alignment: ?Alignment) ?[*]u8 {
+            if (size == 0) return zero_length_ptr(alignment);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
                 self.stats.smallest_allocation_request_ever = @min(self.stats.smallest_allocation_request_ever, size);
@@ -647,6 +648,9 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             self.free_internal(@alignCast(memory), alignment);
         }
         fn free_internal(self: *Self, memory: []u8, alignment: ?Alignment) void {
+            // Zero-length slices never own memory (see `realloc_internal`), so
+            // freeing one is a no-op like it is in `std.mem.Allocator`.
+            if (memory.len == 0) return;
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(memory.len, a) else bucket_index_from_size(memory.len);
             if (bucket_idx < NUM_BUCKETS) {
                 const prev_first_free = self.first_free_block[bucket_idx];
@@ -666,6 +670,88 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
                 self.stats.current_total_bytes_allocated_from_fallback -= memory.len;
                 self.stats.current_total_memory_allocated -= memory.len;
             }
+        }
+
+        pub inline fn realloc_bytes(self: *Self, memory: []u8, new_len: usize) ?[]u8 {
+            if (self.realloc_internal(memory, memory.len, new_len, null)) |new_mem| {
+                return new_mem[0..new_len];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_with_align(self: *Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
+            if (self.realloc_internal(memory, memory.len, new_len, alignment)) |new_mem| {
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
+            }
+            return null;
+        }
+        pub fn realloc_types(self: *Self, comptime T: type, memory: []T, new_count: usize) ?[]T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const new_len = @sizeOf(T) * new_count;
+            if (self.realloc_internal(raw_ptr[0..raw_len], raw_len, new_len, Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+                const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn realloc_types_with_align(self: *Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const new_len = @sizeOf(T) * new_count;
+            if (self.realloc_internal(raw_ptr[0..raw_len], raw_len, new_len, alignment)) |new_mem| {
+                const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_custom_data_len(self: *Self, memory: []u8, data_len: usize, new_len: usize) ?[]u8 {
+            if (self.realloc_internal(memory, data_len, new_len, null)) |new_mem| {
+                return new_mem[0..new_len];
+            }
+            return null;
+        }
+        pub inline fn realloc_bytes_with_align_custom_data_len(self: *Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
+            if (self.realloc_internal(memory, data_len, new_len, alignment)) |new_mem| {
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
+            }
+            return null;
+        }
+        pub fn realloc_types_custom_data_count(self: *Self, comptime T: type, memory: []T, data_count: usize, new_count: usize) ?[]T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const data_len = @sizeOf(T) * data_count;
+            const new_len = @sizeOf(T) * new_count;
+            if (self.realloc_internal(raw_ptr[0..raw_len], data_len, new_len, Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+                const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        pub fn realloc_types_with_align_custom_data_count(self: *Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, new_count: usize) ?[]align(alignment.toByteUnits()) T {
+            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
+            const raw_len: usize = @sizeOf(T) * memory.len;
+            const data_len = @sizeOf(T) * data_count;
+            const new_len = @sizeOf(T) * new_count;
+            if (self.realloc_internal(raw_ptr[0..raw_len], data_len, new_len, alignment)) |new_mem| {
+                const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
+                return t_ptr[0..new_count];
+            }
+            return null;
+        }
+        fn realloc_internal(self: *Self, memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment) ?[*]u8 {
+            if (new_len == 0) {
+                if (memory.len != 0) self.free_internal(memory, alignment);
+                return zero_length_ptr(alignment);
+            }
+            if (memory.len == 0) return self.alloc_internal(new_len, alignment);
+            if (self.resize_internal(memory, new_len, alignment)) return memory.ptr;
+            if (self.alloc_internal(new_len, alignment)) |new_mem| {
+                const copy_len = @min(@min(data_len, memory.len), new_len);
+                @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
+                self.free_internal(memory, alignment);
+                return new_mem;
+            }
+            return null;
         }
 
         pub inline fn create_with_align(self: *Self, comptime T: type, comptime alignment: Alignment) ?*align(alignment.toByteUnits()) T {
@@ -817,6 +903,11 @@ const LOG_FAIL_MSG = "failed to allocate memory for BucketSlabAlloc usage loggin
 
 inline fn stat_value_or_zero(value: usize) usize {
     return if (value == math.maxInt(usize)) 0 else value;
+}
+
+inline fn zero_length_ptr(alignment: ?Alignment) [*]u8 {
+    const real_align: usize = if (alignment) |a| a.toByteUnits() else 1;
+    return @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), real_align));
 }
 
 pub const GlobalDef = struct {
@@ -1107,6 +1198,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         pub fn alloc_raw(size: usize, alignment: ?Alignment) ?[*]u8 {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            if (size == 0) return zero_length_ptr(alignment);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
                 gbsa.stats.smallest_allocation_request_ever = @min(gbsa.stats.smallest_allocation_request_ever, size);
@@ -1322,6 +1414,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         pub fn free_raw(memory: []u8, alignment: ?Alignment) void {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            if (memory.len == 0) return;
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(memory.len, a) else bucket_index_from_size(memory.len);
             if (bucket_idx < NUM_BUCKETS) {
                 const prev_first_free = gbsa.first_free_block[bucket_idx];
@@ -1345,20 +1438,21 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
 
         pub inline fn realloc_bytes(memory: []u8, new_len: usize) ?[]u8 {
             if (realloc_raw(memory, memory.len, new_len, null)) |new_mem| {
-                return new_mem.ptr[0..new_len];
+                return new_mem[0..new_len];
             }
             return null;
         }
         pub inline fn realloc_bytes_with_align(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
             if (realloc_raw(memory, memory.len, new_len, alignment)) |new_mem| {
-                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem.ptr)))[0..new_len];
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
             }
             return null;
         }
         pub fn realloc_types(comptime T: type, memory: []T, new_count: usize) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
-            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+            const new_len = @sizeOf(T) * new_count;
+            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_len, Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
                 const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
                 return t_ptr[0..new_count];
             }
@@ -1367,7 +1461,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         pub fn realloc_types_with_align(comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
-            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_count * @sizeOf(T), alignment)) |new_mem| {
+            const new_len = @sizeOf(T) * new_count;
+            if (realloc_raw(raw_ptr[0..raw_len], raw_len, new_len, alignment)) |new_mem| {
                 const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
                 return t_ptr[0..new_count];
             }
@@ -1375,13 +1470,13 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         }
         pub inline fn realloc_bytes_custom_data_len(memory: []u8, data_len: usize, new_len: usize) ?[]u8 {
             if (realloc_raw(memory, data_len, new_len, null)) |new_mem| {
-                return new_mem.ptr[0..new_len];
+                return new_mem[0..new_len];
             }
             return null;
         }
         pub inline fn realloc_bytes_with_align_custom_data_len(comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, new_len: usize) ?[]align(alignment.toByteUnits()) u8 {
             if (realloc_raw(memory, data_len, new_len, alignment)) |new_mem| {
-                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem.ptr)))[0..new_len];
+                return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
             }
             return null;
         }
@@ -1389,7 +1484,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
-            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
+            const new_len = @sizeOf(T) * new_count;
+            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_len, Alignment.fromByteUnits(@alignOf(T)))) |new_mem| {
                 const t_ptr: [*]T = @ptrCast(@alignCast(new_mem));
                 return t_ptr[0..new_count];
             }
@@ -1399,23 +1495,24 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
-            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_count * @sizeOf(T), alignment)) |new_mem| {
+            const new_len = @sizeOf(T) * new_count;
+            if (realloc_raw(raw_ptr[0..raw_len], data_len, new_len, alignment)) |new_mem| {
                 const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
                 return t_ptr[0..new_count];
             }
             return null;
         }
+
         pub fn realloc_raw(memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment) ?[*]u8 {
-            if (memory.len == 0) return alloc_raw(new_len, alignment);
-            const real_align = if (alignment) |a| a.toByteUnits() else 1;
             if (new_len == 0) {
-                free_raw(memory, alignment);
-                return Utils.invalid_ptr_many_align(u8, real_align);
+                if (memory.len != 0) free_raw(memory, alignment);
+                return zero_length_ptr(alignment);
             }
+            if (memory.len == 0) return alloc_raw(new_len, alignment);
             if (resize_raw(memory, new_len, alignment)) return memory.ptr;
             if (alloc_raw(new_len, alignment)) |new_mem| {
-                const min_copy = @min(data_len, new_len);
-                @memcpy(new_mem[0..min_copy], memory[0..min_copy]);
+                const copy_len = @min(data_len, memory.len, new_len);
+                @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
                 free_raw(memory, alignment);
                 return new_mem;
             }
