@@ -276,6 +276,33 @@ pub const AllocSource = union(AllocSourceKind) {
     pub inline fn CAN_NEVER_ALLOCATE(comptime self: AllocSource) bool {
         return self == .NEVER_ALLOCATES;
     }
+
+    pub fn equals(comptime self: AllocSource, other: AllocSource) bool {
+        if (@backingInt(self) != @backingInt(other)) return false;
+        return switch (comptime self) {
+            .NEVER_ALLOCATES => true,
+            .PASSED_ALLOCATOR_INTERFACE => true,
+            .CACHED_ALLOCATOR_INTERFACE => true,
+            .COMPTIME_ALLOCATOR_INTERFACE_PTR => |SELF_PTR| SELF_PTR == other.COMPTIME_ALLOCATOR_INTERFACE_PTR,
+            .COMPILANT_GLOBAL_ALLOCATOR => |SELF_T| SELF_T == other.COMPILANT_GLOBAL_ALLOCATOR,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => true,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => true,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |SELF_INFO| (SELF_INFO.INSTANTIATED_ALLOC == other.COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR.INSTANTIATED_ALLOC) and (SELF_INFO.INSTANTIATED_ALLOC_PTR == other.COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR.INSTANTIATED_ALLOC_PTR),
+        };
+    }
+
+    pub fn debug_str(comptime self: AllocSource) []const u8 {
+        return @tagName(self) ++ switch (comptime self) {
+            .NEVER_ALLOCATES => "",
+            .PASSED_ALLOCATOR_INTERFACE => "",
+            .CACHED_ALLOCATOR_INTERFACE => "",
+            .COMPTIME_ALLOCATOR_INTERFACE_PTR => |SELF_PTR| std.fmt.comptimePrint("{*}", .{SELF_PTR}),
+            .COMPILANT_GLOBAL_ALLOCATOR => |SELF_T| SELF_T == std.fmt.comptimePrint("{s}", .{@typeName(SELF_T)}),
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => "",
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => "",
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |SELF_INFO| std.fmt.comptimePrint("{*}", .{@as(*SELF_INFO.INSTANTIATED_ALLOC, @ptrCast(@alignCast(SELF_INFO.INSTANTIATED_ALLOC_PTR)))}),
+        };
+    }
 };
 
 pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {

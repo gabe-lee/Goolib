@@ -428,17 +428,17 @@ pub fn ParametricStateSystem(
         var package_pool: PackagePool = .{};
         var dep_pool: DepPool = .{};
 
-        var update_queue: QueueList = QueueList.new();
+        var update_queue: QueueList = QueueList.new({});
         var update_queue_cursor: usize = 0;
 
-        var delete_queue: DeleteList = DeleteList.new();
+        var delete_queue: DeleteList = DeleteList.new({});
 
         var funcs: [NUM_FUNCTIONS]*const UpdateFunction = @splat(Utils.invalid_ptr_const(UpdateFunction));
         var funcs_init: [NUM_FUNCTIONS]bool = @splat(false);
-        var func_packages: [NUM_FUNCTIONS]FuncList = @splat(FuncList.new());
+        var func_packages: [NUM_FUNCTIONS]FuncList = @splat(FuncList.new({}));
         var func_packages_init: [NUM_FUNCTIONS]bool = @splat(false);
 
-        var metas: [NUM_CATEGORIES]MetaList = @splat(MetaList.new());
+        var metas: [NUM_CATEGORIES]MetaList = @splat(MetaList.new({}));
 
         var category_counts: [NUM_CATEGORIES]IndexType = @splat(0);
 

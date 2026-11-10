@@ -86,7 +86,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub const ORDERED_FIELD_NAMES = _ORDERED_FIELD_NAMES;
         pub const ORDERED_FIELD_TYPES = _ORDERED_FIELD_TYPES;
         pub const ORDERED_FIELD_OFFSETS = _ORDERED_FIELD_OFFSETS;
-        pub const ALLOC_MODE = DEF.ALLOC;
+        pub const ALLOC_MODE = DEF.ALLOC_SOURCE;
         pub const SPLIT = FIELD_LAYOUT == .SPLIT_FIELDS;
         pub const IS_STRUCT = Type.type_is_struct(ELEM);
         pub const IS_UNION = Type.type_is_union(ELEM);
@@ -221,8 +221,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //****************
         // INITIALIZE
         //****************
-        pub inline fn new() List {
-            return List{};
+        pub inline fn new(cached_alloc: CachedAlloc) List {
+            return List{ .alloc = .new(cached_alloc) };
         }
         pub inline fn from_slice_keep_data(data_slice: []ELEM) List {
             return List{
@@ -245,21 +245,18 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             };
         }
         pub fn allocate_new(init_cap: IDX, init_alloc: InitAlloc) ListAlloc {
-            var list = ListAlloc.new();
-            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            var list = ListAlloc.new(Alloc.init_to_cached_alloc(init_alloc));
             realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .ERRORS_ARE_UNREACHABLE);
             return list;
         }
         pub fn allocate_new_set_len(init_cap: IDX, init_alloc: InitAlloc) ListAlloc {
-            var list = ListAlloc.new();
-            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            var list = ListAlloc.new(Alloc.init_to_cached_alloc(init_alloc));
             realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .ERRORS_ARE_UNREACHABLE);
             list.set_len_unchecked(init_cap);
             return list;
         }
         pub fn allocate_new_might_error(init_cap: IDX, init_alloc: InitAlloc) AllocErr!ListAlloc {
-            var list = ListAlloc.new();
-            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            var list = ListAlloc.new(Alloc.init_to_cached_alloc(init_alloc));
             try realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .RETURN_ERRORS);
             return list;
         }

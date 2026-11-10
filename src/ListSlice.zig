@@ -269,7 +269,7 @@ pub const ListDefNoElem = struct {
             .FIELD_LAYOUT = self.FIELD_LAYOUT,
             .INDEX_LAYOUT = self.INDEX_LAYOUT,
             .OWNERSHIP = self.OWNERSHIP,
-            .ALLOC = self.ALLOC,
+            .ALLOC_SOURCE = self.ALLOC,
         };
     }
     pub fn with_ownership(comptime self: ListDefNoElem, comptime new_ownership: Root.ListSlice.Ownership) ListDefNoElem {
@@ -289,10 +289,10 @@ pub const ListDef = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: AllocSource = .PASSED_ALLOCATOR_INTERFACE,
+    ALLOC_SOURCE: AllocSource = .PASSED_ALLOCATOR_INTERFACE,
 
     pub inline fn List(comptime self: ListDef) type {
-        return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
+        return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC_SOURCE);
     }
 
     pub fn with_type(comptime self: ListDef, comptime new_type: type) ListDef {
@@ -302,7 +302,7 @@ pub const ListDef = struct {
             .FIELD_LAYOUT = self.FIELD_LAYOUT,
             .INDEX_LAYOUT = self.INDEX_LAYOUT,
             .OWNERSHIP = self.OWNERSHIP,
-            .ALLOC = self.ALLOC,
+            .ALLOC_SOURCE = self.ALLOC_SOURCE,
         };
     }
     pub fn with_ownership(comptime self: ListDef, comptime new_ownership: Root.ListSlice.Ownership) ListDef {
@@ -312,7 +312,7 @@ pub const ListDef = struct {
             .FIELD_LAYOUT = self.FIELD_LAYOUT,
             .INDEX_LAYOUT = self.INDEX_LAYOUT,
             .OWNERSHIP = new_ownership,
-            .ALLOC = self.ALLOC,
+            .ALLOC_SOURCE = self.ALLOC_SOURCE,
         };
     }
 };
@@ -417,7 +417,7 @@ pub fn ListFullDefinition(
             .FIELD_LAYOUT = FIELD_LAYOUT,
             .INDEX_LAYOUT = INDEX_LAYOUT,
             .OWNERSHIP = OWNERSHIP,
-            .ALLOC = ALLOC_SOURCE,
+            .ALLOC_SOURCE = ALLOC_SOURCE,
         };
 
         pub const Field = _FIELD_ENUM;
@@ -478,8 +478,8 @@ pub fn ListFullDefinition(
         //****************
         // INITIALIZE
         //****************
-        pub inline fn new() ListSelf {
-            return IMPL.new();
+        pub inline fn new(cached_alloc: CachedAlloc) ListSelf {
+            return IMPL.new(cached_alloc);
         }
         pub inline fn from_slice_keep_data(data_slice: []ELEM) ListSelf {
             return IMPL.from_slice_keep_data(data_slice);
