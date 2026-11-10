@@ -28,11 +28,11 @@ const RectPacker = Root.RectPacker;
 const Vec2 = Root.Vec2;
 const Rect2 = Root.Rect2;
 
-const PackerF32 = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
-const PackerU32 = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
-const PackerU8 = RectPacker.RowPacker(.{ .SIZE_TYPE = u8, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC = .CACHED_ALLOC });
-const PackerF32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC = .CACHED_ALLOC });
-const PackerU32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC = .CACHED_ALLOC });
+const PackerF32 = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
+const PackerU32 = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
+const PackerU8 = RectPacker.RowPacker(.{ .SIZE_TYPE = u8, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
+const PackerF32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
+const PackerU32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
 
 const VecF = Vec2.define_vec2_type(f32);
 const RectF = Rect2.define_rect2_type(f32);
@@ -92,7 +92,7 @@ const AtlasF32Manual = RectPacker.RowPackedAtlas(
     hashI32,
     equalI32,
     .{},
-    .{ .SIZE_TYPE = f32, .IDX = u16, .ALLOC = .MANUAL_ALLOC },
+    .{ .SIZE_TYPE = f32, .IDX = u16, .ALLOC = .PASSED_ALLOCATOR_INTERFACE },
 );
 
 test "RowPacker -> shelf layout" {

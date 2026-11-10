@@ -705,8 +705,8 @@ test "ListSlice -> Traverser" {
         buf: [15]u8 = undefined,
         idx: u8 = 0,
     };
-    const TravList = ListFullDefinition(Node, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
-    const TravListDual = ListFullDefinition(NodeDual, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
+    const TravList = ListFullDefinition(Node, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+    const TravListDual = ListFullDefinition(NodeDual, u8, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
     const Trav = TravList.ForwardLinkedTraverser(&.{TravList.Field.first_child}, TravList.Field.next_sibling, .MAX_STACK_LEN_NOT_IMPORTANT);
     const TravDual = TravListDual.ForwardLinkedTraverser(&.{ TravListDual.Field.first_child_lower, TravListDual.Field.first_child_upper }, TravListDual.Field.next_sibling, .MAX_STACK_LEN_NOT_IMPORTANT);
     const PROTO = struct {
@@ -1173,7 +1173,7 @@ test "ListSlice -> allocated and cached alloc" {
     try Test.expect_equal_src(list.get_cap(), 12, @src(), "resize exact might error", .{});
     list.free(alloc);
 
-    const LC = ListFullDefinition(u32, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .CACHED_ALLOC);
+    const LC = ListFullDefinition(u32, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .CACHED_ALLOCATOR_INTERFACE);
     var cached = LC.allocate_new(2, alloc);
     cached.append_one(1, {});
     cached.append_one(2, {});

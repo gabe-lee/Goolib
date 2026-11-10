@@ -41,6 +41,9 @@
 // const Test = Root.Testing;
 // const AllocatorModule = Root.Allocator;
 // const ListSlice = Root.ListSlice;
+// const SourceLocation = std.builtin.SourceLocation;
+// const AllocSource = AllocatorModule.AllocSource;
+// const AllocAdapter = AllocatorModule.AllocatorAdapter;
 
 // const dummy_alloc = AllocatorModule.Dummy.allocator_panic_free_noop;
 // const assert_with_reason = Assert.assert_with_reason;
@@ -218,21 +221,18 @@
 //         };
 //     }
 // };
-// const OBSERVABLE_GENERIC_ID = "GOOLIB_OBSERVABLE";
-// pub fn Observable(comptime TYPE_SET: TypeSet, comptime ACCESS: AccessFuncs(TYPE_SET), comptime NOTIFICATION: type) type {
+// // const OBSERVABLE_GENERIC_ID = "GOOLIB_OBSERVABLE";
+// pub fn Observable(comptime T: type, comptime NOTIFICATION: type, comptime ALLOC_SOURCE: AllocSource) type {
+//     const GEN_ID_ = Utils.src_loc_hash(@src());
 //     return struct {
 //         const Self = @This();
 //         const ObserverIface = Observer(NOTIFICATION);
-//         const ObserverList = ListSlice.ListFullDefinition(ObserverIface, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-//         const T_PRIVATE = TYPE_SET.PRIVATE;
-//         const T_PUBLIC = TYPE_SET.PUBLIC;
-//         pub const TYPE_ID_GENERIC = Type.get_string_id("GOOLIB_OBSERVABLE");
-//         pub const TYPE_ID = Type.get_type_id(Self);
+//         const ObserverList = ListSlice.ListFullDefinition(ObserverIface, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 
-//         val: T_PRIVATE = undefined,
+//         val: T = undefined,
 //         observers: ObserverList = .{},
 
-//         pub inline fn new(initial_val: T_PUBLIC) Self {
+//         pub inline fn new(initial_val: T) Self {
 //             var self = Self{};
 //             self.set_no_notify(initial_val);
 //             return self;

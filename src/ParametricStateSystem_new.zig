@@ -571,8 +571,8 @@
 //             return key.to_const();
 //         }
 
-//         const QueueList = List(UpdatePackage, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-//         const DeleteList = List(OpaqueVal, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+//         const QueueList = List(UpdatePackage, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+//         const DeleteList = List(OpaqueVal, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 
 //         inline fn assert_initialized() void {
 //             Assert._with_reason(initialized, @src(), "ParametricStateSystem memory has not been initialized (call `init` first)", .{});

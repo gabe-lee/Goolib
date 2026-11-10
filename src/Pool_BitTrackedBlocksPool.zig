@@ -30,7 +30,7 @@ const Utils = Root.Utils;
 const Growth = Root.CommonTypes.GrowthModel;
 const RwLock = std.Io.RwLock;
 const Io = std.Io;
-const AllocSourceMode = Root.CommonTypes.AllocSourceMode;
+const AllocSourceMode = Root.Allocator.AllocSource;
 const ListSliceMoule = Root.ListSlice;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -55,7 +55,7 @@ pub const PoolDef = struct {
     /// Must be a positive multiple of `@bitSizeOf(STATE_UINT)` so that every state
     /// bit maps to a real slot.
     SLOTS_PER_BLOCK: comptime_int = 64,
-    ALLOC_MODE: AllocSourceMode = .MANUAL_ALLOC,
+    ALLOC_MODE: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
     BACK_POINT_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
 };
 
@@ -188,7 +188,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         const VALS_ALIGN = VALS_ALIGN_;
         const VALS_ARRAY_PTR_MASK = ~(VALS_ALIGN - 1);
         const BACK_STRAT = DEF.BACK_POINT_STRATEGY;
-        const DataBlockSlice = ListSliceMoule.ListFullDefinition(*DataBlock, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
+        const DataBlockSlice = ListSliceMoule.ListFullDefinition(*DataBlock, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 
         const DataBlock = struct {
             vals: [DATA_BLOCK_SLOT_LENGTH]SlotContainer align(VALS_ALIGN) = undefined,

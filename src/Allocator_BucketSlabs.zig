@@ -158,8 +158,8 @@ pub const BucketDef = struct {
     BUCKET_SIZE: PowerOf2,
 };
 
-const BucketSlice = List(BucketDef, usize, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
-const SlabList = List([]u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+const BucketSlice = List(BucketDef, usize, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .PASSED_ALLOCATOR_INTERFACE);
+const SlabList = List([]u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 
 fn bucket_greater(slice: BucketSlice, idx_a: usize, val_b: BucketDef, _: void, comptime _: void) bool {
     return slice.get(idx_a).BUCKET_SIZE.greater_than(val_b.BUCKET_SIZE);

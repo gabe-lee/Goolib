@@ -45,6 +45,8 @@ const Growth = Common.GrowthModel;
 const FuncParamType = Common.FuncParamType;
 const ErrorBehavior = Common.ErrorBehavior;
 const AllocErr = Utils.Alloc.AllocErr;
+const AllocSource = Root.Allocator.AllocSource;
+const AllocAdapter = Root.Allocator.AllocatorAdapter;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
@@ -210,10 +212,10 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub const IdxElemPair = struct { IDX, ELEM };
         pub const NULL_IDX = math.maxInt(IDX);
         pub const MAX_LEN = math.maxInt(IDX);
-        const CachedAlloc = ALLOC_MODE.CachedAllocIf(IS_ALLOCATED);
-        const FuncAlloc = ALLOC_MODE.FuncParamAllocIf(IS_ALLOCATED);
-        const CACHED_ALLOC_DEFAULT = ALLOC_MODE.CACHED_ALLOC_DEFAULT_IF(IS_ALLOCATED);
-        const no_func_alloc = ALLOC_MODE.no_func_alloc_if(IS_ALLOCATED);
+        pub const PassedAlloc = List.PassedAlloc;
+        pub const NilPassedAlloc = List.NilPassedAlloc;
+        pub const CachedAlloc = List.CachedAlloc;
+        pub const Alloc = List.Alloc;
 
         //****************
         // INITIALIZE
@@ -1903,26 +1905,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //**************
         // ALLOC/REALLOC
         //**************
-        fn realloc_internal(self: *List, new_exact_cap: IDX, alloc_fn: FuncAlloc, comptime ERRORS: ErrorBehavior) ERRORS.PayloadVoid(Utils.Alloc.AllocErr) {
+        fn realloc_internal(self: *List, new_exact_cap: IDX, passed_alloc: PassedAlloc, comptime ERRORS: ErrorBehavior) ERRORS.PayloadVoid(Utils.Alloc.AllocErr) {
             comptime assert_owned_allocated(@src());
-            const alloc = ALLOC_MODE.get_alloc(alloc_fn, self.cached_alloc);
+            // const alloc = ALLOC_MODE.get_alloc(alloc_fn, self.cached_alloc);
             self.data_len = @min(self.data_len, new_exact_cap);
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    if (self.data_len > 0) {
-                        if (alloc.remap(self.root_ptr[0..self.root_cap], new_exact_cap)) |new_mem| {
-                            self.root_ptr = new_mem.ptr;
-                            self.root_cap = @intCast(new_mem.len);
-                            return;
-                        }
-                    }
-                    const new_mem = alloc.alloc(ELEM, new_exact_cap) catch |e| return ERRORS.handle(@src(), e);
-                    if (self.data_len > 0) {
-                        @memcpy(new_mem[0..self.data_len], self.root_ptr[0..self.data_len]);
-                    }
-                    if (self.root_cap > 0) {
-                        alloc.free(self.root_ptr[0..self.root_cap]);
-                    }
+                    const new_mem = self.alloc.realloc_types_custom_data_count(ELEM, self.root_ptr[0..self.root_cap], @intCast(self.data_len), @intCast(new_exact_cap), passed_alloc) orelse return ERRORS.handle(@src(), AllocErr.OutOfMemory);
                     self.root_ptr = new_mem.ptr;
                     self.root_cap = @intCast(new_mem.len);
                 },
@@ -1931,7 +1920,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     const new_byte_cap = end_stride() * new_exact_cap;
                     // remap would require doing a @memmove on each field region to correctly reposition them,
                     // so might as well just alloc and go for the potentially faster @memcpy
-                    const new_mem = alloc.alignedAlloc(u8, .fromByteUnits(@alignOf(ELEM)), new_byte_cap) catch |e| return ERRORS.handle(@src(), e);
+                    const new_mem = self.alloc.alloc_bytes_with_align(new_byte_cap, .fromByteUnits(@alignOf(ELEM)), passed_alloc) orelse return ERRORS.handle(@src(), AllocErr.OutOfMemory);
                     if (self.data_len > 0) {
                         inline for (ORDERED_FIELD_OFFSETS[0..NUM_FIELDS], ORDERED_FIELD_TYPES[0..]) |offset, t| {
                             const field_start_offset_old = offset * self.root_cap;
@@ -1942,70 +1931,70 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         }
                     }
                     if (self.root_cap > 0) {
-                        alloc.free(self.root_ptr[0..old_byte_cap]);
+                        self.alloc.free_bytes_with_align(.fromByteUnits(@alignOf(ELEM)), self.root_ptr[0..old_byte_cap], passed_alloc);
                     }
                     self.root_ptr = @alignCast(new_mem.ptr);
                     self.root_cap = new_exact_cap;
                 },
             }
         }
-        pub fn grow(self: *List, capacity: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub fn grow(self: *List, capacity: IDX, growth: Growth, alloc: PassedAlloc) void {
             const adjusted_capacity = growth.calc(capacity);
             realloc_internal(self, adjusted_capacity, alloc, .ERRORS_ARE_UNREACHABLE);
         }
-        pub fn grow_capacity_if_needed(self: *List, need_capacity: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub fn grow_capacity_if_needed(self: *List, need_capacity: IDX, growth: Growth, alloc: PassedAlloc) void {
             if (self.root_cap < need_capacity) {
                 const adjusted_need_capacity = growth.calc(need_capacity);
                 realloc_internal(self, adjusted_need_capacity, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
-        pub fn grow_capacity_if_needed_for_n_more_elems(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub fn grow_capacity_if_needed_for_n_more_elems(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             const need_cap = self.data_len + count;
             self.grow_capacity_if_needed(need_cap, growth, alloc);
         }
-        pub fn shrink_capacity_to_at_most(self: *List, new_max_cap: IDX, alloc: FuncAlloc) void {
+        pub fn shrink_capacity_to_at_most(self: *List, new_max_cap: IDX, alloc: PassedAlloc) void {
             if (self.root_cap > new_max_cap) {
                 realloc_internal(self, new_max_cap, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
-        pub fn shrink_capacity_reserve_at_most_n_free_space(self: *List, at_most_n_free_space: IDX, alloc: FuncAlloc) void {
+        pub fn shrink_capacity_reserve_at_most_n_free_space(self: *List, at_most_n_free_space: IDX, alloc: PassedAlloc) void {
             const curr_free_space = self.root_cap - self.data_len;
             if (curr_free_space > at_most_n_free_space) {
                 const new_cap = self.data_len + at_most_n_free_space;
                 realloc_internal(self, new_cap, alloc, .ERRORS_ARE_UNREACHABLE);
             }
         }
-        pub fn resize_capacity_exact(self: *List, exact_cap: IDX, alloc: FuncAlloc) void {
+        pub fn resize_capacity_exact(self: *List, exact_cap: IDX, alloc: PassedAlloc) void {
             if (self.root_cap == exact_cap) return;
             realloc_internal(self, exact_cap, alloc, .ERRORS_ARE_UNREACHABLE);
         }
-        pub fn grow_capacity_if_needed_might_error(self: *List, need_capacity: IDX, growth: Growth, alloc: FuncAlloc) AllocErr!void {
+        pub fn grow_capacity_if_needed_might_error(self: *List, need_capacity: IDX, growth: Growth, alloc: PassedAlloc) AllocErr!void {
             if (self.root_cap < need_capacity) {
                 const adjusted_need_capacity = growth.calc(need_capacity);
                 return realloc_internal(self, adjusted_need_capacity, alloc, .RETURN_ERRORS);
             }
         }
-        pub fn grow_capacity_if_needed_for_n_more_elems_might_error(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) AllocErr!void {
+        pub fn grow_capacity_if_needed_for_n_more_elems_might_error(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) AllocErr!void {
             const need_cap = self.data_len + count;
             return self.grow_capacity_if_needed_might_error(need_cap, growth, alloc);
         }
-        pub fn shrink_capacity_to_at_most_might_error(self: *List, new_max_cap: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub fn shrink_capacity_to_at_most_might_error(self: *List, new_max_cap: IDX, alloc: PassedAlloc) AllocErr!void {
             if (self.root_cap > new_max_cap) {
                 return realloc_internal(self, new_max_cap, alloc, .RETURN_ERRORS);
             }
         }
-        pub fn shrink_capacity_reserve_at_most_n_free_space_might_error(self: *List, at_most_n_free_space: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub fn shrink_capacity_reserve_at_most_n_free_space_might_error(self: *List, at_most_n_free_space: IDX, alloc: PassedAlloc) AllocErr!void {
             const curr_free_space = self.root_cap - self.data_len;
             if (curr_free_space > at_most_n_free_space) {
                 const new_cap = self.data_len + at_most_n_free_space;
                 return realloc_internal(self, new_cap, alloc, .RETURN_ERRORS);
             }
         }
-        pub fn resize_capacity_exact_might_error(self: *List, exact_cap: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub fn resize_capacity_exact_might_error(self: *List, exact_cap: IDX, alloc: PassedAlloc) AllocErr!void {
             if (self.root_cap == exact_cap) return;
             return realloc_internal(self, exact_cap, alloc, .RETURN_ERRORS);
         }
-        fn free_internal(self: *List, alloc_fn: FuncAlloc) void {
+        fn free_internal(self: *List, alloc_fn: PassedAlloc) void {
             const alloc = ALLOC_MODE.get_alloc(alloc_fn, self.cached_alloc);
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
@@ -2023,24 +2012,24 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 },
             }
         }
-        pub fn free(self: *List, alloc: FuncAlloc) void {
+        pub fn free(self: *List, alloc: PassedAlloc) void {
             assert_owned_allocated(@src());
             assert_with_reason(self.root_cap > 0, @src(), "cannot free zero-capacity memory", .{});
             free_internal(self, alloc);
         }
-        pub fn free_if_non_zero(self: *List, alloc: FuncAlloc) void {
+        pub fn free_if_non_zero(self: *List, alloc: PassedAlloc) void {
             assert_owned_allocated(@src());
             if (self.root_cap > 0) {
                 free_internal(self, alloc);
             }
         }
-        pub fn free_if_owned(self: *List, alloc: FuncAlloc) void {
+        pub fn free_if_owned(self: *List, alloc: PassedAlloc) void {
             if (comptime IS_ALLOCATED) {
                 assert_with_reason(self.root_cap > 0, @src(), "cannot free zero-capacity memory", .{});
                 free_internal(self, alloc);
             }
         }
-        pub fn free_if_owned_and_non_zero(self: *List, alloc: FuncAlloc) void {
+        pub fn free_if_owned_and_non_zero(self: *List, alloc: PassedAlloc) void {
             if (comptime IS_ALLOCATED) {
                 if (self.root_cap > 0) {
                     free_internal(self, alloc);
@@ -2182,7 +2171,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //************s
         // APPEND ONE
         //************
-        fn append_idxs_internal(self: *List, n: IDX, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth) IDX {
+        fn append_idxs_internal(self: *List, n: IDX, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth) IDX {
             switch (ALLOC) {
                 .ASSUME_CAP => {
                     assert_with_reason(self.data_len + n <= self.root_cap, @src(), "appending {d} slots would exceed capacity, len = {d}, cap = {d}", .{ n, self.data_len, self.root_cap });
@@ -2195,7 +2184,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             self.data_len += n;
             return first_idx;
         }
-        fn append_one_slot_internal(self: *List, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
+        fn append_one_slot_internal(self: *List, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
             var first_new_idx: IDX = undefined;
             if (comptime IS_REFERENCE) {
                 first_new_idx = self.data_len;
@@ -2209,102 +2198,102 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(first_new_idx) else undefined, first_new_idx);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr(self: *List) ElemPtr {
-            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_one_slot_get_ptr(self: *List, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_slot_get_ptr(self: *List, alloc: PassedAlloc) ElemPtr {
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr_idx(self: *List) struct { ElemPtr, IDX } {
-            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_one_slot_with_growth_get_ptr_idx(self: *List, growth: Growth, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_slot_with_growth_get_ptr_idx(self: *List, growth: Growth, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_one_slot_get_ptr_idx(self: *List, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_slot_get_ptr_idx(self: *List, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_one_slot_assume_cap_get_idx(self: *List) IDX {
-            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
-        pub inline fn append_one_slot_with_growth_get_idx(self: *List, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_slot_with_growth_get_idx(self: *List, growth: Growth, alloc: PassedAlloc) IDX {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
         }
-        pub inline fn append_one_slot_get_idx(self: *List, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_slot_get_idx(self: *List, alloc: PassedAlloc) IDX {
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_one_slot_assume_cap(self: *List) void {
-            return append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn append_one_slot_with_growth(self: *List, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_one_slot_with_growth(self: *List, growth: Growth, alloc: PassedAlloc) void {
             return append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn append_one_slot(self: *List, alloc: FuncAlloc) void {
+        pub inline fn append_one_slot(self: *List, alloc: PassedAlloc) void {
             return append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn append_one_assume_cap_get_ptr(self: *List, val: ELEM) ElemPtr {
-            const elem_ptr = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn append_one_with_growth_get_ptr(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub fn append_one_with_growth_get_ptr(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn append_one_get_ptr(self: *List, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub fn append_one_get_ptr(self: *List, val: ELEM, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
         pub fn append_one_assume_cap_get_ptr_idx(self: *List, val: ELEM) struct { ElemPtr, IDX } {
-            const elem_ptr, const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            const elem_ptr, const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
             assign_val_to_elem_ptr(elem_ptr, val);
             return .{ elem_ptr, slot_idx };
         }
-        pub fn append_one_with_growth_get_ptr_idx(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub fn append_one_with_growth_get_ptr_idx(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             const elem_ptr, const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
             assign_val_to_elem_ptr(elem_ptr, val);
             return .{ elem_ptr, slot_idx };
         }
-        pub fn append_one_get_ptr_idx(self: *List, val: ELEM, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub fn append_one_get_ptr_idx(self: *List, val: ELEM, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             const elem_ptr, const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
             assign_val_to_elem_ptr(elem_ptr, val);
             return .{ elem_ptr, slot_idx };
         }
         pub fn append_one_assume_cap_get_idx(self: *List, val: ELEM) IDX {
-            const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
             return slot_idx;
         }
-        pub fn append_one_with_growth_get_idx(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) IDX {
+        pub fn append_one_with_growth_get_idx(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) IDX {
             const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
             return slot_idx;
         }
-        pub fn append_one_get_idx(self: *List, val: ELEM, alloc: FuncAlloc) IDX {
+        pub fn append_one_get_idx(self: *List, val: ELEM, alloc: PassedAlloc) IDX {
             const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
             return slot_idx;
         }
         pub fn append_one_assume_cap(self: *List, val: ELEM) void {
-            const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            const slot_idx = append_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
-        pub fn append_one_with_growth(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub fn append_one_with_growth(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
-        pub fn append_one(self: *List, val: ELEM, alloc: FuncAlloc) void {
+        pub fn append_one(self: *List, val: ELEM, alloc: PassedAlloc) void {
             const slot_idx = append_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
         //*************
         // APPEND MANY
         //*************
-        fn append_many_slots_internal(self: *List, count: IDX, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn append_many_slots_internal(self: *List, count: IDX, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             var first_new_idx: IDX = undefined;
             if (comptime IS_REFERENCE) {
                 first_new_idx = self.data_len;
@@ -2318,42 +2307,42 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(first_new_idx, self.data_len) else undefined, first_new_idx);
         }
         pub inline fn append_many_slots_assume_cap_get_slice(self: *List, count: IDX) Slice {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_many_slots_get_slice(self: *List, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_slots_get_slice(self: *List, count: IDX, alloc: PassedAlloc) Slice {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_slots_assume_cap_get_slice_idx(self: *List, count: IDX) struct { Slice, IDX } {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_many_slots_with_growth_get_slice_idx(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_slots_with_growth_get_slice_idx(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) struct { Slice, IDX } {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_many_slots_get_slice_idx(self: *List, count: IDX, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_slots_get_slice_idx(self: *List, count: IDX, alloc: PassedAlloc) struct { Slice, IDX } {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_slots_assume_cap_get_idx(self: *List, count: IDX) IDX {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
-        pub inline fn append_many_slots_with_growth_get_idx(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_slots_with_growth_get_idx(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) IDX {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
         }
-        pub inline fn append_many_slots_get_idx(self: *List, count: IDX, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_slots_get_idx(self: *List, count: IDX, alloc: PassedAlloc) IDX {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_many_slots_assume_cap(self: *List, count: IDX) void {
-            return append_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn append_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn append_many_slots(self: *List, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn append_many_slots(self: *List, count: IDX, alloc: PassedAlloc) void {
             return append_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
-        fn append_many_internal(self: *List, vals_: anytype, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn append_many_internal(self: *List, vals_: anytype, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             const vals = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(vals_);
             const vals_len = vals.get_len();
             if (comptime ALLOC == .REALLOC and Assert.SHOULD_ASSERT) {
@@ -2366,46 +2355,46 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) appended_slice else undefined, first_new_idx);
         }
         pub inline fn append_many_assume_cap_get_slice(self: *List, vals_: anytype) Slice {
-            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return append_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn append_many_get_slice(self: *List, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_get_slice(self: *List, vals_: anytype, alloc: PassedAlloc) Slice {
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn append_many_assume_cap_get_ptr_idx(self: *List, vals_: anytype) struct { Slice, IDX } {
-            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
+            return append_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_many_with_growth_get_ptr_idx(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_with_growth_get_ptr_idx(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) struct { Slice, IDX } {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE_IDX);
         }
-        pub inline fn append_many_get_ptr_idx(self: *List, vals_: anytype, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_get_ptr_idx(self: *List, vals_: anytype, alloc: PassedAlloc) struct { Slice, IDX } {
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE_IDX);
         }
         pub inline fn append_many_assume_cap_get_idx(self: *List, vals_: anytype) IDX {
-            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            return append_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
         }
-        pub inline fn append_many_with_growth_get_idx(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_with_growth_get_idx(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) IDX {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
         }
-        pub inline fn append_many_get_idx(self: *List, vals_: anytype, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_get_idx(self: *List, vals_: anytype, alloc: PassedAlloc) IDX {
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
         }
         pub inline fn append_many_assume_cap(self: *List, vals_: anytype) void {
-            return append_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return append_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn append_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return append_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn append_many(self: *List, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn append_many(self: *List, vals_: anytype, alloc: PassedAlloc) void {
             return append_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
 
         //*************
         // PREPEND ONE
         //*************
-        fn prepend_one_slot_internal(self: *List, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
+        fn prepend_one_slot_internal(self: *List, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
             if (comptime IS_REFERENCE) {
                 self.decr_slice_start(1);
             } else {
@@ -2419,54 +2408,54 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(ElemPtr, IDX, if (comptime RETURN.returns_ptr()) self.get_ptr(0) else undefined, 0);
         }
         pub inline fn prepend_one_slot_assume_cap_get_ptr(self: *List) ElemPtr {
-            return prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_slot_with_growth_get_ptr(self: *List, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_one_slot_get_ptr(self: *List, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_slot_get_ptr(self: *List, alloc: PassedAlloc) ElemPtr {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_one_slot_assume_cap(self: *List) void {
-            return prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn prepend_one_slot_with_growth(self: *List, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_one_slot_with_growth(self: *List, growth: Growth, alloc: PassedAlloc) void {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn prepend_one_slot(self: *List, alloc: FuncAlloc) void {
+        pub inline fn prepend_one_slot(self: *List, alloc: PassedAlloc) void {
             return prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn prepend_one_assume_cap_get_ptr(self: *List, val: ELEM) ElemPtr {
-            const elem_ptr = prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = prepend_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn prepend_one_with_growth_get_ptr(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub fn prepend_one_with_growth_get_ptr(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn prepend_one_get_ptr(self: *List, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub fn prepend_one_get_ptr(self: *List, val: ELEM, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
         pub fn prepend_one_assume_cap(self: *List, val: ELEM) void {
-            prepend_one_slot_internal(self, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            prepend_one_slot_internal(self, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
             set_true_idx(self.*, true_idx(self.*, 0), val);
         }
-        pub fn prepend_one_with_growth(self: *List, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub fn prepend_one_with_growth(self: *List, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             prepend_one_slot_internal(self, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
             set_true_idx(self.*, true_idx(self.*, 0), val);
         }
-        pub fn prepend_one(self: *List, val: ELEM, alloc: FuncAlloc) void {
+        pub fn prepend_one(self: *List, val: ELEM, alloc: PassedAlloc) void {
             prepend_one_slot_internal(self, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
             set_true_idx(self.*, true_idx(self.*, 0), val);
         }
         //**************
         // PREPEND MANY
         //**************
-        fn prepend_many_slots_internal(self: *List, count: IDX, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn prepend_many_slots_internal(self: *List, count: IDX, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             if (count > 0) {
                 if (comptime IS_REFERENCE) {
                     insert_many_slots_internal(self, 0, count, ALLOC, alloc, GROWTH_MODE, growth, RETURN);
@@ -2482,24 +2471,24 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) self.slice(0, count) else undefined, 0);
         }
         pub inline fn prepend_many_slots_assume_cap_get_slice(self: *List, count: IDX) Slice {
-            return prepend_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_slots_with_growth_get_slice(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_many_slots_get_slice(self: *List, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_slots_get_slice(self: *List, count: IDX, alloc: PassedAlloc) Slice {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_slots_assume_cap(self: *List, count: IDX) void {
-            return prepend_many_slots_internal(self, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_many_slots_internal(self, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn prepend_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_slots_with_growth(self: *List, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn prepend_many_slots(self: *List, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_slots(self: *List, count: IDX, alloc: PassedAlloc) void {
             return prepend_many_slots_internal(self, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
-        fn prepend_many_internal(self: *List, vals_: anytype, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn prepend_many_internal(self: *List, vals_: anytype, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             const vals = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(vals_);
             const vals_len = vals.get_len();
             if (comptime ALLOC == .REALLOC and Assert.SHOULD_ASSERT) {
@@ -2512,27 +2501,27 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, if (comptime RETURN.returns_ptr()) prepended_slice else undefined, 0);
         }
         pub inline fn prepend_many_assume_cap_get_slice(self: *List, vals_: anytype) Slice {
-            return prepend_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return prepend_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_with_growth_get_slice(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn prepend_many_get_slice(self: *List, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_get_slice(self: *List, vals_: anytype, alloc: PassedAlloc) Slice {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn prepend_many_assume_cap(self: *List, vals_: anytype) void {
-            return prepend_many_internal(self, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return prepend_many_internal(self, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn prepend_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_with_growth(self: *List, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn prepend_many(self: *List, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn prepend_many(self: *List, vals_: anytype, alloc: PassedAlloc) void {
             return prepend_many_internal(self, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         //**************
         // INSERT ONE
         //**************
-        fn insert_one_slot_internal(self: *List, idx: IDX, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
+        fn insert_one_slot_internal(self: *List, idx: IDX, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(ElemPtr, IDX) {
             if (idx == self.data_len) {
                 return append_one_slot_internal(self, ALLOC, alloc, GROWTH_MODE, growth, RETURN);
             } else if (IS_OWNED and idx == 0) {
@@ -2556,54 +2545,54 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             }
         }
         pub inline fn insert_one_slot_assume_cap_get_ptr(self: *List, idx: IDX) ElemPtr {
-            return insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_one_slot_internal(self, idx, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_one_slot_with_growth_get_ptr(self: *List, idx: IDX, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_slot_with_growth_get_ptr(self: *List, idx: IDX, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_one_slot_get_ptr(self: *List, idx: IDX, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_slot_get_ptr(self: *List, idx: IDX, alloc: PassedAlloc) ElemPtr {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_one_slot_assume_cap(self: *List, idx: IDX) void {
-            return insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_one_slot_internal(self, idx, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn insert_one_slot_with_growth(self: *List, idx: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_one_slot_with_growth(self: *List, idx: IDX, growth: Growth, alloc: PassedAlloc) void {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn insert_one_slot(self: *List, idx: IDX, alloc: FuncAlloc) void {
+        pub inline fn insert_one_slot(self: *List, idx: IDX, alloc: PassedAlloc) void {
             return insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         pub fn insert_one_assume_cap_get_ptr(self: *List, idx: IDX, val: ELEM) ElemPtr {
-            const elem_ptr = insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            const elem_ptr = insert_one_slot_internal(self, idx, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn insert_one_with_growth_get_ptr(self: *List, idx: IDX, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub fn insert_one_with_growth_get_ptr(self: *List, idx: IDX, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
-        pub fn insert_one_get_ptr(self: *List, idx: IDX, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub fn insert_one_get_ptr(self: *List, idx: IDX, val: ELEM, alloc: PassedAlloc) ElemPtr {
             const elem_ptr = insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
             assign_val_to_elem_ptr(elem_ptr, val);
             return elem_ptr;
         }
         pub fn insert_one_assume_cap(self: *List, idx: IDX, val: ELEM) void {
-            const slot_idx = insert_one_slot_internal(self, idx, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
+            const slot_idx = insert_one_slot_internal(self, idx, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
-        pub fn insert_one_with_growth(self: *List, idx: IDX, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub fn insert_one_with_growth(self: *List, idx: IDX, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             const slot_idx = insert_one_slot_internal(self, idx, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
-        pub fn insert_one(self: *List, idx: IDX, val: ELEM, alloc: FuncAlloc) void {
+        pub fn insert_one(self: *List, idx: IDX, val: ELEM, alloc: PassedAlloc) void {
             const slot_idx = insert_one_slot_internal(self, idx, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_IDX);
             set_true_idx(self.*, true_idx(self.*, slot_idx), val);
         }
         //**************
         // INSERT MANY
         //**************
-        fn insert_many_slots_internal(self: *List, idx: IDX, count: IDX, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn insert_many_slots_internal(self: *List, idx: IDX, count: IDX, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             if (idx == self.data_len) {
                 return append_many_slots_internal(self, count, ALLOC, alloc, GROWTH_MODE, growth, RETURN);
             } else if (IS_OWNED and idx == 0) {
@@ -2628,24 +2617,24 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             }
         }
         pub inline fn insert_many_slots_assume_cap_get_slice(self: *List, idx: IDX, count: IDX) Slice {
-            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_many_slots_with_growth_get_slice(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_slots_with_growth_get_slice(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_many_slots_get_slice(self: *List, idx: IDX, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_slots_get_slice(self: *List, idx: IDX, count: IDX, alloc: PassedAlloc) Slice {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_slots_assume_cap(self: *List, idx: IDX, count: IDX) void {
-            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, no_func_alloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_many_slots_internal(self, idx, count, .ASSUME_CAP, NilPassedAlloc, .DEFAULT_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn insert_many_slots_with_growth(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_many_slots_with_growth(self: *List, idx: IDX, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn insert_many_slots(self: *List, idx: IDX, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn insert_many_slots(self: *List, idx: IDX, count: IDX, alloc: PassedAlloc) void {
             return insert_many_slots_internal(self, idx, count, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
-        fn insert_many_internal(self: *List, idx: IDX, vals_: anytype, comptime ALLOC: AllocMode, alloc: FuncAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
+        fn insert_many_internal(self: *List, idx: IDX, vals_: anytype, comptime ALLOC: AllocMode, alloc: PassedAlloc, comptime GROWTH_MODE: GrowthMode, growth: Growth, comptime RETURN: ReturnMode) RETURN.RetType(Slice, IDX) {
             const vals = coerce_anytype_to_list_or_list_ptr_with_same_elem_type(vals_);
             const vals_len = vals.get_len();
             if (comptime ALLOC == .REALLOC and Assert.SHOULD_ASSERT) {
@@ -2658,21 +2647,21 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return RETURN.ret_val(Slice, IDX, inserted_slice, idx);
         }
         pub inline fn insert_many_assume_cap_get_ptr(self: *List, idx: IDX, vals_: anytype) Slice {
-            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
+            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_many_with_growth_get_ptr(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_with_growth_get_ptr(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_PTR_OR_SLICE);
         }
-        pub inline fn insert_many_get_ptr(self: *List, idx: IDX, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_get_ptr(self: *List, idx: IDX, vals_: anytype, alloc: PassedAlloc) Slice {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_PTR_OR_SLICE);
         }
         pub inline fn insert_many_assume_cap(self: *List, idx: IDX, vals_: anytype) void {
-            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, no_func_alloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
+            return insert_many_internal(self, idx, vals_, .ASSUME_CAP, NilPassedAlloc, .CUSTOM_GROWTH, .GROW_EXACT_NEEDED, .RETURN_VOID);
         }
-        pub inline fn insert_many_with_growth(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_many_with_growth(self: *List, idx: IDX, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .CUSTOM_GROWTH, growth, .RETURN_VOID);
         }
-        pub inline fn insert_many(self: *List, idx: IDX, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn insert_many(self: *List, idx: IDX, vals_: anytype, alloc: PassedAlloc) void {
             return insert_many_internal(self, idx, vals_, .REALLOC, alloc, .DEFAULT_GROWTH, .GROW_BY_25_PERCENT, .RETURN_VOID);
         }
         //**************
@@ -3563,7 +3552,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
@@ -3580,7 +3569,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
@@ -3597,7 +3586,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
             const idx = binary_insert_location_in_range(self.*, val, start, end_excluded, greater_idx_val);
@@ -3607,7 +3596,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn binary_insert(
             self: *List,
             val: ELEM,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             greater_idx_val: *const fn (List, IDX, ELEM, void, void) bool,
         ) IDX {
             const idx = binary_insert_location(self.*, val, greater_idx_val);
@@ -3619,7 +3608,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
         ) IDX {
             const idx = binary_insert_location_in_range_implicit(self.*, val, start, end_excluded);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
@@ -3628,7 +3617,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn binary_insert_implicit(
             self: *List,
             val: ELEM,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
         ) IDX {
             const idx = binary_insert_location_implicit(self.*, val);
             insert_one_with_growth(self, idx, val, .GROW_BY_25_PERCENT, alloc);
@@ -5612,7 +5601,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .write_pos = 0,
             };
         }
-        pub fn std_writer_with_alloc(self: *List, buffer: []u8, alloc: FuncAlloc, growth: Growth) StdWriter {
+        pub fn std_writer_with_alloc(self: *List, buffer: []u8, alloc: PassedAlloc, growth: Growth) StdWriter {
             return StdWriter{
                 .iface = std.Io.Writer{
                     .vtable = &StdWriter.VTABLE,
@@ -5632,7 +5621,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             iface: std.Io.Writer,
             list: *List,
             write_pos: IDX,
-            alloc: ?FuncAlloc = null,
+            alloc: ?PassedAlloc = null,
             growth: Growth = .GROW_BY_25_PERCENT,
             partial_elem: if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) ELEM else void = if (FIELD_LAYOUT == .SPLIT_FIELDS or SIZE_NOT_1_BYTE) undefined else {},
             partial_byte_pos: if (SIZE_NOT_1_BYTE) IDX else void = if (SIZE_NOT_1_BYTE) 0 else {},
@@ -5825,7 +5814,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack: ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).Stack,
-            stack_alloc: Allocator,
+            comptime STACK_ALLOC_SOURCE: AllocSource,
+            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).init_stack_is_allocated(self, stack, stack_alloc, stack_growth);
@@ -5836,18 +5826,23 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack_capacity: IDX,
-            stack_alloc: Allocator,
+            comptime STACK_ALLOC_SOURCE: AllocSource,
+            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).init_allocate_new_stack(self, stack_capacity, stack_alloc, stack_growth);
         }
-        pub fn ForwardLinkedTraverser(comptime FIRST_CHILD_FIELDS: []const Field, comptime OPT_NEXT_SIBLING_FIELD: ?Field, comptime MAX_STACK_MODE: TrackMaxStackMode) type {
+        pub fn ForwardLinkedTraverser(comptime FIRST_CHILD_FIELDS: []const Field, comptime OPT_NEXT_SIBLING_FIELD: ?Field, comptime MAX_STACK_MODE: TrackMaxStackMode, comptime ALLOC_SOURCE: AllocSource) type {
             return struct {
                 const ListSelfTraverser = @This();
+                const StackAlloc = AllocAdapter(ALLOC_SOURCE);
+                const StackCachedAlloc = StackAlloc.CachedAlloc;
+                const StackPassedAlloc = StackAlloc.PassedAlloc;
+                const StackInitAlloc = StackAlloc.InitAlloc;
 
                 list: List,
                 stack: Stack = .{},
-                stack_alloc: Allocator = dummy_alloc,
+                alloc: Alloc = .{},
                 stack_growth: Growth = .GROW_EXACT_NEEDED,
                 max_stack_len: if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) IDX else void = if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) 0 else {},
 
@@ -5857,20 +5852,20 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .stack = stack,
                     };
                 }
-                pub fn init_stack_is_allocated(list: List, stack: Stack, stack_alloc: Allocator, stack_growth: Growth) ListSelfTraverser {
+                pub fn init_stack_is_allocated(list: List, stack: Stack, comptime STACK_ALLOC_SOURCE: AllocSource, stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc, stack_growth: Growth) ListSelfTraverser {
                     return ListSelfTraverser{
                         .list = list,
                         .stack = stack,
-                        .stack_alloc = stack_alloc,
+                        .alloc = stack_alloc,
                         .stack_growth = stack_growth,
                     };
                 }
-                pub fn init_allocate_new_stack(list: List, stack_capacity: IDX, stack_alloc: Allocator, stack_growth: Growth) ListSelfTraverser {
+                pub fn init_allocate_new_stack(list: List, stack_capacity: IDX, comptime STACK_ALLOC_SOURCE: AllocSource, stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc, stack_growth: Growth) ListSelfTraverser {
                     const stack = Stack.allocate_new(stack_capacity, stack_alloc);
                     return ListSelfTraverser{
                         .list = list,
                         .stack = stack,
-                        .stack_alloc = stack_alloc,
+                        .alloc = stack_alloc,
                         .stack_growth = stack_growth,
                     };
                 }
@@ -5883,7 +5878,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 };
                 pub const HAS_NEXT_SIBLING_FIELD = OPT_NEXT_SIBLING_FIELD != null;
                 pub const NEXT_SIBLING_FIELD = if (OPT_NEXT_SIBLING_FIELD) |F| F else {};
-                pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+                pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
                 pub const AllowedPaths = union(enum) {
                     ALL: void,
                     WHITELIST: [NUM_CHILD_PATHS]bool,
@@ -5953,7 +5948,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         },
                         .curr_path = 0,
                     };
-                    const new_depth = self.stack.append_one_with_growth_get_idx(new_frame, self.stack_growth, self.stack_alloc);
+                    const new_depth = self.stack.append_one_with_growth_get_idx(new_frame, self.stack_growth, self.alloc);
                     if (comptime MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) {
                         self.max_stack_len = @max(self.max_stack_len, new_depth);
                     }
@@ -6020,7 +6015,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                             if (curr_child_idx >= self.list.get_len()) {
                                 return TraverserError.index_out_of_bounds;
                             }
-                            self.stack.grow_capacity_if_needed_for_n_more_elems(1, self.stack_growth, self.stack_alloc);
+                            self.stack.grow_capacity_if_needed_for_n_more_elems(1, self.stack_growth, self.alloc);
                             self.increment_next_child(depth, curr_child_idx);
                             if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
                                 if (comptime ACTION_ERROR != null) {

@@ -2033,7 +2033,7 @@ test "TrueTypeFont -> load and render chars" {
     try font.shape_text("ABcdEfGg&ć", 2.0, &text_shape_list, alloc);
 }
 
-// pub const TextList = ListSlice.ListFullDefinition(u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+// pub const TextList = ListSlice.ListFullDefinition(u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 // pub const SimpleTextRect = struct {
 //     text: , //CHECKPOINT
 // };

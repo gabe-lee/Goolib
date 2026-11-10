@@ -64,7 +64,7 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         const FreeNode = struct {
             next: ?*FreeNode,
         };
-        const BlockList = ListSliceModule.ListFullDefinition([]u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+        const BlockList = ListSliceModule.ListFullDefinition([]u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 
         backing_alloc: Allocator = std.heap.page_allocator,
         free_lists: [NUM_CLASSES]?*FreeNode = @splat(null),

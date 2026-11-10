@@ -46,6 +46,8 @@ const FuncParamType = Common.FuncParamType;
 const ErrorBehavior = Common.ErrorBehavior;
 const AllocErr = Utils.Alloc.AllocErr;
 const AllocSourceMode = Common.AllocSourceMode;
+const AllocSource = Root.Allocator.AllocSource;
+const AllocAdapter = Root.Allocator.AllocatorAdapter;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_with_reason_debug_only = Assert.assert_with_reason_debug_only;
@@ -255,7 +257,7 @@ pub const ListDefNoElem = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: AllocSourceMode = .MANUAL_ALLOC,
+    ALLOC: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
 
     pub inline fn List(comptime self: ListDefNoElem, comptime T: type) type {
         return ListFullDefinition(T, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -286,7 +288,7 @@ pub const ListDef = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: AllocSourceMode = .MANUAL_ALLOC,
+    ALLOC: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
 
     pub inline fn List(comptime self: ListDef) type {
         return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -314,28 +316,28 @@ pub const ListDef = struct {
     }
 };
 pub fn ListNotAllocated(comptime T: type) type {
-    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_NOT_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn ListAllocated(comptime T: type) type {
-    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn SliceMutable(comptime T: type) type {
-    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_MUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn SliceImmutable(comptime T: type) type {
-    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_IMMUTABLE, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .REFERENCED_IMMUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn ListNotAllocatedAdvanced(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
-    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_NOT_ALLOCATED, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_NOT_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn ListAllocatedAdvanced(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
-    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn SliceMutableAdvanced(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
-    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_MUTABLE, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_MUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 }
 pub fn SliceImmutableAdvanced(comptime T: type, comptime FIELD_LAYOUT: FieldLayout, comptime INDEX_LAYOUT: IndexLayout) type {
-    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_IMMUTABLE, .MANUAL_ALLOC);
+    return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_IMMUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 }
 
 pub fn ListFullDefinition(
@@ -344,8 +346,9 @@ pub fn ListFullDefinition(
     comptime FIELD_LAYOUT: FieldLayout,
     comptime INDEX_LAYOUT: IndexLayout,
     comptime OWNERSHIP: Ownership,
-    comptime ALLOC: AllocSourceMode,
+    comptime ALLOC_SOURCE: AllocSource,
 ) type {
+    const GEN_ID_ = Utils.src_loc_hash(@src());
     assert_with_reason(Type.type_is_unsigned_int(IDX), @src(), "IDX type must be an unsigned integer, got type `{s}`", .{@typeName(IDX)});
     if (FIELD_LAYOUT == .SPLIT_FIELDS) {
         assert_with_reason(!Type.type_is_comptime_only(ELEM), @src(), ".SPLIT_FIELDS not compatible with comptime-only elements, type `{s}` is comptime-only", .{@typeName(ELEM)});
@@ -406,13 +409,14 @@ pub fn ListFullDefinition(
     };
     return struct {
         const ListSelf = @This();
+        pub const GENERIC_ID = GEN_ID_;
         pub const LIST_DEF = ListDef{
             .ELEM = ELEM,
             .IDX = IDX,
             .FIELD_LAYOUT = FIELD_LAYOUT,
             .INDEX_LAYOUT = INDEX_LAYOUT,
             .OWNERSHIP = OWNERSHIP,
-            .ALLOC = ALLOC,
+            .ALLOC = ALLOC_SOURCE,
         };
 
         pub const Field = _FIELD_ENUM;
@@ -445,9 +449,12 @@ pub fn ListFullDefinition(
         pub const NextIdxFnRT = IMPL.NextIdxFnRT;
         pub const NextIdxFnCT = IMPL.NextIdxFnCT;
         pub const ForEachReturn = IMPL.ForEachReturn;
-        const CachedAlloc = ALLOC.CachedAllocIf(IS_ALLOCATED);
-        const FuncAlloc = ALLOC.FuncParamAllocIf(IS_ALLOCATED);
-        const CACHED_ALLOC_DEFAULT = ALLOC.CACHED_ALLOC_DEFAULT_IF(IS_ALLOCATED);
+        pub const PassedAlloc = Alloc.PassedAlloc;
+        pub const NilPassedAlloc = Alloc.NilPassedAlloc;
+        pub const CachedAlloc = Alloc.CachedAlloc;
+        pub const CachedAllocInit = Alloc.CachedAllocInit;
+        pub const InitAlloc = Alloc.InitAlloc;
+        pub const Alloc = AllocAdapter(ALLOC_SOURCE);
 
         /// The root memory pointer of the memory region
         root_ptr: MemPtr = undefined,
@@ -463,8 +470,9 @@ pub fn ListFullDefinition(
         /// If the list is a slice, this is the offset from index
         /// `0` where the slice starts
         slice_offset: if (IS_REFERENCE) IDX else void = if (IS_REFERENCE) 0 else {},
-        /// If `ALLOC == .CACHED_ALLOC` and the list is an allocated list, this is the allocator for the list
-        cached_alloc: CachedAlloc = CACHED_ALLOC_DEFAULT,
+        /// An `AllocatorAdapter(ALLOC_SOURCE)` that may or may not have any data stored
+        /// inside it depending on the setting of `ALLOC_SOURCE`
+        alloc: Alloc = .{},
 
         //****************
         // INITIALIZE
@@ -481,13 +489,13 @@ pub fn ListFullDefinition(
         pub inline fn from_slice_const_keep_data(data_slice: []const ELEM) SliceConst {
             return IMPL.from_slice_const_keep_data(data_slice);
         }
-        pub inline fn allocate_new(init_cap: IDX, alloc: Allocator) ListAlloc {
+        pub inline fn allocate_new(init_cap: IDX, alloc: InitAlloc) ListAlloc {
             return IMPL.allocate_new(init_cap, alloc);
         }
-        pub inline fn allocate_new_set_len(init_cap: IDX, alloc: Allocator) ListAlloc {
+        pub inline fn allocate_new_set_len(init_cap: IDX, alloc: InitAlloc) ListAlloc {
             return IMPL.allocate_new_set_len(init_cap, alloc);
         }
-        pub inline fn allocate_new_might_error(init_cap: IDX, alloc: Allocator) AllocErr!ListAlloc {
+        pub inline fn allocate_new_might_error(init_cap: IDX, alloc: InitAlloc) AllocErr!ListAlloc {
             return IMPL.allocate_new_might_error(init_cap, alloc);
         }
         pub inline fn from_allocated_slice_keep_data(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
@@ -873,49 +881,49 @@ pub fn ListFullDefinition(
         //**************
         // ALLOC/REALLOC
         //**************
-        pub inline fn grow(self: *ListSelf, capacity: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn grow(self: *ListSelf, capacity: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.grow(self, capacity, growth, alloc);
         }
-        pub inline fn grow_capacity_if_needed(self: *ListSelf, need_capacity: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn grow_capacity_if_needed(self: *ListSelf, need_capacity: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.grow_capacity_if_needed(self, need_capacity, growth, alloc);
         }
-        pub inline fn grow_capacity_if_needed_for_n_more_elems(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn grow_capacity_if_needed_for_n_more_elems(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.grow_capacity_if_needed_for_n_more_elems(self, count, growth, alloc);
         }
-        pub inline fn shrink_capacity_to_at_most(self: *ListSelf, new_max_cap: IDX, alloc: FuncAlloc) void {
+        pub inline fn shrink_capacity_to_at_most(self: *ListSelf, new_max_cap: IDX, alloc: PassedAlloc) void {
             return IMPL.shrink_capacity_to_at_most(self, new_max_cap, alloc);
         }
-        pub inline fn shrink_capacity_reserve_at_most_n_free_space(self: *ListSelf, at_most_n_free_space: IDX, alloc: FuncAlloc) void {
+        pub inline fn shrink_capacity_reserve_at_most_n_free_space(self: *ListSelf, at_most_n_free_space: IDX, alloc: PassedAlloc) void {
             return IMPL.shrink_capacity_reserve_at_most_n_free_space(self, at_most_n_free_space, alloc);
         }
-        pub inline fn resize_capacity_exact(self: *ListSelf, exact_cap: IDX, alloc: FuncAlloc) void {
+        pub inline fn resize_capacity_exact(self: *ListSelf, exact_cap: IDX, alloc: PassedAlloc) void {
             return IMPL.resize_capacity_exact(self, exact_cap, alloc);
         }
-        pub inline fn grow_capacity_if_needed_might_error(self: *ListSelf, need_capacity: IDX, growth: Growth, alloc: FuncAlloc) AllocErr!void {
+        pub inline fn grow_capacity_if_needed_might_error(self: *ListSelf, need_capacity: IDX, growth: Growth, alloc: PassedAlloc) AllocErr!void {
             return IMPL.grow_capacity_if_needed_might_error(self, need_capacity, growth, alloc);
         }
-        pub inline fn grow_capacity_if_needed_for_n_more_elems_might_error(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) AllocErr!void {
+        pub inline fn grow_capacity_if_needed_for_n_more_elems_might_error(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) AllocErr!void {
             return IMPL.grow_capacity_if_needed_for_n_more_elems_might_error(self, count, growth, alloc);
         }
-        pub inline fn shrink_capacity_to_at_most_might_error(self: *ListSelf, new_max_cap: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub inline fn shrink_capacity_to_at_most_might_error(self: *ListSelf, new_max_cap: IDX, alloc: PassedAlloc) AllocErr!void {
             return IMPL.shrink_capacity_to_at_most_might_error(self, new_max_cap, alloc);
         }
-        pub inline fn shrink_capacity_reserve_at_most_n_free_space_might_error(self: *ListSelf, at_most_n_free_space: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub inline fn shrink_capacity_reserve_at_most_n_free_space_might_error(self: *ListSelf, at_most_n_free_space: IDX, alloc: PassedAlloc) AllocErr!void {
             return IMPL.shrink_capacity_reserve_at_most_n_free_space_might_error(self, at_most_n_free_space, alloc);
         }
-        pub inline fn resize_capacity_exact_might_error(self: *ListSelf, exact_cap: IDX, alloc: FuncAlloc) AllocErr!void {
+        pub inline fn resize_capacity_exact_might_error(self: *ListSelf, exact_cap: IDX, alloc: PassedAlloc) AllocErr!void {
             return IMPL.resize_capacity_exact_might_error(self, exact_cap, alloc);
         }
-        pub inline fn free(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn free(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.free(self, alloc);
         }
-        pub inline fn free_if_non_zero(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn free_if_non_zero(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.free_if_non_zero(self, alloc);
         }
-        pub inline fn free_if_owned(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn free_if_owned(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.free_if_owned(self, alloc);
         }
-        pub inline fn free_if_owned_and_non_zero(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn free_if_owned_and_non_zero(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.free_if_owned_and_non_zero(self, alloc);
         }
         //*********
@@ -963,73 +971,73 @@ pub fn ListFullDefinition(
         pub inline fn append_one_slot_assume_cap_get_ptr(self: *ListSelf) ElemPtr {
             return IMPL.append_one_slot_assume_cap_get_ptr(self);
         }
-        pub inline fn append_one_slot_with_growth_get_ptr(self: *ListSelf, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_slot_with_growth_get_ptr(self: *ListSelf, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.append_one_slot_with_growth_get_ptr(self, growth, alloc);
         }
-        pub inline fn append_one_slot_get_ptr(self: *ListSelf, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_slot_get_ptr(self: *ListSelf, alloc: PassedAlloc) ElemPtr {
             return IMPL.append_one_slot_get_ptr(self, alloc);
         }
         pub inline fn append_one_slot_assume_cap_get_ptr_idx(self: *ListSelf) struct { ElemPtr, IDX } {
             return IMPL.append_one_slot_assume_cap_get_ptr_idx(self);
         }
-        pub inline fn append_one_slot_with_growth_get_ptr_idx(self: *ListSelf, growth: Growth, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_slot_with_growth_get_ptr_idx(self: *ListSelf, growth: Growth, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return IMPL.append_one_slot_with_growth_get_ptr_idx(self, growth, alloc);
         }
-        pub inline fn append_one_slot_get_ptr_idx(self: *ListSelf, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_slot_get_ptr_idx(self: *ListSelf, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return IMPL.append_one_slot_get_ptr_idx(self, alloc);
         }
         pub inline fn append_one_slot_assume_cap_get_idx(self: *ListSelf) IDX {
             return IMPL.append_one_slot_assume_cap_get_idx(self);
         }
-        pub inline fn append_one_slot_with_growth_get_idx(self: *ListSelf, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_slot_with_growth_get_idx(self: *ListSelf, growth: Growth, alloc: PassedAlloc) IDX {
             return IMPL.append_one_slot_with_growth_get_idx(self, growth, alloc);
         }
-        pub inline fn append_one_slot_get_idx(self: *ListSelf, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_slot_get_idx(self: *ListSelf, alloc: PassedAlloc) IDX {
             return IMPL.append_one_slot_get_idx(self, alloc);
         }
         pub inline fn append_one_slot_assume_cap(self: *ListSelf) void {
             return IMPL.append_one_slot_assume_cap(self);
         }
-        pub inline fn append_one_slot_with_growth(self: *ListSelf, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_one_slot_with_growth(self: *ListSelf, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.append_one_slot_with_growth(self, growth, alloc);
         }
-        pub inline fn append_one_slot(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn append_one_slot(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.append_one_slot(self, alloc);
         }
         pub inline fn append_one_assume_cap_get_ptr(self: *ListSelf, val: ELEM) ElemPtr {
             return IMPL.append_one_assume_cap_get_ptr(self, val);
         }
-        pub inline fn append_one_with_growth_get_ptr(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_with_growth_get_ptr(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.append_one_with_growth_get_ptr(self, val, growth, alloc);
         }
-        pub inline fn append_one_get_ptr(self: *ListSelf, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub inline fn append_one_get_ptr(self: *ListSelf, val: ELEM, alloc: PassedAlloc) ElemPtr {
             return IMPL.append_one_get_ptr(self, val, alloc);
         }
         pub inline fn append_one_assume_cap_get_ptr_idx(self: *ListSelf, val: ELEM) struct { ElemPtr, IDX } {
             return IMPL.append_one_assume_cap_get_ptr_idx(self, val);
         }
-        pub inline fn append_one_with_growth_get_ptr_idx(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_with_growth_get_ptr_idx(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return IMPL.append_one_with_growth_get_ptr_idx(self, val, growth, alloc);
         }
-        pub inline fn append_one_get_ptr_idx(self: *ListSelf, val: ELEM, alloc: FuncAlloc) struct { ElemPtr, IDX } {
+        pub inline fn append_one_get_ptr_idx(self: *ListSelf, val: ELEM, alloc: PassedAlloc) struct { ElemPtr, IDX } {
             return IMPL.append_one_get_ptr_idx(self, val, alloc);
         }
         pub inline fn append_one_assume_cap_get_idx(self: *ListSelf, val: ELEM) IDX {
             return IMPL.append_one_assume_cap_get_idx(self, val);
         }
-        pub inline fn append_one_with_growth_get_idx(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_with_growth_get_idx(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) IDX {
             return IMPL.append_one_with_growth_get_idx(self, val, growth, alloc);
         }
-        pub inline fn append_one_get_idx(self: *ListSelf, val: ELEM, alloc: FuncAlloc) IDX {
+        pub inline fn append_one_get_idx(self: *ListSelf, val: ELEM, alloc: PassedAlloc) IDX {
             return IMPL.append_one_get_idx(self, val, alloc);
         }
         pub inline fn append_one_assume_cap(self: *ListSelf, val: ELEM) void {
             return IMPL.append_one_assume_cap(self, val);
         }
-        pub inline fn append_one_with_growth(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_one_with_growth(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.append_one_with_growth(self, val, growth, alloc);
         }
-        pub inline fn append_one(self: *ListSelf, val: ELEM, alloc: FuncAlloc) void {
+        pub inline fn append_one(self: *ListSelf, val: ELEM, alloc: PassedAlloc) void {
             return IMPL.append_one(self, val, alloc);
         }
         //*************
@@ -1038,73 +1046,73 @@ pub fn ListFullDefinition(
         pub inline fn append_many_slots_assume_cap_get_slice(self: *ListSelf, count: IDX) Slice {
             return IMPL.append_many_slots_assume_cap_get_slice(self, count);
         }
-        pub inline fn append_many_slots_with_growth_get_slice(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_slots_with_growth_get_slice(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.append_many_slots_with_growth_get_slice(self, count, growth, alloc);
         }
-        pub inline fn append_many_slots_get_slice(self: *ListSelf, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_slots_get_slice(self: *ListSelf, count: IDX, alloc: PassedAlloc) Slice {
             return IMPL.append_many_slots_get_slice(self, count, alloc);
         }
         pub inline fn append_many_slots_assume_cap_get_slice_idx(self: *ListSelf, count: IDX) struct { Slice, IDX } {
             return IMPL.append_many_slots_assume_cap_get_slice_idx(self, count);
         }
-        pub inline fn append_many_slots_with_growth_get_slice_idx(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_slots_with_growth_get_slice_idx(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) struct { Slice, IDX } {
             return IMPL.append_many_slots_with_growth_get_slice_idx(self, count, growth, alloc);
         }
-        pub inline fn append_many_slots_get_slice_idx(self: *ListSelf, count: IDX, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_slots_get_slice_idx(self: *ListSelf, count: IDX, alloc: PassedAlloc) struct { Slice, IDX } {
             return IMPL.append_many_slots_get_slice_idx(self, count, alloc);
         }
         pub inline fn append_many_slots_assume_cap_get_idx(self: *ListSelf, count: IDX) IDX {
             return IMPL.append_many_slots_assume_cap_get_idx(self, count);
         }
-        pub inline fn append_many_slots_with_growth_get_idx(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_slots_with_growth_get_idx(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) IDX {
             return IMPL.append_many_slots_with_growth_get_idx(self, count, growth, alloc);
         }
-        pub inline fn append_many_slots_get_idx(self: *ListSelf, count: IDX, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_slots_get_idx(self: *ListSelf, count: IDX, alloc: PassedAlloc) IDX {
             return IMPL.append_many_slots_get_idx(self, count, alloc);
         }
         pub inline fn append_many_slots_assume_cap(self: *ListSelf, count: IDX) void {
             return IMPL.append_many_slots_assume_cap(self, count);
         }
-        pub inline fn append_many_slots_with_growth(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_many_slots_with_growth(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.append_many_slots_with_growth(self, count, growth, alloc);
         }
-        pub inline fn append_many_slots(self: *ListSelf, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn append_many_slots(self: *ListSelf, count: IDX, alloc: PassedAlloc) void {
             return IMPL.append_many_slots(self, count, alloc);
         }
         pub inline fn append_many_assume_cap_get_slice(self: *ListSelf, vals_: anytype) Slice {
             return IMPL.append_many_assume_cap_get_slice(self, vals_);
         }
-        pub inline fn append_many_with_growth_get_slice(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_with_growth_get_slice(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.append_many_with_growth_get_slice(self, vals_, growth, alloc);
         }
-        pub inline fn append_many_get_slice(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn append_many_get_slice(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) Slice {
             return IMPL.append_many_get_slice(self, vals_, alloc);
         }
         pub inline fn append_many_assume_cap_get_ptr_idx(self: *ListSelf, vals_: anytype) struct { Slice, IDX } {
             return IMPL.append_many_assume_cap_get_ptr_idx(self, vals_);
         }
-        pub inline fn append_many_with_growth_get_ptr_idx(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_with_growth_get_ptr_idx(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) struct { Slice, IDX } {
             return IMPL.append_many_with_growth_get_ptr_idx(self, vals_, growth, alloc);
         }
-        pub inline fn append_many_get_ptr_idx(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) struct { Slice, IDX } {
+        pub inline fn append_many_get_ptr_idx(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) struct { Slice, IDX } {
             return IMPL.append_many_get_ptr_idx(self, vals_, alloc);
         }
         pub inline fn append_many_assume_cap_get_idx(self: *ListSelf, vals_: anytype) IDX {
             return IMPL.append_many_assume_cap_get_idx(self, vals_);
         }
-        pub inline fn append_many_with_growth_get_idx(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_with_growth_get_idx(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) IDX {
             return IMPL.append_many_with_growth_get_idx(self, vals_, growth, alloc);
         }
-        pub inline fn append_many_get_idx(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) IDX {
+        pub inline fn append_many_get_idx(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) IDX {
             return IMPL.append_many_get_idx(self, vals_, alloc);
         }
         pub inline fn append_many_assume_cap(self: *ListSelf, vals_: anytype) void {
             return IMPL.append_many_assume_cap(self, vals_);
         }
-        pub inline fn append_many_with_growth(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn append_many_with_growth(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.append_many_with_growth(self, vals_, growth, alloc);
         }
-        pub inline fn append_many(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn append_many(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) void {
             return IMPL.append_many(self, vals_, alloc);
         }
         //*************
@@ -1113,37 +1121,37 @@ pub fn ListFullDefinition(
         pub inline fn prepend_one_slot_assume_cap_get_ptr(self: *ListSelf) ElemPtr {
             return IMPL.prepend_one_slot_assume_cap_get_ptr(self);
         }
-        pub inline fn prepend_one_slot_with_growth_get_ptr(self: *ListSelf, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_slot_with_growth_get_ptr(self: *ListSelf, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.prepend_one_slot_with_growth_get_ptr(self, growth, alloc);
         }
-        pub inline fn prepend_one_slot_get_ptr(self: *ListSelf, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_slot_get_ptr(self: *ListSelf, alloc: PassedAlloc) ElemPtr {
             return IMPL.prepend_one_slot_get_ptr(self, alloc);
         }
         pub inline fn prepend_one_slot_assume_cap(self: *ListSelf) void {
             return IMPL.prepend_one_slot_assume_cap(self);
         }
-        pub inline fn prepend_one_slot_with_growth(self: *ListSelf, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_one_slot_with_growth(self: *ListSelf, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.prepend_one_slot_with_growth(self, growth, alloc);
         }
-        pub inline fn prepend_one_slot(self: *ListSelf, alloc: FuncAlloc) void {
+        pub inline fn prepend_one_slot(self: *ListSelf, alloc: PassedAlloc) void {
             return IMPL.prepend_one_slot(self, alloc);
         }
         pub inline fn prepend_one_assume_cap_get_ptr(self: *ListSelf, val: ELEM) ElemPtr {
             return IMPL.prepend_one_assume_cap_get_ptr(self, val);
         }
-        pub inline fn prepend_one_with_growth_get_ptr(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_with_growth_get_ptr(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.prepend_one_with_growth_get_ptr(self, val, growth, alloc);
         }
-        pub inline fn prepend_one_get_ptr(self: *ListSelf, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub inline fn prepend_one_get_ptr(self: *ListSelf, val: ELEM, alloc: PassedAlloc) ElemPtr {
             return IMPL.prepend_one_get_ptr(self, val, alloc);
         }
         pub inline fn prepend_one_assume_cap(self: *ListSelf, val: ELEM) void {
             return IMPL.prepend_one_assume_cap(self, val);
         }
-        pub inline fn prepend_one_with_growth(self: *ListSelf, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_one_with_growth(self: *ListSelf, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.prepend_one_with_growth(self, val, growth, alloc);
         }
-        pub inline fn prepend_one(self: *ListSelf, val: ELEM, alloc: FuncAlloc) void {
+        pub inline fn prepend_one(self: *ListSelf, val: ELEM, alloc: PassedAlloc) void {
             return IMPL.prepend_one(self, val, alloc);
         }
         //**************
@@ -1152,37 +1160,37 @@ pub fn ListFullDefinition(
         pub inline fn prepend_many_slots_assume_cap_get_slice(self: *ListSelf, count: IDX) Slice {
             return IMPL.prepend_many_slots_assume_cap_get_slice(self, count);
         }
-        pub inline fn prepend_many_slots_with_growth_get_slice(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_slots_with_growth_get_slice(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.prepend_many_slots_with_growth_get_slice(self, count, growth, alloc);
         }
-        pub inline fn prepend_many_slots_get_slice(self: *ListSelf, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_slots_get_slice(self: *ListSelf, count: IDX, alloc: PassedAlloc) Slice {
             return IMPL.prepend_many_slots_get_slice(self, count, alloc);
         }
         pub inline fn prepend_many_slots_assume_cap(self: *ListSelf, count: IDX) void {
             return IMPL.prepend_many_slots_assume_cap(self, count);
         }
-        pub inline fn prepend_many_slots_with_growth(self: *ListSelf, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_slots_with_growth(self: *ListSelf, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.prepend_many_slots_with_growth(self, count, growth, alloc);
         }
-        pub inline fn prepend_many_slots(self: *ListSelf, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_slots(self: *ListSelf, count: IDX, alloc: PassedAlloc) void {
             return IMPL.prepend_many_slots(self, count, alloc);
         }
         pub inline fn prepend_many_assume_cap_get_slice(self: *ListSelf, vals_: anytype) Slice {
             return IMPL.prepend_many_assume_cap_get_slice(self, vals_);
         }
-        pub inline fn prepend_many_with_growth_get_slice(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_with_growth_get_slice(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.prepend_many_with_growth_get_slice(self, vals_, growth, alloc);
         }
-        pub inline fn prepend_many_get_slice(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn prepend_many_get_slice(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) Slice {
             return IMPL.prepend_many_get_slice(self, vals_, alloc);
         }
         pub inline fn prepend_many_assume_cap(self: *ListSelf, vals_: anytype) void {
             return IMPL.prepend_many_assume_cap(self, vals_);
         }
-        pub inline fn prepend_many_with_growth(self: *ListSelf, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn prepend_many_with_growth(self: *ListSelf, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.prepend_many_with_growth(self, vals_, growth, alloc);
         }
-        pub inline fn prepend_many(self: *ListSelf, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn prepend_many(self: *ListSelf, vals_: anytype, alloc: PassedAlloc) void {
             return IMPL.prepend_many(self, vals_, alloc);
         }
         //**************
@@ -1191,37 +1199,37 @@ pub fn ListFullDefinition(
         pub inline fn insert_one_slot_assume_cap_get_ptr(self: *ListSelf, idx: IDX) ElemPtr {
             return IMPL.insert_one_slot_assume_cap_get_ptr(self, idx);
         }
-        pub inline fn insert_one_slot_with_growth_get_ptr(self: *ListSelf, idx: IDX, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_slot_with_growth_get_ptr(self: *ListSelf, idx: IDX, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.insert_one_slot_with_growth_get_ptr(self, idx, growth, alloc);
         }
-        pub inline fn insert_one_slot_get_ptr(self: *ListSelf, idx: IDX, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_slot_get_ptr(self: *ListSelf, idx: IDX, alloc: PassedAlloc) ElemPtr {
             return IMPL.insert_one_slot_get_ptr(self, idx, alloc);
         }
         pub inline fn insert_one_slot_assume_cap(self: *ListSelf, idx: IDX) void {
             return IMPL.insert_one_slot_assume_cap(self, idx);
         }
-        pub inline fn insert_one_slot_with_growth(self: *ListSelf, idx: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_one_slot_with_growth(self: *ListSelf, idx: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.insert_one_slot_with_growth(self, idx, growth, alloc);
         }
-        pub inline fn insert_one_slot(self: *ListSelf, idx: IDX, alloc: FuncAlloc) void {
+        pub inline fn insert_one_slot(self: *ListSelf, idx: IDX, alloc: PassedAlloc) void {
             return IMPL.insert_one_slot(self, idx, alloc);
         }
         pub inline fn insert_one_assume_cap_get_ptr(self: *ListSelf, idx: IDX, val: ELEM) ElemPtr {
             return IMPL.insert_one_assume_cap_get_ptr(self, idx, val);
         }
-        pub inline fn insert_one_with_growth_get_ptr(self: *ListSelf, idx: IDX, val: ELEM, growth: Growth, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_with_growth_get_ptr(self: *ListSelf, idx: IDX, val: ELEM, growth: Growth, alloc: PassedAlloc) ElemPtr {
             return IMPL.insert_one_with_growth_get_ptr(self, idx, val, growth, alloc);
         }
-        pub inline fn insert_one_get_ptr(self: *ListSelf, idx: IDX, val: ELEM, alloc: FuncAlloc) ElemPtr {
+        pub inline fn insert_one_get_ptr(self: *ListSelf, idx: IDX, val: ELEM, alloc: PassedAlloc) ElemPtr {
             return IMPL.insert_one_get_ptr(self, idx, val, alloc);
         }
         pub inline fn insert_one_assume_cap(self: *ListSelf, idx: IDX, val: ELEM) void {
             return IMPL.insert_one_assume_cap(self, idx, val);
         }
-        pub inline fn insert_one_with_growth(self: *ListSelf, idx: IDX, val: ELEM, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_one_with_growth(self: *ListSelf, idx: IDX, val: ELEM, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.insert_one_with_growth(self, idx, val, growth, alloc);
         }
-        pub inline fn insert_one(self: *ListSelf, idx: IDX, val: ELEM, alloc: FuncAlloc) void {
+        pub inline fn insert_one(self: *ListSelf, idx: IDX, val: ELEM, alloc: PassedAlloc) void {
             return IMPL.insert_one(self, idx, val, alloc);
         }
         //**************
@@ -1230,37 +1238,37 @@ pub fn ListFullDefinition(
         pub inline fn insert_many_slots_assume_cap_get_slice(self: *ListSelf, idx: IDX, count: IDX) Slice {
             return IMPL.insert_many_slots_assume_cap_get_slice(self, idx, count);
         }
-        pub inline fn insert_many_slots_with_growth_get_slice(self: *ListSelf, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_slots_with_growth_get_slice(self: *ListSelf, idx: IDX, count: IDX, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.insert_many_slots_with_growth_get_slice(self, idx, count, growth, alloc);
         }
-        pub inline fn insert_many_slots_get_slice(self: *ListSelf, idx: IDX, count: IDX, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_slots_get_slice(self: *ListSelf, idx: IDX, count: IDX, alloc: PassedAlloc) Slice {
             return IMPL.insert_many_slots_get_slice(self, idx, count, alloc);
         }
         pub inline fn insert_many_slots_assume_cap(self: *ListSelf, idx: IDX, count: IDX) void {
             return IMPL.insert_many_slots_assume_cap(self, idx, count);
         }
-        pub inline fn insert_many_slots_with_growth(self: *ListSelf, idx: IDX, count: IDX, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_many_slots_with_growth(self: *ListSelf, idx: IDX, count: IDX, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.insert_many_slots_with_growth(self, idx, count, growth, alloc);
         }
-        pub inline fn insert_many_slots(self: *ListSelf, idx: IDX, count: IDX, alloc: FuncAlloc) void {
+        pub inline fn insert_many_slots(self: *ListSelf, idx: IDX, count: IDX, alloc: PassedAlloc) void {
             return IMPL.insert_many_slots(self, idx, count, alloc);
         }
         pub inline fn insert_many_assume_cap_get_ptr(self: *ListSelf, idx: IDX, vals_: anytype) Slice {
             return IMPL.insert_many_assume_cap_get_ptr(self, idx, vals_);
         }
-        pub inline fn insert_many_with_growth_get_ptr(self: *ListSelf, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_with_growth_get_ptr(self: *ListSelf, idx: IDX, vals_: anytype, growth: Growth, alloc: PassedAlloc) Slice {
             return IMPL.insert_many_with_growth_get_ptr(self, idx, vals_, growth, alloc);
         }
-        pub inline fn insert_many_get_ptr(self: *ListSelf, idx: IDX, vals_: anytype, alloc: FuncAlloc) Slice {
+        pub inline fn insert_many_get_ptr(self: *ListSelf, idx: IDX, vals_: anytype, alloc: PassedAlloc) Slice {
             return IMPL.insert_many_get_ptr(self, idx, vals_, alloc);
         }
         pub inline fn insert_many_assume_cap(self: *ListSelf, idx: IDX, vals_: anytype) void {
             return IMPL.insert_many_assume_cap(self, idx, vals_);
         }
-        pub inline fn insert_many_with_growth(self: *ListSelf, idx: IDX, vals_: anytype, growth: Growth, alloc: FuncAlloc) void {
+        pub inline fn insert_many_with_growth(self: *ListSelf, idx: IDX, vals_: anytype, growth: Growth, alloc: PassedAlloc) void {
             return IMPL.insert_many_with_growth(self, idx, vals_, growth, alloc);
         }
-        pub inline fn insert_many(self: *ListSelf, idx: IDX, vals_: anytype, alloc: FuncAlloc) void {
+        pub inline fn insert_many(self: *ListSelf, idx: IDX, vals_: anytype, alloc: PassedAlloc) void {
             return IMPL.insert_many(self, idx, vals_, alloc);
         }
         //**************
@@ -1381,7 +1389,8 @@ pub fn ListFullDefinition(
             start_idx: IDX,
             end_idx_exclusive: IDX,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -1396,7 +1405,8 @@ pub fn ListFullDefinition(
             start_idx: IDX,
             end_idx_exclusive: IDX,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -1451,7 +1461,8 @@ pub fn ListFullDefinition(
         pub inline fn remove_filtered(
             self: *ListSelf,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -1464,7 +1475,8 @@ pub fn ListFullDefinition(
         pub inline fn swap_remove_filtered(
             self: *ListSelf,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -1727,7 +1739,7 @@ pub fn ListFullDefinition(
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
@@ -1742,7 +1754,7 @@ pub fn ListFullDefinition(
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             growth: Growth,
             compare_ctx: anytype,
             comptime COMPARE_CTX: anytype,
@@ -1757,7 +1769,7 @@ pub fn ListFullDefinition(
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             greater_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) IDX {
             return IMPL.binary_insert_in_range(self, val, start, end_excluded, alloc, greater_idx_val);
@@ -1765,7 +1777,7 @@ pub fn ListFullDefinition(
         pub inline fn binary_insert(
             self: *ListSelf,
             val: ELEM,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
             greater_idx_val: *const fn (ListSelf, IDX, ELEM, void, void) bool,
         ) IDX {
             return IMPL.binary_insert(self, val, alloc, greater_idx_val);
@@ -1775,14 +1787,14 @@ pub fn ListFullDefinition(
             val: ELEM,
             start: IDX,
             end_excluded: IDX,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
         ) IDX {
             return IMPL.binary_insert_in_range_implicit(self, val, start, end_excluded, alloc);
         }
         pub inline fn binary_insert_implicit(
             self: *ListSelf,
             val: ELEM,
-            alloc: FuncAlloc,
+            alloc: PassedAlloc,
         ) IDX {
             return IMPL.binary_insert_implicit(self, val, alloc);
         }
@@ -2941,7 +2953,7 @@ pub fn ListFullDefinition(
         pub inline fn std_writer(self: *ListSelf, buffer: []u8) StdWriter {
             return IMPL.std_writer(self, buffer);
         }
-        pub inline fn std_writer_with_alloc(self: *ListSelf, buffer: []u8, alloc: FuncAlloc, growth: Growth) StdWriter {
+        pub inline fn std_writer_with_alloc(self: *ListSelf, buffer: []u8, alloc: PassedAlloc, growth: Growth) StdWriter {
             return IMPL.std_writer_with_alloc(self, buffer, alloc, growth);
         }
 
@@ -2962,7 +2974,8 @@ pub fn ListFullDefinition(
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack: ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).Stack,
-            stack_alloc: Allocator,
+            comptime STACK_ALLOC_SOURCE: AllocSource,
+            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return IMPL.forward_linked_traverser_pre_allocated_stack(self, FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE, stack, stack_alloc, stack_growth);
@@ -2973,7 +2986,8 @@ pub fn ListFullDefinition(
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack_capacity: IDX,
-            stack_alloc: Allocator,
+            comptime STACK_ALLOC_SOURCE: AllocSource,
+            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return IMPL.forward_linked_traverser_allocate_new_stack(self, FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE, stack_capacity, stack_alloc, stack_growth);

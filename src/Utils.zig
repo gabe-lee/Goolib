@@ -1345,3 +1345,13 @@ pub fn type_hash32_as_hex_string(comptime T: type) []const u8 {
     const hash_as_str_res = comptime Format.num_to_hex(hash, .{});
     return comptime hash_as_str_res.slice();
 }
+
+pub fn src_loc_hash(comptime src: std.builtin.SourceLocation) u64 {
+    var h = std.hash.Wyhash.init(0);
+    h.update(src.module);
+    h.update(src.file);
+    h.update(src.fn_name);
+    h.update(std.mem.asBytes(&src.line));
+    h.update(std.mem.asBytes(&src.column));
+    return h.final();
+}

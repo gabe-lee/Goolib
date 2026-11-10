@@ -51,6 +51,7 @@ comptime {
 }
 
 pub const AllocSourceKind = enum {
+    NEVER_ALLOCATES,
     PASSED_ALLOCATOR_INTERFACE,
     CACHED_ALLOCATOR_INTERFACE,
     COMPTIME_ALLOCATOR_INTERFACE_PTR,
@@ -79,6 +80,7 @@ pub fn assert_type_is_compliant_allocator_local(comptime T: type) void {
 }
 
 pub const AllocSource = union(AllocSourceKind) {
+    NEVER_ALLOCATES: void,
     PASSED_ALLOCATOR_INTERFACE: void,
     CACHED_ALLOCATOR_INTERFACE: void,
     COMPTIME_ALLOCATOR_INTERFACE_PTR: *const Allocator,
@@ -90,6 +92,9 @@ pub const AllocSource = union(AllocSourceKind) {
         INSTANTIATED_ALLOC_PTR: *anyopaque,
     },
 
+    pub fn never_allocates() AllocSource {
+        return AllocSource{ .NEVER_ALLOCATES = {} };
+    }
     pub fn passed_allocator_interface() AllocSource {
         return AllocSource{ .PASSED_ALLOCATOR_INTERFACE = {} };
     }
@@ -114,6 +119,7 @@ pub const AllocSource = union(AllocSourceKind) {
 
     pub fn CONST_TYPE(comptime self: AllocSource) type {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
             .PASSED_ALLOCATOR_INTERFACE => void,
             .CACHED_ALLOCATOR_INTERFACE => void,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => *const Allocator,
@@ -125,6 +131,7 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn CONST_TYPE_INIT(comptime self: AllocSource) self.CONST_TYPE() {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => {},
             .PASSED_ALLOCATOR_INTERFACE => {},
             .CACHED_ALLOCATOR_INTERFACE => {},
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => |PTR| PTR,
@@ -136,17 +143,19 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn FIELD_TYPE(comptime self: AllocSource) type {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
             .PASSED_ALLOCATOR_INTERFACE => void,
             .CACHED_ALLOCATOR_INTERFACE => Allocator,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => void,
             .COMPILANT_GLOBAL_ALLOCATOR => void,
-            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |TYPE| *TYPE,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| *T,
             .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => void,
             .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => void,
         };
     }
     pub fn FIELD_TYPE_INIT(comptime self: AllocSource) self.FIELD_TYPE() {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => {},
             .PASSED_ALLOCATOR_INTERFACE => {},
             .CACHED_ALLOCATOR_INTERFACE => Dummy.allocator_panic_free_noop,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => {},
@@ -156,8 +165,33 @@ pub const AllocSource = union(AllocSourceKind) {
             .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {},
         };
     }
+    pub fn INIT_TYPE(comptime self: AllocSource) type {
+        return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
+            .PASSED_ALLOCATOR_INTERFACE => Allocator,
+            .CACHED_ALLOCATOR_INTERFACE => Allocator,
+            .COMPTIME_ALLOCATOR_INTERFACE_PTR => void,
+            .COMPILANT_GLOBAL_ALLOCATOR => void,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| *T,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| *T,
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => void,
+        };
+    }
+    pub fn NIL_INIT_TYPE(comptime self: AllocSource) self.INIT_TYPE() {
+        return switch (comptime self) {
+            .NEVER_ALLOCATES => {},
+            .PASSED_ALLOCATOR_INTERFACE => Dummy.allocator_panic,
+            .CACHED_ALLOCATOR_INTERFACE => Dummy.allocator_panic,
+            .COMPTIME_ALLOCATOR_INTERFACE_PTR => {},
+            .COMPILANT_GLOBAL_ALLOCATOR => {},
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| Utils.invalid_ptr(T),
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| Utils.invalid_ptr(T),
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {},
+        };
+    }
     pub fn PARAM_TYPE(comptime self: AllocSource) type {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
             .PASSED_ALLOCATOR_INTERFACE => Allocator,
             .CACHED_ALLOCATOR_INTERFACE => void,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => void,
@@ -167,8 +201,21 @@ pub const AllocSource = union(AllocSourceKind) {
             .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => void,
         };
     }
+    pub fn PARAM_NIL(comptime self: AllocSource) self.PARAM_TYPE() {
+        return switch (comptime self) {
+            .NEVER_ALLOCATES => {},
+            .PASSED_ALLOCATOR_INTERFACE => Root.Allocator.Dummy.allocator_panic_free_noop,
+            .CACHED_ALLOCATOR_INTERFACE => {},
+            .COMPTIME_ALLOCATOR_INTERFACE_PTR => {},
+            .COMPILANT_GLOBAL_ALLOCATOR => {},
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => {},
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| Utils.invalid_ptr(T),
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {},
+        };
+    }
     pub fn COMPLIANT_TYPE(comptime self: AllocSource) type {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
             .PASSED_ALLOCATOR_INTERFACE => void,
             .CACHED_ALLOCATOR_INTERFACE => void,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => void,
@@ -180,6 +227,7 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn INSTANTIATED_COMPLIANT_TYPE_PTR(comptime self: AllocSource) type {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => void,
             .PASSED_ALLOCATOR_INTERFACE => void,
             .CACHED_ALLOCATOR_INTERFACE => void,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => void,
@@ -191,6 +239,7 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn USE_FIELD_TYPE(comptime self: AllocSource) bool {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => false,
             .PASSED_ALLOCATOR_INTERFACE => false,
             .CACHED_ALLOCATOR_INTERFACE => true,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => false,
@@ -202,6 +251,7 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn USE_CONST_TYPE(comptime self: AllocSource) bool {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => false,
             .PASSED_ALLOCATOR_INTERFACE => false,
             .CACHED_ALLOCATOR_INTERFACE => false,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => true,
@@ -213,6 +263,7 @@ pub const AllocSource = union(AllocSourceKind) {
     }
     pub fn USE_PARAM_TYPE(comptime self: AllocSource) bool {
         return switch (comptime self) {
+            .NEVER_ALLOCATES => false,
             .PASSED_ALLOCATOR_INTERFACE => true,
             .CACHED_ALLOCATOR_INTERFACE => false,
             .COMPTIME_ALLOCATOR_INTERFACE_PTR => false,
@@ -222,9 +273,13 @@ pub const AllocSource = union(AllocSourceKind) {
             .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => false,
         };
     }
+    pub inline fn CAN_NEVER_ALLOCATE(comptime self: AllocSource) bool {
+        return self == .NEVER_ALLOCATES;
+    }
 };
 
 pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
+    const GEN_ID_ = Utils.src_loc_hash(@src());
     switch (comptime SOURCE) {
         .COMPILANT_GLOBAL_ALLOCATOR => |T| assert_type_is_compliant_allocator_static(T),
         .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |INFO| assert_type_is_compliant_allocator_local(INFO.INSTANTIATED_ALLOC),
@@ -234,11 +289,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
     }
     return struct {
         const Self = @This();
+        pub const GENERIC_ID = GEN_ID_;
 
-        const C: SOURCE.CONST_TYPE() = SOURCE.CONST_TYPE_INIT();
-        f: SOURCE.FIELD_TYPE() = SOURCE.FIELD_TYPE_INIT(),
+        const C: ConstAlloc = ConstAllocInit;
+        f: CachedAlloc = CachedAllocInit,
 
         pub const PassedAlloc = SOURCE.PARAM_TYPE();
+        pub const NilPassedAlloc = SOURCE.PARAM_NIL();
+        pub const CachedAlloc = SOURCE.FIELD_TYPE();
+        pub const CachedAllocInit = SOURCE.FIELD_TYPE_INIT();
+        pub const ConstAlloc = SOURCE.CONST_TYPE();
+        pub const ConstAllocInit = SOURCE.CONST_TYPE_INIT();
+        pub const InitAlloc = SOURCE.INIT_TYPE();
+        pub const NilInitAlloc = SOURCE.NIL_INIT_TYPE();
 
         pub const VTABLE: Allocator.VTable = .{
             .alloc = alloc_impl,
@@ -262,72 +325,97 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }.get;
 
-        pub inline fn passed_source_interface_adapter(alloc_param: SOURCE.PARAM_TYPE()) PassedAllocInterfaceAdapter {
+        pub inline fn passed_source_interface_adapter(alloc_param: PassedAlloc) PassedAllocAdapter {
             assert_alloc_param(@src());
-            return PassedAllocInterfaceAdapter.new(alloc_param);
+            return PassedAllocAdapter.new(alloc_param);
         }
 
-        pub const PassedAllocInterfaceAdapter = struct {
-            alloc_param: SOURCE.PARAM_TYPE(),
+        pub fn init_to_cached_alloc(init_alloc: InitAlloc) CachedAlloc {
+            if (CachedAlloc == InitAlloc) return init_alloc;
+            return CachedAllocInit;
+        }
+        pub fn init_to_passed_alloc(init_alloc: InitAlloc) CachedAlloc {
+            if (PassedAlloc == InitAlloc) return init_alloc;
+            return NilPassedAlloc;
+        }
 
-            pub fn new(alloc_param: SOURCE.PARAM_TYPE()) PassedAllocInterfaceAdapter {
+        pub const PassedAllocAdapter = struct {
+            alloc_param: PassedAlloc = NilPassedAlloc,
+
+            pub fn new(alloc_param: PassedAlloc) PassedAllocAdapter {
                 assert_alloc_param(@src());
-                return PassedAllocInterfaceAdapter{
+                return PassedAllocAdapter{
                     .alloc_param = alloc_param,
                 };
             }
-            pub fn interface(self: *PassedAllocInterfaceAdapter) Allocator {
+            pub fn interface(self: *PassedAllocAdapter) Allocator {
                 assert_alloc_param(@src());
-                return Allocator{ .ptr = @ptrCast(@alignCast(self)), .vtable = &PassedAllocInterfaceAdapter.VTABLE };
+                return Allocator{ .ptr = @ptrCast(@alignCast(self)), .vtable = &PassedAllocAdapter.VTABLE };
             }
 
             pub const VTABLE: Allocator.VTable = .{
-                .alloc = PassedAllocInterfaceAdapter.alloc_impl,
-                .resize = PassedAllocInterfaceAdapter.resize_impl,
-                .remap = PassedAllocInterfaceAdapter.remap_impl,
-                .free = PassedAllocInterfaceAdapter.free_impl,
+                .alloc = PassedAllocAdapter.alloc_impl,
+                .resize = PassedAllocAdapter.resize_impl,
+                .remap = PassedAllocAdapter.remap_impl,
+                .free = PassedAllocAdapter.free_impl,
             };
 
             fn alloc_impl(self_opaque: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+                if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
                 assert_alloc_param(@src());
                 _ = ret_addr;
-                const self: *PassedAllocInterfaceAdapter = @ptrCast(@alignCast(self_opaque));
+                const self: *PassedAllocAdapter = @ptrCast(@alignCast(self_opaque));
                 return Self.alloc_raw(.{}, len, alignment, self.alloc_param);
             }
             fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+                if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return false;
                 assert_alloc_param(@src());
                 _ = ret_addr;
-                const self: *PassedAllocInterfaceAdapter = @ptrCast(@alignCast(self_opaque));
+                const self: *PassedAllocAdapter = @ptrCast(@alignCast(self_opaque));
                 return Self.resize_raw(.{}, memory, new_len, alignment, self.alloc_param);
             }
             fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+                if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
                 assert_alloc_param(@src());
                 _ = ret_addr;
-                const self: *PassedAllocInterfaceAdapter = @ptrCast(@alignCast(self_opaque));
+                const self: *PassedAllocAdapter = @ptrCast(@alignCast(self_opaque));
                 return Self.remap_raw(.{}, memory, new_len, alignment, self.alloc_param);
             }
             fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+                if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return;
                 assert_alloc_param(@src());
                 _ = ret_addr;
-                const self: *PassedAllocInterfaceAdapter = @ptrCast(@alignCast(self_opaque));
+                const self: *PassedAllocAdapter = @ptrCast(@alignCast(self_opaque));
                 Self.free_raw(.{}, memory, alignment, self.alloc_param);
             }
         };
 
-        pub inline fn init(self: *Self, cached_alloc: SOURCE.FIELD_TYPE()) void {
+        pub inline fn init(self: *Self, cached_alloc: CachedAlloc) void {
             if (comptime SOURCE.USE_FIELD_TYPE()) {
                 self.f = cached_alloc;
             }
         }
-        pub inline fn new(cached_alloc: SOURCE.FIELD_TYPE()) Self {
+        pub inline fn init_from_init_alloc(self: *Self, init_alloc: InitAlloc) void {
+            if (comptime SOURCE.USE_FIELD_TYPE()) {
+                self.f = init_to_cached_alloc(init_alloc);
+            }
+        }
+        pub inline fn new(cached_alloc: CachedAlloc) Self {
             if (comptime SOURCE.USE_FIELD_TYPE()) {
                 return Self{ .f = cached_alloc };
             } else {
                 return Self{};
             }
         }
+        pub inline fn new_from_init_alloc(init_alloc: InitAlloc) Self {
+            if (comptime SOURCE.USE_FIELD_TYPE()) {
+                return Self{ .f = init_to_cached_alloc(init_alloc) };
+            } else {
+                return Self{};
+            }
+        }
 
-        inline fn get_alloc_iface(self: Self, alloc_param: SOURCE.PARAM_TYPE()) Allocator {
+        inline fn get_alloc_iface(self: Self, alloc_param: PassedAlloc) Allocator {
             return switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE => alloc_param,
                 .CACHED_ALLOCATOR_INTERFACE => self.f,
@@ -335,7 +423,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
                 else => unreachable,
             };
         }
-        inline fn get_instantiated_compliant_alloc_ptr(self: Self, alloc_param: SOURCE.PARAM_TYPE()) SOURCE.INSTANTIATED_COMPLIANT_TYPE_PTR() {
+        inline fn get_instantiated_compliant_alloc_ptr(self: Self, alloc_param: PassedAlloc) SOURCE.INSTANTIATED_COMPLIANT_TYPE_PTR() {
             return switch (comptime SOURCE) {
                 .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => self.f,
                 .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => alloc_param,
@@ -353,7 +441,8 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         //*********
         // ALLOC
         //*********
-        pub inline fn alloc_raw(self: Self, size: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[*]u8 {
+        pub inline fn alloc_raw(self: Self, size: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
                     const alloc = self.get_alloc_iface(alloc_param);
@@ -369,33 +458,35 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }
         fn alloc_impl(self_opaque: *anyopaque, len: usize, alignment: Alignment, ret_addr: usize) ?[*]u8 {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
             return self.alloc_raw(len, alignment, {});
         }
-        pub inline fn alloc_types(self: Self, comptime T: type, count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub inline fn alloc_types(self: Self, comptime T: type, count: usize, alloc_param: PassedAlloc) ?[]T {
             const ptr = self.alloc_raw(@sizeOf(T) * count, Alignment.fromByteUnits(@alignOf(T)), alloc_param) orelse return null;
             const t_ptr: [*]T = @ptrCast(@alignCast(ptr));
             return t_ptr[0..count];
         }
-        pub inline fn alloc_types_with_align(self: Self, comptime T: type, count: usize, comptime alignment: Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub inline fn alloc_types_with_align(self: Self, comptime T: type, count: usize, comptime alignment: Alignment, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const ptr = self.alloc_raw(@sizeOf(T) * count, alignment, alloc_param) orelse return null;
             const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(ptr));
             return t_ptr[0..count];
         }
-        pub inline fn alloc_bytes(self: Self, size: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn alloc_bytes(self: Self, size: usize, alloc_param: PassedAlloc) ?[]u8 {
             const ptr = self.alloc_raw(size, null, alloc_param) orelse return null;
             return ptr[0..size];
         }
-        pub inline fn alloc_bytes_with_align(self: Self, size: usize, comptime alignment: Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn alloc_bytes_with_align(self: Self, size: usize, comptime alignment: Alignment, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             const ptr: [*]align(alignment.toByteUnits()) u8 = @alignCast(self.alloc_raw(size, alignment, alloc_param) orelse return null);
             return ptr[0..size];
         }
         //*********
         // RESIZE
         //*********
-        pub inline fn resize_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) bool {
+        pub inline fn resize_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) bool {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return false;
             switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
                     const alloc = self.get_alloc_iface(alloc_param);
@@ -411,27 +502,29 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }
         fn resize_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) bool {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return false;
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
             return self.resize_raw(memory, new_len, alignment, {});
         }
-        pub inline fn resize_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) bool {
+        pub inline fn resize_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: PassedAlloc) bool {
             return self.resize_raw(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param);
         }
-        pub inline fn resize_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) bool {
+        pub inline fn resize_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: PassedAlloc) bool {
             return self.resize_raw(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment, alloc_param);
         }
-        pub inline fn resize_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) bool {
+        pub inline fn resize_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: PassedAlloc) bool {
             return self.resize_raw(memory, new_len, null, alloc_param);
         }
-        pub inline fn resize_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) bool {
+        pub inline fn resize_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: PassedAlloc) bool {
             return self.resize_raw(@alignCast(memory), new_len, alignment, alloc_param);
         }
         //*********
         // REMAP
         //*********
-        pub inline fn remap_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[*]u8 {
+        pub inline fn remap_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
                     const alloc = self.get_alloc_iface(alloc_param);
@@ -447,32 +540,33 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }
         fn remap_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
             return self.remap_raw(memory, new_len, alignment, {});
         }
-        pub inline fn remap_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub inline fn remap_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: PassedAlloc) ?[]T {
             if (self.remap_raw(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param)) |new_mem| {
                 const new_cast_mem: [*]T = @ptrCast(@alignCast(new_mem));
                 return new_cast_mem[0..new_count];
             }
             return null;
         }
-        pub inline fn remap_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub inline fn remap_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             if (self.remap_raw(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment, alloc_param)) |new_mem| {
                 const new_cast_mem: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
                 return new_cast_mem[0..new_count];
             }
             return null;
         }
-        pub inline fn remap_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn remap_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: PassedAlloc) ?[]u8 {
             if (self.remap_raw(memory, new_len, null, alloc_param)) |new_mem| {
                 return new_mem[0..new_len];
             }
             return null;
         }
-        pub inline fn remap_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn remap_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.remap_raw(@alignCast(memory), new_len, alignment, alloc_param)) |new_mem| {
                 const new_cast_mem: [*]align(alignment.toByteUnits()) u8 = @ptrCast(@alignCast(new_mem));
                 return new_cast_mem[0..new_len];
@@ -482,7 +576,8 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         //*********
         // FREE
         //*********
-        pub inline fn free_raw(self: Self, memory: []u8, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn free_raw(self: Self, memory: []u8, alignment: ?Alignment, alloc_param: PassedAlloc) void {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return;
             switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
                     const alloc = self.get_alloc_iface(alloc_param);
@@ -498,31 +593,33 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }
         fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return;
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
             self.free_raw(memory, alignment, {});
         }
-        pub inline fn free_types(self: Self, comptime T: type, memory: []T, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn free_types(self: Self, comptime T: type, memory: []T, alloc_param: PassedAlloc) void {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len = memory.len * @sizeOf(T);
             self.free_raw(raw_ptr[0..raw_len], Alignment.fromByteUnits(@alignOf(T)), alloc_param);
         }
-        pub inline fn free_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn free_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, alloc_param: PassedAlloc) void {
             const raw_ptr: [*]u8 = @ptrCast(@alignCast(memory.ptr));
             const raw_len = memory.len * @sizeOf(T);
             self.free_raw(raw_ptr[0..raw_len], alignment, alloc_param);
         }
-        pub inline fn free_bytes(self: Self, memory: []u8, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn free_bytes(self: Self, memory: []u8, alloc_param: PassedAlloc) void {
             self.free_raw(memory, null, alloc_param);
         }
-        pub inline fn free_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn free_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, alloc_param: PassedAlloc) void {
             self.free_raw(@alignCast(memory), alignment, alloc_param);
         }
         //*********
         // REALLOC
         //*********
-        pub fn realloc_raw(self: Self, memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[*]u8 {
+        pub fn realloc_raw(self: Self, memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
+            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             if (new_len == 0) {
                 if (memory.len != 0) self.free_raw(memory, alignment, alloc_param);
                 return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
@@ -538,19 +635,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub inline fn realloc_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn realloc_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: PassedAlloc) ?[]u8 {
             if (self.realloc_raw(memory, memory.len, new_len, null, alloc_param)) |new_mem| {
                 return new_mem[0..new_len];
             }
             return null;
         }
-        pub inline fn realloc_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn realloc_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.realloc_raw(memory, memory.len, new_len, alignment, alloc_param)) |new_mem| {
                 return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
             }
             return null;
         }
-        pub fn realloc_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub fn realloc_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: PassedAlloc) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const new_len = @sizeOf(T) * new_count;
@@ -560,7 +657,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn realloc_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub fn realloc_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const new_len = @sizeOf(T) * new_count;
@@ -570,19 +667,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub inline fn realloc_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn realloc_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, new_len: usize, alloc_param: PassedAlloc) ?[]u8 {
             if (self.realloc_raw(memory, data_len, new_len, null, alloc_param)) |new_mem| {
                 return new_mem[0..new_len];
             }
             return null;
         }
-        pub inline fn realloc_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, new_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn realloc_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, new_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.realloc_raw(memory, data_len, new_len, alignment, alloc_param)) |new_mem| {
                 return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..new_len];
             }
             return null;
         }
-        pub fn realloc_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub fn realloc_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, new_count: usize, alloc_param: PassedAlloc) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -593,7 +690,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn realloc_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, new_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub fn realloc_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, new_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -607,7 +704,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         //*********
         // CLONE
         //*********
-        pub fn clone_raw(self: Self, memory: []u8, data_len: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[*]u8 {
+        pub fn clone_raw(self: Self, memory: []u8, data_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
             if (self.alloc_raw(memory.len, alignment, alloc_param)) |new_mem| {
                 const copy_len = @min(memory.len, data_len);
                 @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
@@ -615,7 +712,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn clone_slim_raw(self: Self, memory: []u8, data_len: usize, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?[*]u8 {
+        pub fn clone_slim_raw(self: Self, memory: []u8, data_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
             const copy_len = @min(memory.len, data_len);
             if (self.alloc_raw(copy_len, alignment, alloc_param)) |new_mem| {
                 @memcpy(new_mem[0..copy_len], memory[0..copy_len]);
@@ -623,19 +720,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub inline fn clone_bytes(self: Self, memory: []u8, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn clone_bytes(self: Self, memory: []u8, alloc_param: PassedAlloc) ?[]u8 {
             if (self.clone_raw(memory, memory.len, null, alloc_param)) |new_mem| {
                 return new_mem[0..memory.len];
             }
             return null;
         }
-        pub inline fn clone_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn clone_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.clone_raw(memory, memory.len, alignment, alloc_param)) |new_mem| {
                 return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..memory.len];
             }
             return null;
         }
-        pub fn clone_types(self: Self, comptime T: type, memory: []T, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub fn clone_types(self: Self, comptime T: type, memory: []T, alloc_param: PassedAlloc) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             if (self.clone_raw(raw_ptr[0..raw_len], raw_len, Alignment.fromByteUnits(@alignOf(T)), alloc_param)) |new_mem| {
@@ -644,7 +741,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn clone_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub fn clone_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             if (self.clone_raw(raw_ptr[0..raw_len], raw_len, alignment, alloc_param)) |new_mem| {
@@ -653,19 +750,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub inline fn clone_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn clone_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, alloc_param: PassedAlloc) ?[]u8 {
             if (self.clone_raw(memory, data_len, null, alloc_param)) |new_mem| {
                 return new_mem[0..memory.len];
             }
             return null;
         }
-        pub inline fn clone_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn clone_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.clone_raw(memory, data_len, alignment, alloc_param)) |new_mem| {
                 return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..memory.len];
             }
             return null;
         }
-        pub fn clone_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub fn clone_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, alloc_param: PassedAlloc) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -675,7 +772,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn clone_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub fn clone_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -685,19 +782,19 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub inline fn slim_clone_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]u8 {
+        pub inline fn slim_clone_bytes_custom_data_len(self: Self, memory: []u8, data_len: usize, alloc_param: PassedAlloc) ?[]u8 {
             if (self.clone_slim_raw(memory, data_len, null, alloc_param)) |new_mem| {
                 return new_mem[0..@min(data_len, memory.len)];
             }
             return null;
         }
-        pub inline fn slim_clone_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) u8 {
+        pub inline fn slim_clone_bytes_with_align_custom_data_len(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, data_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
             if (self.clone_slim_raw(memory, data_len, alignment, alloc_param)) |new_mem| {
                 return @as([*]align(alignment.toByteUnits()) u8, @ptrCast(@alignCast(new_mem)))[0..@min(data_len, memory.len)];
             }
             return null;
         }
-        pub fn slim_clone_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]T {
+        pub fn slim_clone_types_custom_data_count(self: Self, comptime T: type, memory: []T, data_count: usize, alloc_param: PassedAlloc) ?[]T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -707,7 +804,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
             return null;
         }
-        pub fn slim_clone_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, alloc_param: SOURCE.PARAM_TYPE()) ?[]align(alignment.toByteUnits()) T {
+        pub fn slim_clone_types_with_align_custom_data_count(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, data_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
             const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
             const raw_len: usize = @sizeOf(T) * memory.len;
             const data_len = @sizeOf(T) * data_count;
@@ -720,51 +817,51 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         //*********
         // CREATE/DESTROY
         //*********
-        pub inline fn create_with_align(self: Self, comptime T: type, comptime alignment: Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?*align(alignment.toByteUnits()) T {
+        pub inline fn create_with_align(self: Self, comptime T: type, comptime alignment: Alignment, alloc_param: PassedAlloc) ?*align(alignment.toByteUnits()) T {
             if (self.alloc_types_with_align(T, 1, alignment, alloc_param)) |slice| {
                 return @ptrCast(slice.ptr);
             }
             return null;
         }
-        pub inline fn create(self: Self, comptime T: type, alloc_param: SOURCE.PARAM_TYPE()) ?*T {
+        pub inline fn create(self: Self, comptime T: type, alloc_param: PassedAlloc) ?*T {
             if (self.alloc_types(T, 1, alloc_param)) |slice| {
                 return @ptrCast(slice.ptr);
             }
             return null;
         }
-        pub inline fn create_raw(self: Self, comptime T: type, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?*T {
+        pub inline fn create_raw(self: Self, comptime T: type, alignment: ?Alignment, alloc_param: PassedAlloc) ?*T {
             if (self.alloc_raw(@sizeOf(T), alignment, alloc_param)) |ptr| {
                 return @ptrCast(@alignCast(ptr));
             }
             return null;
         }
-        pub inline fn destroy_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: *align(alignment.toByteUnits()) T, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn destroy_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: *align(alignment.toByteUnits()) T, alloc_param: PassedAlloc) void {
             const slice = @as([*]align(alignment.toByteUnits()) T, @ptrCast(ptr))[0..1];
             self.free_types_with_align(alignment, T, slice, alloc_param);
         }
-        pub inline fn destroy(self: Self, comptime T: type, ptr: *T, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn destroy(self: Self, comptime T: type, ptr: *T, alloc_param: PassedAlloc) void {
             const slice = @as([*]T, @ptrCast(ptr))[0..1];
             self.free_types(T, slice, alloc_param);
         }
-        pub inline fn destroy_raw(self: Self, comptime T: type, ptr: *T, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) void {
+        pub inline fn destroy_raw(self: Self, comptime T: type, ptr: *T, alignment: ?Alignment, alloc_param: PassedAlloc) void {
             const slice = @as([*]u8, @ptrCast(ptr))[0..@sizeOf(T)];
             self.free_raw(slice, alignment, alloc_param);
         }
-        pub inline fn clone_one_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: *align(alignment.toByteUnits()) T, alloc_param: SOURCE.PARAM_TYPE()) ?*align(alignment.toByteUnits()) T {
+        pub inline fn clone_one_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: *align(alignment.toByteUnits()) T, alloc_param: PassedAlloc) ?*align(alignment.toByteUnits()) T {
             if (self.create_with_align(T, alignment, alloc_param)) |new_ptr| {
                 new_ptr.* = ptr.*;
                 return new_ptr;
             }
             return null;
         }
-        pub inline fn clone_one(self: Self, comptime T: type, ptr: *T, alloc_param: SOURCE.PARAM_TYPE()) ?*T {
+        pub inline fn clone_one(self: Self, comptime T: type, ptr: *T, alloc_param: PassedAlloc) ?*T {
             if (self.create(T, alloc_param)) |new_ptr| {
                 new_ptr.* = ptr.*;
                 return new_ptr;
             }
             return null;
         }
-        pub inline fn clone_one_raw(self: Self, comptime T: type, ptr: *T, alignment: ?Alignment, alloc_param: SOURCE.PARAM_TYPE()) ?*T {
+        pub inline fn clone_one_raw(self: Self, comptime T: type, ptr: *T, alignment: ?Alignment, alloc_param: PassedAlloc) ?*T {
             if (self.create_raw(T, alignment, alloc_param)) |new_ptr| {
                 new_ptr.* = ptr.*;
                 return new_ptr;

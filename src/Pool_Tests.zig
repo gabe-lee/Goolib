@@ -487,7 +487,7 @@ const BitTrackedCachedPool = BitTrackedBlocksPool(.{
     .IDX = u32,
     .LOCK_MODE = .NO_LOCKS,
     .SLOTS_PER_BLOCK = 64,
-    .ALLOC_MODE = .CACHED_ALLOC,
+    .ALLOC_MODE = .CACHED_ALLOCATOR_INTERFACE,
 });
 
 test "BitTrackedBlocksPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
@@ -1014,7 +1014,7 @@ test "BitTrackedBlocksPool -> struct elements" {
         .IDX = u32,
         .LOCK_MODE = .NO_LOCKS,
         .SLOTS_PER_BLOCK = 320,
-        .ALLOC_MODE = .MANUAL_ALLOC,
+        .ALLOC_MODE = .PASSED_ALLOCATOR_INTERFACE,
     });
 
     var pool: Pool = .{};
@@ -1049,7 +1049,7 @@ test "BitTrackedBlocksPool -> struct elements (u16 state int)" {
         .STATE_UINT = u16,
         .LOCK_MODE = .NO_LOCKS,
         .SLOTS_PER_BLOCK = 320,
-        .ALLOC_MODE = .MANUAL_ALLOC,
+        .ALLOC_MODE = .PASSED_ALLOCATOR_INTERFACE,
     });
 
     var pool: Pool = .{};

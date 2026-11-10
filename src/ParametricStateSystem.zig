@@ -415,10 +415,10 @@ pub fn ParametricStateSystem(
         const DepPool = BitTrackedPool(.{ .ELEM = DependantNode, .IDX = u32, .LOCK_MODE = .NO_LOCKS, .SLOTS_PER_BLOCK = 64 });
 
         const ListAlloc = Root.ListSlice.ListFullDefinition;
-        const MetaList = ListAlloc(ParamMeta, IndexType, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const QueueList = ListAlloc(UpdateQueueItem, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const DeleteList = ListAlloc(ParamRef, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
-        const FuncList = ListAlloc(FunctionDependants, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .MANUAL_ALLOC);
+        const MetaList = ListAlloc(ParamMeta, IndexType, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+        const QueueList = ListAlloc(UpdateQueueItem, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+        const DeleteList = ListAlloc(ParamRef, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+        const FuncList = ListAlloc(FunctionDependants, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
 
         pub var initialized: bool = false;
         var system_allocator: Allocator = DummyAllocator.allocator_panic_free_noop;
