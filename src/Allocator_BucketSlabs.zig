@@ -436,7 +436,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
             }
         }
         fn alloc_internal(self: *Self, size: usize, alignment: ?Alignment) ?[*]u8 {
-            if (size == 0) return zero_length_ptr(alignment);
+            if (size == 0) return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
                 self.stats.smallest_allocation_request_ever = @min(self.stats.smallest_allocation_request_ever, size);
@@ -741,7 +741,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
         fn realloc_internal(self: *Self, memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment) ?[*]u8 {
             if (new_len == 0) {
                 if (memory.len != 0) self.free_internal(memory, alignment);
-                return zero_length_ptr(alignment);
+                return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
             }
             if (memory.len == 0) return self.alloc_internal(new_len, alignment);
             if (self.resize_internal(memory, new_len, alignment)) return memory.ptr;
@@ -903,11 +903,6 @@ const LOG_FAIL_MSG = "failed to allocate memory for BucketSlabAlloc usage loggin
 
 inline fn stat_value_or_zero(value: usize) usize {
     return if (value == math.maxInt(usize)) 0 else value;
-}
-
-inline fn zero_length_ptr(alignment: ?Alignment) [*]u8 {
-    const real_align: usize = if (alignment) |a| a.toByteUnits() else 1;
-    return @ptrFromInt(std.mem.alignBackward(usize, math.maxInt(usize), real_align));
 }
 
 pub const GlobalDef = struct {
@@ -1198,7 +1193,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         pub fn alloc_raw(size: usize, alignment: ?Alignment) ?[*]u8 {
             LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
             defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            if (size == 0) return zero_length_ptr(alignment);
+            if (size == 0) return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
                 gbsa.stats.smallest_allocation_request_ever = @min(gbsa.stats.smallest_allocation_request_ever, size);
@@ -1388,6 +1383,12 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             }
             return null;
         }
+        pub fn remap_raw(memory: []u8, new_len: usize, alignment: ?Alignment) ?[*]u8 {
+            if (resize_raw(memory, new_len, alignment)) {
+                return memory.ptr;
+            }
+            return null;
+        }
 
         fn free_impl(self_opaque: *anyopaque, memory: []u8, alignment: Alignment, ret_addr: usize) void {
             _ = ret_addr;
@@ -1506,7 +1507,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         pub fn realloc_raw(memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment) ?[*]u8 {
             if (new_len == 0) {
                 if (memory.len != 0) free_raw(memory, alignment);
-                return zero_length_ptr(alignment);
+                return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
             }
             if (memory.len == 0) return alloc_raw(new_len, alignment);
             if (resize_raw(memory, new_len, alignment)) return memory.ptr;

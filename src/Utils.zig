@@ -1240,19 +1240,19 @@ pub fn invalid_ptr_many_const(comptime T: type) [*]const T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) @alignOf(T) else 1);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_align(comptime T: type, comptime alignment: usize) *T {
+pub fn invalid_ptr_align(comptime T: type, alignment: usize) *T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_const_align(comptime T: type, comptime alignment: usize) *const T {
+pub fn invalid_ptr_const_align(comptime T: type, alignment: usize) *const T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_many_align(comptime T: type, comptime alignment: usize) [*]T {
+pub fn invalid_ptr_many_align(comptime T: type, alignment: usize) [*]T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_many_const_align(comptime T: type, comptime alignment: usize) [*]const T {
+pub fn invalid_ptr_many_const_align(comptime T: type, alignment: usize) [*]const T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
     return @ptrFromInt(addr);
 }
@@ -1262,26 +1262,26 @@ pub fn invalid_slice(comptime T: type) []T {
 pub fn invalid_slice_const(comptime T: type) []const T {
     return invalid_ptr_many(T)[0..0];
 }
-pub fn invalid_ptr_custom_align(comptime T: type, comptime alignment: usize) *align(alignment) T {
+pub fn invalid_ptr_custom_align(comptime T: type, alignment: usize) *align(alignment) T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), alignment);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_const_custom_align(comptime T: type, comptime alignment: usize) *align(alignment) const T {
+pub fn invalid_ptr_const_custom_align(comptime T: type, alignment: usize) *align(alignment) const T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), alignment);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_many_custom_align(comptime T: type, comptime alignment: usize) [*]align(alignment) T {
+pub fn invalid_ptr_many_custom_align(comptime T: type, alignment: usize) [*]align(alignment) T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), alignment);
     return @ptrFromInt(addr);
 }
-pub fn invalid_ptr_many_const_custom_align(comptime T: type, comptime alignment: usize) [*]align(alignment) const T {
+pub fn invalid_ptr_many_const_custom_align(comptime T: type, alignment: usize) [*]align(alignment) const T {
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), alignment);
     return @ptrFromInt(addr);
 }
-pub fn invalid_slice_custom_align(comptime T: type, comptime alignment: usize) []align(alignment) T {
+pub fn invalid_slice_custom_align(comptime T: type, alignment: usize) []align(alignment) T {
     return invalid_ptr_many_custom_align(T, alignment)[0..0];
 }
-pub fn invalid_slice_const_custom_align(comptime T: type, comptime alignment: usize) []align(alignment) const T {
+pub fn invalid_slice_const_custom_align(comptime T: type, alignment: usize) []align(alignment) const T {
     return invalid_ptr_many_custom_align(T, alignment)[0..0];
 }
 
