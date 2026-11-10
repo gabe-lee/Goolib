@@ -75,6 +75,7 @@ pub const Math = @import("./Math.zig");
 pub const Matrix = @import("./Matrix.zig");
 pub const Measurement = @import("./Measurement.zig");
 pub const MSDF_Generator_Bezier = @import("./MSDF_Generator_Bezier.zig");
+pub const Observer = @import("./Observer.zig");
 pub const ParametricStateSystem = @import("./ParametricStateSystem.zig");
 // pub const ParamTable = @import("./ParamTable.zig");
 pub const Pool = @import("./Pool.zig");
@@ -147,6 +148,7 @@ comptime {
         _ = @import("./Matrix.zig");
         _ = @import("./Measurement.zig");
         _ = @import("./MSDF_Generator_Bezier.zig");
+        _ = @import("./Observer.zig");
         _ = @import("./ParametricStateSystem.zig");
         // _ = @import("./ParamTable.zig");
         _ = @import("./Pool.zig");

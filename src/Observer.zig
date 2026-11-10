@@ -21,6 +21,12 @@
 //    misrepresented as being the original software.
 // 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Observer_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const build = @import("builtin");
 
@@ -169,7 +175,8 @@ pub fn Observable(comptime T: type, comptime NOTIFICATION_: type, comptime ALLOC
         pub fn notify_all_observers_that_exist_report_if_all_exist(self: Self, notif: NOTIFICATION) bool {
             var all_exist: bool = true;
             for (self.observers.zig_slice_entire_const()) |observer| {
-                all_exist = all_exist and observer.notify_if_exists_and_report_exists(notif);
+                const exists = observer.notify_if_exists_and_report_exists(notif);
+                all_exist = all_exist and exists;
             }
             return all_exist;
         }
@@ -220,7 +227,7 @@ pub fn ObservingActionSource(comptime DEF: ObservingActionDef) type {
         pub fn CACHED_FN_INIT(comptime self: Self) self.CACHED_FN() {
             return switch (comptime self) {
                 .RUNTIME_FN_PTR => noop,
-                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => void,
+                .COMPTIME_FN_BODY, .COMPTIME_FN_PTR => {},
             };
         }
         pub fn CONST_FN(comptime self: Self) type {
@@ -244,17 +251,29 @@ pub fn ObservingActionSource(comptime DEF: ObservingActionDef) type {
     };
 }
 
+fn is_observable_type(comptime T: type, comptime NOTIF: type, comptime ALLOC_SOURCE: AllocSource) bool {
+    switch (comptime @typeInfo(T)) {
+        .@"struct" => {
+            return Types.type_has_decl_with_type_and_val(T, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
+                Types.type_has_decl_with_type_and_val(T, "NOTIFICATION", type, NOTIF) and //
+                Types.type_has_decl_with_type(T, "ALLOC_SOURCE", AllocSource) and //
+                @field(T, "ALLOC_SOURCE").equals(ALLOC_SOURCE);
+        },
+        else => return false,
+    }
+}
+
+fn assert_observable_input(comptime ALLOW_NON_OBSERVABLE_INPUTS: bool, comptime NOTIF: type, comptime ALLOC_SOURCE: AllocSource, comptime IN: type) void {
+    assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+}
+
 fn add_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: AllocSource, passed_alloc: ALLOC_SOURCE.PARAM_TYPE(), obs: Observer(NOTIF), comptime IN: type, in: IN, comptime ALLOW_NON_OBSERVABLE_INPUTS: bool) void {
-    const INFO = @typeInfo(IN);
-    switch (comptime INFO) {
+    switch (comptime @typeInfo(IN)) {
         .pointer => |PTR| {
             const CHILD = PTR.child;
-            if (Types.type_has_decl_with_type_and_val(CHILD, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                Types.type_has_decl_with_type_and_val(CHILD, "NOTIFICATION", type, NOTIF) and //
-                Types.type_has_decl_with_type(CHILD, "ALLOC_SOURCE", AllocSource) and //
-                @field(CHILD, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
+            if (comptime (is_observable_type(CHILD, NOTIF, ALLOC_SOURCE) and //
                 PTR.attrs.@"const" == false and //
-                (PTR.size == .one or PTR.size == .slice))
+                (PTR.size == .one or PTR.size == .slice)))
             {
                 switch (comptime PTR.size) {
                     .one => {
@@ -269,52 +288,57 @@ fn add_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: Alloc
                 }
             } else {
                 const CHILD_INFO = @typeInfo(CHILD);
-                if (CHILD_INFO == .array) {
-                    const CHILD2 = CHILD_INFO.array.child;
-                    const CHILD_INFO2 = @typeInfo(CHILD2);
-                    if (CHILD_INFO2 == .pointer) {
-                        const CHILD_PTR2 = CHILD_INFO2.pointer;
-                        const CHILD3 = CHILD_PTR2.child;
-                        if (Types.type_has_decl_with_type_and_val(CHILD3, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                            Types.type_has_decl_with_type_and_val(CHILD3, "NOTIFICATION", type, NOTIF) and //
-                            Types.type_has_decl_with_type(CHILD3, "ALLOC_SOURCE", AllocSource) and //
-                            @field(CHILD3, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
-                            (CHILD_PTR2.attrs.@"const" == false) and //
-                            (CHILD_PTR2.size == .one))
-                        {
-                            switch (comptime PTR.size) {
-                                .one => {
-                                    for (in[0..]) |sub_in| {
-                                        sub_in.add_observer(obs, passed_alloc);
-                                    }
-                                },
-                                else => unreachable,
-                            }
-                        } else {
-                            assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
-                        }
-                    } else if (Types.type_has_decl_with_type_and_val(CHILD2, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                        Types.type_has_decl_with_type_and_val(CHILD2, "NOTIFICATION", type, NOTIF) and //
-                        Types.type_has_decl_with_type(CHILD2, "ALLOC_SOURCE", AllocSource) and //
-                        @field(CHILD2, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
-                        (PTR.attrs.@"const" == false) and //
-                        (PTR.size == .one))
-                    {
-                        switch (comptime PTR.size) {
-                            .one => {
-                                for (in[0..]) |*sub_in| {
+                switch (comptime CHILD_INFO) {
+                    .array => |ARR| {
+                        const CHILD2 = ARR.child;
+                        const CHILD2_INFO = @typeInfo(CHILD2);
+                        if (comptime CHILD2_INFO == .pointer) {
+                            const CHILD_PTR2 = CHILD2_INFO.pointer;
+                            if (comptime (is_observable_type(CHILD_PTR2.child, NOTIF, ALLOC_SOURCE) and //
+                                CHILD_PTR2.attrs.@"const" == false and //
+                                CHILD_PTR2.size == .one and //
+                                PTR.attrs.@"const" == false and //
+                                PTR.size == .one))
+                            {
+                                for (in[0..]) |sub_in| {
                                     sub_in.add_observer(obs, passed_alloc);
                                 }
-                            },
-                            else => unreachable,
+                            } else {
+                                assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                            }
+                        } else if (comptime (is_observable_type(CHILD2, NOTIF, ALLOC_SOURCE) and //
+                            PTR.attrs.@"const" == false and //
+                            PTR.size == .one))
+                        {
+                            for (in[0..]) |*sub_in| {
+                                sub_in.add_observer(obs, passed_alloc);
+                            }
+                        } else {
+                            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
                         }
-                    } else {
-                        assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
-                    }
-                } else {
-                    assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+                    },
+                    .pointer => |CHILD_PTR| {
+                        if (comptime (is_observable_type(CHILD_PTR.child, NOTIF, ALLOC_SOURCE) and //
+                            CHILD_PTR.attrs.@"const" == false and //
+                            PTR.attrs.@"const" == false and //
+                            PTR.size == .slice))
+                        {
+                            for (in) |sub_in| {
+                                sub_in.add_observer(obs, passed_alloc);
+                            }
+                        } else {
+                            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                        }
+                    },
+                    else => {
+                        assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                    },
                 }
-                assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+            }
+        },
+        .array => |ARR| {
+            inline for (0..ARR.len) |i| {
+                add_observer_on_all_inputs(NOTIF, ALLOC_SOURCE, passed_alloc, obs, ARR.child, in[i], ALLOW_NON_OBSERVABLE_INPUTS);
             }
         },
         .@"struct" => |STRUCT| {
@@ -323,22 +347,18 @@ fn add_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: Alloc
             }
         },
         else => {
-            assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL input must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
         },
     }
 }
 
 fn remove_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: AllocSource, obs: Observer(NOTIF), comptime IN: type, in: IN, comptime ALLOW_NON_OBSERVABLE_INPUTS: bool) void {
-    const INFO = @typeInfo(IN);
-    switch (comptime INFO) {
+    switch (comptime @typeInfo(IN)) {
         .pointer => |PTR| {
             const CHILD = PTR.child;
-            if (Types.type_has_decl_with_type_and_val(CHILD, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                Types.type_has_decl_with_type_and_val(CHILD, "NOTIFICATION", type, NOTIF) and //
-                Types.type_has_decl_with_type(CHILD, "ALLOC_SOURCE", AllocSource) and //
-                @field(CHILD, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
+            if (comptime (is_observable_type(CHILD, NOTIF, ALLOC_SOURCE) and //
                 PTR.attrs.@"const" == false and //
-                (PTR.size == .one or PTR.size == .slice))
+                (PTR.size == .one or PTR.size == .slice)))
             {
                 switch (comptime PTR.size) {
                     .one => {
@@ -353,52 +373,57 @@ fn remove_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: Al
                 }
             } else {
                 const CHILD_INFO = @typeInfo(CHILD);
-                if (CHILD_INFO == .array) {
-                    const CHILD2 = CHILD_INFO.array.child;
-                    const CHILD_INFO2 = @typeInfo(CHILD2);
-                    if (CHILD_INFO2 == .pointer) {
-                        const CHILD_PTR2 = CHILD_INFO2.pointer;
-                        const CHILD3 = CHILD_PTR2.child;
-                        if (Types.type_has_decl_with_type_and_val(CHILD3, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                            Types.type_has_decl_with_type_and_val(CHILD3, "NOTIFICATION", type, NOTIF) and //
-                            Types.type_has_decl_with_type(CHILD3, "ALLOC_SOURCE", AllocSource) and //
-                            @field(CHILD3, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
-                            (CHILD_PTR2.attrs.@"const" == false) and //
-                            (CHILD_PTR2.size == .one))
-                        {
-                            switch (comptime PTR.size) {
-                                .one => {
-                                    for (in[0..]) |sub_in| {
-                                        sub_in.remove_observer(obs);
-                                    }
-                                },
-                                else => unreachable,
-                            }
-                        } else {
-                            assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL inputs must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
-                        }
-                    } else if (Types.type_has_decl_with_type_and_val(CHILD2, "GENERIC_ID", u64, comptime OBSERVABLE_GEN_ID()) and //
-                        Types.type_has_decl_with_type_and_val(CHILD2, "NOTIFICATION", type, NOTIF) and //
-                        Types.type_has_decl_with_type(CHILD2, "ALLOC_SOURCE", AllocSource) and //
-                        @field(CHILD2, "ALLOC_SOURCE").equals(ALLOC_SOURCE) and //
-                        (PTR.attrs.@"const" == false) and //
-                        (PTR.size == .one))
-                    {
-                        switch (comptime PTR.size) {
-                            .one => {
-                                for (in[0..]) |*sub_in| {
+                switch (comptime CHILD_INFO) {
+                    .array => |ARR| {
+                        const CHILD2 = ARR.child;
+                        const CHILD2_INFO = @typeInfo(CHILD2);
+                        if (comptime CHILD2_INFO == .pointer) {
+                            const CHILD_PTR2 = CHILD2_INFO.pointer;
+                            if (comptime (is_observable_type(CHILD_PTR2.child, NOTIF, ALLOC_SOURCE) and //
+                                CHILD_PTR2.attrs.@"const" == false and //
+                                CHILD_PTR2.size == .one and //
+                                PTR.attrs.@"const" == false and //
+                                PTR.size == .one))
+                            {
+                                for (in[0..]) |sub_in| {
                                     sub_in.remove_observer(obs);
                                 }
-                            },
-                            else => unreachable,
+                            } else {
+                                assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                            }
+                        } else if (comptime (is_observable_type(CHILD2, NOTIF, ALLOC_SOURCE) and //
+                            PTR.attrs.@"const" == false and //
+                            PTR.size == .one))
+                        {
+                            for (in[0..]) |*sub_in| {
+                                sub_in.remove_observer(obs);
+                            }
+                        } else {
+                            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
                         }
-                    } else {
-                        assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL inputs must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
-                    }
-                } else {
-                    assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL inputs must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+                    },
+                    .pointer => |CHILD_PTR| {
+                        if (comptime (is_observable_type(CHILD_PTR.child, NOTIF, ALLOC_SOURCE) and //
+                            CHILD_PTR.attrs.@"const" == false and //
+                            PTR.attrs.@"const" == false and //
+                            PTR.size == .slice))
+                        {
+                            for (in) |sub_in| {
+                                sub_in.remove_observer(obs);
+                            }
+                        } else {
+                            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                        }
+                    },
+                    else => {
+                        assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
+                    },
                 }
-                assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL inputs must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+            }
+        },
+        .array => |ARR| {
+            inline for (0..ARR.len) |i| {
+                remove_observer_on_all_inputs(NOTIF, ALLOC_SOURCE, obs, ARR.child, in[i], ALLOW_NON_OBSERVABLE_INPUTS);
             }
         },
         .@"struct" => |STRUCT| {
@@ -407,7 +432,7 @@ fn remove_observer_on_all_inputs(comptime NOTIF: type, comptime ALLOC_SOURCE: Al
             }
         },
         else => {
-            assert_with_reason(ALLOW_NON_OBSERVABLE_INPUTS, @src(), "if `ALLOW_NON_OBSERVABLE_INPUTS` is false, ALL inputs must be one of `*Observable(T, {s}, {s})`,  `*[_]Observable(T, ..., ...)`,  `[]Observable(T, ..., ...)`,  `[_]*Observable(T, ..., ...)` types (or a struct where every field is one of the previous types), got type `{s}`", .{ @typeName(NOTIF), ALLOC_SOURCE.debug_str(), @typeName(IN) });
+            assert_observable_input(ALLOW_NON_OBSERVABLE_INPUTS, NOTIF, ALLOC_SOURCE, IN);
         },
     }
 }
