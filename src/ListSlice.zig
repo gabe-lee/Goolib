@@ -45,7 +45,6 @@ const Growth = Common.GrowthModel;
 const FuncParamType = Common.FuncParamType;
 const ErrorBehavior = Common.ErrorBehavior;
 const AllocErr = Utils.Alloc.AllocErr;
-const AllocSourceMode = Common.AllocSourceMode;
 const AllocSource = Root.Allocator.AllocSource;
 const AllocAdapter = Root.Allocator.AllocatorAdapter;
 
@@ -257,7 +256,7 @@ pub const ListDefNoElem = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
+    ALLOC: AllocSource = .PASSED_ALLOCATOR_INTERFACE,
 
     pub inline fn List(comptime self: ListDefNoElem, comptime T: type) type {
         return ListFullDefinition(T, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -270,6 +269,7 @@ pub const ListDefNoElem = struct {
             .FIELD_LAYOUT = self.FIELD_LAYOUT,
             .INDEX_LAYOUT = self.INDEX_LAYOUT,
             .OWNERSHIP = self.OWNERSHIP,
+            .ALLOC = self.ALLOC,
         };
     }
     pub fn with_ownership(comptime self: ListDefNoElem, comptime new_ownership: Root.ListSlice.Ownership) ListDefNoElem {
@@ -278,6 +278,7 @@ pub const ListDefNoElem = struct {
             .FIELD_LAYOUT = self.FIELD_LAYOUT,
             .INDEX_LAYOUT = self.INDEX_LAYOUT,
             .OWNERSHIP = new_ownership,
+            .ALLOC = self.ALLOC,
         };
     }
 };
@@ -288,7 +289,7 @@ pub const ListDef = struct {
     FIELD_LAYOUT: FieldLayout = .WHOLE_STRUCTS,
     INDEX_LAYOUT: IndexLayout = .SERIAL_INDEXES,
     OWNERSHIP: Ownership = .REFERENCED_IMMUTABLE,
-    ALLOC: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
+    ALLOC: AllocSource = .PASSED_ALLOCATOR_INTERFACE,
 
     pub inline fn List(comptime self: ListDef) type {
         return ListFullDefinition(self.ELEM, self.IDX, self.FIELD_LAYOUT, self.INDEX_LAYOUT, self.OWNERSHIP, self.ALLOC);
@@ -1398,7 +1399,7 @@ pub fn ListFullDefinition(
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return IMPL.remove_range_filtered(self, start_idx, end_idx_exclusive, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return IMPL.remove_range_filtered(self, start_idx, end_idx_exclusive, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_range_filtered(
             self: *ListSelf,
@@ -1414,7 +1415,7 @@ pub fn ListFullDefinition(
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return IMPL.swap_remove_range_filtered(self, start_idx, end_idx_exclusive, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return IMPL.swap_remove_range_filtered(self, start_idx, end_idx_exclusive, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn delete_filtered(
             self: *ListSelf,
@@ -1470,7 +1471,7 @@ pub fn ListFullDefinition(
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return IMPL.remove_filtered(self, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return IMPL.remove_filtered(self, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_filtered(
             self: *ListSelf,
@@ -1484,7 +1485,7 @@ pub fn ListFullDefinition(
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return IMPL.swap_remove_filtered(self, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return IMPL.swap_remove_filtered(self, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         //*****************
         // ROOT FLAT TREE
@@ -2974,8 +2975,7 @@ pub fn ListFullDefinition(
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack: ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).Stack,
-            comptime STACK_ALLOC_SOURCE: AllocSource,
-            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc,
+            stack_alloc: InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return IMPL.forward_linked_traverser_pre_allocated_stack(self, FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE, stack, stack_alloc, stack_growth);
@@ -2986,8 +2986,7 @@ pub fn ListFullDefinition(
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack_capacity: IDX,
-            comptime STACK_ALLOC_SOURCE: AllocSource,
-            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc,
+            stack_alloc: InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return IMPL.forward_linked_traverser_allocate_new_stack(self, FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE, stack_capacity, stack_alloc, stack_growth);

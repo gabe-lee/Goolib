@@ -215,6 +215,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub const PassedAlloc = List.PassedAlloc;
         pub const NilPassedAlloc = List.NilPassedAlloc;
         pub const CachedAlloc = List.CachedAlloc;
+        pub const InitAlloc = List.InitAlloc;
         pub const Alloc = List.Alloc;
 
         //****************
@@ -243,23 +244,23 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .data_len = @intCast(data_slice.len),
             };
         }
-        pub fn allocate_new(init_cap: IDX, alloc: Allocator) ListAlloc {
+        pub fn allocate_new(init_cap: IDX, init_alloc: InitAlloc) ListAlloc {
             var list = ListAlloc.new();
-            list.cached_alloc = ALLOC_MODE.alloc_to_cached_alloc(alloc);
-            realloc_internal(&list, init_cap, ALLOC_MODE.alloc_to_func_alloc(alloc), .ERRORS_ARE_UNREACHABLE);
+            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .ERRORS_ARE_UNREACHABLE);
             return list;
         }
-        pub fn allocate_new_set_len(init_cap: IDX, alloc: Allocator) ListAlloc {
+        pub fn allocate_new_set_len(init_cap: IDX, init_alloc: InitAlloc) ListAlloc {
             var list = ListAlloc.new();
-            list.cached_alloc = ALLOC_MODE.alloc_to_cached_alloc(alloc);
-            realloc_internal(&list, init_cap, ALLOC_MODE.alloc_to_func_alloc(alloc), .ERRORS_ARE_UNREACHABLE);
+            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .ERRORS_ARE_UNREACHABLE);
             list.set_len_unchecked(init_cap);
             return list;
         }
-        pub fn allocate_new_might_error(init_cap: IDX, alloc: Allocator) AllocErr!ListAlloc {
+        pub fn allocate_new_might_error(init_cap: IDX, init_alloc: InitAlloc) AllocErr!ListAlloc {
             var list = ListAlloc.new();
-            list.cached_alloc = ALLOC_MODE.alloc_to_cached_alloc(alloc);
-            try realloc_internal(&list, init_cap, ALLOC_MODE.alloc_to_func_alloc(alloc), .RETURN_ERRORS);
+            list.alloc = Alloc.new_from_init_alloc(init_alloc);
+            try realloc_internal(&list, init_cap, Alloc.init_to_passed_alloc(init_alloc), .RETURN_ERRORS);
             return list;
         }
         pub fn from_allocated_slice_keep_data(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
@@ -267,14 +268,14 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
-                .cached_alloc = alloc,
+                .alloc = Alloc.new(alloc),
             };
         }
         pub fn from_allocated_slice_set_empty(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
             return ListAlloc{
                 .root_ptr = @ptrCast(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
-                .cached_alloc = alloc,
+                .alloc = Alloc.new(alloc),
             };
         }
 
@@ -1907,7 +1908,6 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //**************
         fn realloc_internal(self: *List, new_exact_cap: IDX, passed_alloc: PassedAlloc, comptime ERRORS: ErrorBehavior) ERRORS.PayloadVoid(Utils.Alloc.AllocErr) {
             comptime assert_owned_allocated(@src());
-            // const alloc = ALLOC_MODE.get_alloc(alloc_fn, self.cached_alloc);
             self.data_len = @min(self.data_len, new_exact_cap);
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
@@ -1995,17 +1995,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             return realloc_internal(self, exact_cap, alloc, .RETURN_ERRORS);
         }
         fn free_internal(self: *List, alloc_fn: PassedAlloc) void {
-            const alloc = ALLOC_MODE.get_alloc(alloc_fn, self.cached_alloc);
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    alloc.free(self.root_ptr[0..self.root_cap]);
+                    self.alloc.free_types(ELEM, self.root_ptr[0..self.root_cap], alloc_fn);
                     self.root_ptr = undefined;
                     self.data_len = 0;
                     self.root_cap = 0;
                 },
                 .SPLIT_FIELDS => {
                     const byte_cap = end_stride() * self.root_cap;
-                    alloc.free(self.root_ptr[0..byte_cap]);
+                    self.alloc.free_bytes_with_align(.fromByteUnits(@alignOf(ELEM)), self.root_ptr[0..byte_cap], alloc_fn);
                     self.root_ptr = undefined;
                     self.data_len = 0;
                     self.root_cap = 0;
@@ -2855,7 +2854,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime RETURN: DeleteReturnMode,
             comptime ALLOC: AllocMode,
             dest_: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -3001,7 +3001,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_delete_range_filtered(
             self: *List,
@@ -3014,7 +3014,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_range_filtered_assume_dest_cap(
             self: *List,
@@ -3028,7 +3028,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_range_filtered_assume_dest_cap(
             self: *List,
@@ -3042,14 +3042,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_range_filtered(
             self: *List,
             start_idx: IDX,
             end_idx_exclusive: IDX,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -3058,14 +3059,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .ORDERED, .RETURN_VAL, .REALLOC, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_range_filtered(
             self: *List,
             start_idx: IDX,
             end_idx_exclusive: IDX,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -3074,7 +3076,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
             assert_valid_range(self.*, start_idx, end_idx_exclusive, @src());
-            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, start_idx, end_idx_exclusive, .SWAP, .RETURN_VAL, .REALLOC, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn delete_filtered(
             self: *List,
@@ -3084,7 +3086,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .IGNORE_VAL, .ASSUME_CAP, {}, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_delete_filtered(
             self: *List,
@@ -3094,7 +3096,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .IGNORE_VAL, .ASSUME_CAP, {}, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_filtered_assume_dest_cap(
             self: *List,
@@ -3105,7 +3107,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .ASSUME_CAP, dest, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_filtered_assume_dest_cap(
             self: *List,
@@ -3116,12 +3118,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .ASSUME_CAP, dest, .PASSED_ALLOCATOR_INTERFACE, dummy_alloc, .GROW_EXACT_NEEDED, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn remove_filtered(
             self: *List,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -3129,12 +3132,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .ORDERED, .RETURN_VAL, .REALLOC, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         pub inline fn swap_remove_filtered(
             self: *List,
             dest: anytype,
-            dest_alloc: Allocator,
+            comptime DEST_ALLOC_SOURCE: AllocSource,
+            dest_alloc: AllocAdapter(DEST_ALLOC_SOURCE).PassedAlloc,
             dest_growth: Growth,
             filter_ctx: anytype,
             comptime FILTER_CTX: anytype,
@@ -3142,7 +3146,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             filter: FilterFnRT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
             comptime FILTER: FilterFnCT(FILTER_FUNC_KIND, @TypeOf(filter_ctx), @TypeOf(FILTER_CTX), null),
         ) IDX {
-            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .REALLOC, dest, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
+            return delete_filtered_internal(self, 0, get_len(self.*), .SWAP, .RETURN_VAL, .REALLOC, dest, DEST_ALLOC_SOURCE, dest_alloc, dest_growth, filter_ctx, FILTER_CTX, FILTER_FUNC_KIND, filter, FILTER);
         }
         //*****************
         // ROOT FLAT TREE
@@ -5814,8 +5818,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack: ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).Stack,
-            comptime STACK_ALLOC_SOURCE: AllocSource,
-            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc,
+            stack_alloc: InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).init_stack_is_allocated(self, stack, stack_alloc, stack_growth);
@@ -5826,23 +5829,19 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             comptime OPT_NEXT_SIBLING_FIELD: ?Field,
             comptime MAX_STACK_MODE: TrackMaxStackMode,
             stack_capacity: IDX,
-            comptime STACK_ALLOC_SOURCE: AllocSource,
-            stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc,
+            stack_alloc: InitAlloc,
             stack_growth: Growth,
         ) ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE) {
             return ForwardLinkedTraverser(FIRST_CHILD_FIELDS, OPT_NEXT_SIBLING_FIELD, MAX_STACK_MODE).init_allocate_new_stack(self, stack_capacity, stack_alloc, stack_growth);
         }
-        pub fn ForwardLinkedTraverser(comptime FIRST_CHILD_FIELDS: []const Field, comptime OPT_NEXT_SIBLING_FIELD: ?Field, comptime MAX_STACK_MODE: TrackMaxStackMode, comptime ALLOC_SOURCE: AllocSource) type {
+        pub fn ForwardLinkedTraverser(comptime FIRST_CHILD_FIELDS: []const Field, comptime OPT_NEXT_SIBLING_FIELD: ?Field, comptime MAX_STACK_MODE: TrackMaxStackMode) type {
             return struct {
                 const ListSelfTraverser = @This();
-                const StackAlloc = AllocAdapter(ALLOC_SOURCE);
-                const StackCachedAlloc = StackAlloc.CachedAlloc;
-                const StackPassedAlloc = StackAlloc.PassedAlloc;
-                const StackInitAlloc = StackAlloc.InitAlloc;
 
                 list: List,
                 stack: Stack = .{},
                 alloc: Alloc = .{},
+                passed_alloc: Alloc.PassedAlloc = Alloc.NilPassedAlloc,
                 stack_growth: Growth = .GROW_EXACT_NEEDED,
                 max_stack_len: if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) IDX else void = if (MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) 0 else {},
 
@@ -5852,20 +5851,24 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .stack = stack,
                     };
                 }
-                pub fn init_stack_is_allocated(list: List, stack: Stack, comptime STACK_ALLOC_SOURCE: AllocSource, stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).PassedAlloc, stack_growth: Growth) ListSelfTraverser {
+                pub fn init_stack_is_allocated(list: List, stack_in: Stack, init_alloc: InitAlloc, stack_growth: Growth) ListSelfTraverser {
+                    var stack = stack_in;
+                    stack.alloc = Alloc.new_from_init_alloc(init_alloc);
                     return ListSelfTraverser{
                         .list = list,
                         .stack = stack,
-                        .alloc = stack_alloc,
+                        .alloc = Alloc.new_from_init_alloc(init_alloc),
+                        .passed_alloc = Alloc.init_to_passed_alloc(init_alloc),
                         .stack_growth = stack_growth,
                     };
                 }
-                pub fn init_allocate_new_stack(list: List, stack_capacity: IDX, comptime STACK_ALLOC_SOURCE: AllocSource, stack_alloc: AllocAdapter(STACK_ALLOC_SOURCE).InitAlloc, stack_growth: Growth) ListSelfTraverser {
-                    const stack = Stack.allocate_new(stack_capacity, stack_alloc);
+                pub fn init_allocate_new_stack(list: List, stack_capacity: IDX, init_alloc: InitAlloc, stack_growth: Growth) ListSelfTraverser {
+                    const stack = Stack.allocate_new(stack_capacity, init_alloc);
                     return ListSelfTraverser{
                         .list = list,
                         .stack = stack,
-                        .alloc = stack_alloc,
+                        .alloc = Alloc.new_from_init_alloc(init_alloc),
+                        .passed_alloc = Alloc.init_to_passed_alloc(init_alloc),
                         .stack_growth = stack_growth,
                     };
                 }
@@ -5878,7 +5881,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 };
                 pub const HAS_NEXT_SIBLING_FIELD = OPT_NEXT_SIBLING_FIELD != null;
                 pub const NEXT_SIBLING_FIELD = if (OPT_NEXT_SIBLING_FIELD) |F| F else {};
-                pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+                pub const Stack = ListFullDefinition(StackFrame, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, ALLOC_MODE);
                 pub const AllowedPaths = union(enum) {
                     ALL: void,
                     WHITELIST: [NUM_CHILD_PATHS]bool,
@@ -5948,7 +5951,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         },
                         .curr_path = 0,
                     };
-                    const new_depth = self.stack.append_one_with_growth_get_idx(new_frame, self.stack_growth, self.alloc);
+                    const new_depth = self.stack.append_one_with_growth_get_idx(new_frame, self.stack_growth, self.passed_alloc);
                     if (comptime MAX_STACK_MODE == .TRACK_MAX_STACK_LEN) {
                         self.max_stack_len = @max(self.max_stack_len, new_depth);
                     }
@@ -6015,7 +6018,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                             if (curr_child_idx >= self.list.get_len()) {
                                 return TraverserError.index_out_of_bounds;
                             }
-                            self.stack.grow_capacity_if_needed_for_n_more_elems(1, self.stack_growth, self.alloc);
+                            self.stack.grow_capacity_if_needed_for_n_more_elems(1, self.stack_growth, self.passed_alloc);
                             self.increment_next_child(depth, curr_child_idx);
                             if (comptime ORDER == .PARENTS_FIRST or ORDER == .ANY_ORDER_MIGHT_HAVE_IDX_GAPS) {
                                 if (comptime ACTION_ERROR != null) {

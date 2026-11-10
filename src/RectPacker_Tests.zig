@@ -92,7 +92,7 @@ const AtlasF32Manual = RectPacker.RowPackedAtlas(
     hashI32,
     equalI32,
     .{},
-    .{ .SIZE_TYPE = f32, .IDX = u16, .ALLOC = .PASSED_ALLOCATOR_INTERFACE },
+    .{ .SIZE_TYPE = f32, .IDX = u16, .ALLOC_SOURCE = .PASSED_ALLOCATOR_INTERFACE },
 );
 
 test "RowPacker -> shelf layout" {

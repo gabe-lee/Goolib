@@ -334,7 +334,7 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             if (CachedAlloc == InitAlloc) return init_alloc;
             return CachedAllocInit;
         }
-        pub fn init_to_passed_alloc(init_alloc: InitAlloc) CachedAlloc {
+        pub fn init_to_passed_alloc(init_alloc: InitAlloc) PassedAlloc {
             if (PassedAlloc == InitAlloc) return init_alloc;
             return NilPassedAlloc;
         }
@@ -415,12 +415,26 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             }
         }
 
-        inline fn get_alloc_iface(self: Self, alloc_param: PassedAlloc) Allocator {
+        inline fn get_alloc_internal(self: Self, alloc_param: PassedAlloc) Allocator {
             return switch (comptime SOURCE) {
                 .PASSED_ALLOCATOR_INTERFACE => alloc_param,
                 .CACHED_ALLOCATOR_INTERFACE => self.f,
                 .COMPTIME_ALLOCATOR_INTERFACE_PTR => C.*,
                 else => unreachable,
+            };
+        }
+
+        pub inline fn get_alloc(self: *Self, alloc_param: PassedAlloc) Allocator {
+            return switch (comptime SOURCE) {
+                .NEVER_ALLOCATES,
+                .COMPILANT_GLOBAL_ALLOCATOR,
+                .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR,
+                .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR,
+                => self.interface(),
+                .CACHED_ALLOCATOR_INTERFACE => self.f,
+                .COMPTIME_ALLOCATOR_INTERFACE_PTR => C.*,
+                .PASSED_ALLOCATOR_INTERFACE => alloc_param,
+                .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => @compileError("cannot get a `std.mem.Allocator` interface from an `AllocatorAdapter` whose allocator source is passed as a compliant pointer; pass the pointer to the adapter methods instead"),
             };
         }
         inline fn get_instantiated_compliant_alloc_ptr(self: Self, alloc_param: PassedAlloc) SOURCE.INSTANTIATED_COMPLIANT_TYPE_PTR() {
@@ -442,10 +456,10 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         // ALLOC
         //*********
         pub inline fn alloc_raw(self: Self, size: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
-            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             switch (comptime SOURCE) {
+                .NEVER_ALLOCATES => return null,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
-                    const alloc = self.get_alloc_iface(alloc_param);
+                    const alloc = self.get_alloc_internal(alloc_param);
                     return alloc.rawAlloc(size, alignment orelse Alignment.@"1", @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
@@ -486,10 +500,10 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         // RESIZE
         //*********
         pub inline fn resize_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) bool {
-            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return false;
             switch (comptime SOURCE) {
+                .NEVER_ALLOCATES => return false,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
-                    const alloc = self.get_alloc_iface(alloc_param);
+                    const alloc = self.get_alloc_internal(alloc_param);
                     return alloc.rawResize(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
@@ -524,10 +538,10 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         // REMAP
         //*********
         pub inline fn remap_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
-            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             switch (comptime SOURCE) {
+                .NEVER_ALLOCATES => return null,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
-                    const alloc = self.get_alloc_iface(alloc_param);
+                    const alloc = self.get_alloc_internal(alloc_param);
                     return alloc.rawRemap(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
@@ -577,10 +591,10 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         // FREE
         //*********
         pub inline fn free_raw(self: Self, memory: []u8, alignment: ?Alignment, alloc_param: PassedAlloc) void {
-            if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return;
             switch (comptime SOURCE) {
+                .NEVER_ALLOCATES => return,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
-                    const alloc = self.get_alloc_iface(alloc_param);
+                    const alloc = self.get_alloc_internal(alloc_param);
                     return alloc.rawFree(memory, alignment orelse Alignment.@"1", @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {

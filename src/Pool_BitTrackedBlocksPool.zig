@@ -30,7 +30,8 @@ const Utils = Root.Utils;
 const Growth = Root.CommonTypes.GrowthModel;
 const RwLock = std.Io.RwLock;
 const Io = std.Io;
-const AllocSourceMode = Root.Allocator.AllocSource;
+const AllocSource = Root.Allocator.AllocSource;
+const AllocAdapter = Root.Allocator.AllocatorAdapter;
 const ListSliceMoule = Root.ListSlice;
 
 const assert_with_reason = Assert.assert_with_reason;
@@ -55,7 +56,7 @@ pub const PoolDef = struct {
     /// Must be a positive multiple of `@bitSizeOf(STATE_UINT)` so that every state
     /// bit maps to a real slot.
     SLOTS_PER_BLOCK: comptime_int = 64,
-    ALLOC_MODE: AllocSourceMode = .PASSED_ALLOCATOR_INTERFACE,
+    ALLOC_MODE: AllocSource = .PASSED_ALLOCATOR_INTERFACE,
     BACK_POINT_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
 };
 
@@ -176,10 +177,10 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         const STATE_INT_BITS: u16 = @bitSizeOf(STATE_INT);
         const STATE_INT_BITS_SHIFT: math.Log2Int(IDX) = @intCast(@ctz(STATE_INT_BITS));
         const STATE_INT_BITS_MINUS_ONE: IDX = @intCast(STATE_INT_BITS - 1);
-        const ALLOC_MODE = DEF.ALLOC_MODE;
-        const CachedAlloc = ALLOC_MODE.CachedAlloc();
-        const FuncAlloc = ALLOC_MODE.FuncParamAlloc();
-        const CACHED_ALLOC_DEFAULT = ALLOC_MODE.CACHED_ALLOC_DEFAULT();
+        const ALLOC_SOURCE = DEF.ALLOC_MODE;
+        const Alloc = AllocAdapter(ALLOC_SOURCE);
+        const PassedAlloc = Alloc.PassedAlloc;
+        const InitAlloc = Alloc.InitAlloc;
         const FULL_STATE_VEC_ALL_ZEROES: StateVector = @splat(0);
         const EMPTY_STATE_BLOCK: STATE_INT = math.maxInt(STATE_INT);
         const SLOT_STEP_PER_STATE_GROUP: IDX = @intCast(STATE_INT_BITS);
@@ -234,7 +235,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         blocks: [*]*DataBlock = invalid_ptr_many(*DataBlock),
         blocks_cap: IDX = 0,
         num_free: IDX = 0,
-        cached_alloc: CachedAlloc = CACHED_ALLOC_DEFAULT,
+        alloc: Alloc = .{},
         lock: if (MASTER_LOCK) RwLock else void = if (MASTER_LOCK) RwLock.init else {},
         io: if (MASTER_LOCK) Io else void = if (MASTER_LOCK) undefined else {},
 
@@ -258,7 +259,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                 self.lock.unlockShared(self.io);
             }
         }
-        pub fn ensure_free_slots_ignore_pool_locks(self: *Self, needed_free_slots: IDX, fn_alloc: FuncAlloc) void {
+        pub fn ensure_free_slots_ignore_pool_locks(self: *Self, needed_free_slots: IDX, fn_alloc: PassedAlloc) void {
             if (self.num_free < needed_free_slots) {
                 const deficit = needed_free_slots - self.num_free;
                 const needed_blocks = @divCeil(deficit, DATA_BLOCK_SLOT_LENGTH);
@@ -266,12 +267,11 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                 assert_with_reason(self.blocks_cap <= INVALID_IDX / DATA_BLOCK_SLOT_LENGTH and needed_blocks <= (INVALID_IDX / DATA_BLOCK_SLOT_LENGTH) - self.blocks_cap, @src(), "adding {d} data blocks would make the pool capacity exceed `math.maxInt(IDX)` ({d})", .{ needed_blocks, INVALID_IDX });
                 const new_blocks_cap = self.blocks_cap + needed_blocks;
                 const old_blocks_cap = self.blocks_cap;
-                const alloc = ALLOC_MODE.get_alloc(fn_alloc, self.cached_alloc);
-                const new_block_list = alloc.realloc(self.blocks[0..self.blocks_cap], new_blocks_cap) catch |e| assert_allocation_failure(@src(), *DataBlock, needed_blocks, e);
+                const new_block_list = self.alloc.realloc_types(*DataBlock, self.blocks[0..self.blocks_cap], new_blocks_cap, fn_alloc) orelse assert_allocation_failure(@src(), *DataBlock, needed_blocks, error.OutOfMemory);
                 self.blocks = new_block_list.ptr;
                 self.blocks_cap = new_blocks_cap;
                 for (self.blocks[old_blocks_cap..new_blocks_cap], old_blocks_cap..) |*block, block_idx| {
-                    const new_block = alloc.create(DataBlock) catch |e| assert_allocation_failure(@src(), DataBlock, 1, e);
+                    const new_block = self.alloc.create(DataBlock, fn_alloc) orelse assert_allocation_failure(@src(), DataBlock, 1, error.OutOfMemory);
                     new_block.* = DataBlock{};
                     if (comptime BACK_STRAT != .SORTED_BLOCKS_BINARY_SEARCH) {
                         new_block.self_idx = @intCast(block_idx);
@@ -295,7 +295,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             }
         }
 
-        pub inline fn ensure_free_slots(self: *Self, needed_free_slots: IDX, fn_alloc: FuncAlloc) void {
+        pub inline fn ensure_free_slots(self: *Self, needed_free_slots: IDX, fn_alloc: PassedAlloc) void {
             self.lock_for_write();
             self.ensure_free_slots_ignore_pool_locks(needed_free_slots, fn_alloc);
             self.unlock_for_write();
@@ -317,12 +317,12 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
         /// Initializes `self` in place. Call this on a fresh value or after
         /// `uninit`. The pool must not be moved or copied after this call,
         /// because its data blocks retain a pointer to it.
-        pub fn init(self: *Self, init_capacity: IDX, allocator: Allocator, init_io: if (MASTER_LOCK) Io else void) void {
+        pub fn init(self: *Self, init_capacity: IDX, init_alloc: InitAlloc, init_io: if (MASTER_LOCK) Io else void) void {
             self.* = .{
-                .cached_alloc = ALLOC_MODE.alloc_to_cached_alloc(allocator),
+                .alloc = Alloc.new_from_init_alloc(init_alloc),
                 .io = init_io,
             };
-            self.ensure_free_slots_ignore_pool_locks(init_capacity, ALLOC_MODE.alloc_to_func_alloc(allocator));
+            self.ensure_free_slots_ignore_pool_locks(init_capacity, Alloc.init_to_passed_alloc(init_alloc));
         }
 
         pub fn clear_all_blocks(self: *Self) void {
@@ -337,20 +337,19 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             self.num_free = (self.blocks_cap * DATA_BLOCK_SLOT_LENGTH);
         }
 
-        pub fn uninit(self: *Self, fn_alloc: FuncAlloc) void {
+        pub fn uninit(self: *Self, fn_alloc: PassedAlloc) void {
             self.lock_for_write();
             if (self.blocks_cap > 0) {
-                const alloc = ALLOC_MODE.get_alloc(fn_alloc, self.cached_alloc);
                 for (self.blocks[0..self.blocks_cap]) |block| {
-                    alloc.destroy(block);
+                    self.alloc.destroy(DataBlock, block, fn_alloc);
                 }
-                alloc.free(self.blocks[0..self.blocks_cap]);
+                self.alloc.free_types(*DataBlock, self.blocks[0..self.blocks_cap], fn_alloc);
             }
             self.unlock_for_write();
             self.* = .{};
         }
 
-        pub fn claim_slot_advanced(self: *Self, fn_alloc: FuncAlloc, comptime pool_lock: PoolLockMode, comptime block_lock: BlockLockMode) *ELEM {
+        pub fn claim_slot_advanced(self: *Self, fn_alloc: PassedAlloc, comptime pool_lock: PoolLockMode, comptime block_lock: BlockLockMode) *ELEM {
             switch (comptime pool_lock) {
                 .CHECK_POOL_LOCKS => self.lock_for_write(),
                 .IGNORE_POOL_LOCKS => {},
@@ -417,7 +416,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             return undefined;
         }
 
-        pub inline fn claim_slot(self: *Self, fn_alloc: FuncAlloc) *ELEM {
+        pub inline fn claim_slot(self: *Self, fn_alloc: PassedAlloc) *ELEM {
             return self.claim_slot_advanced(fn_alloc, .CHECK_POOL_LOCKS, .CHECK_BLOCK_LOCKS);
         }
 

@@ -1259,7 +1259,7 @@ test "ListSlice -> filtered deletes" {
     defer allocated_dest.free(alloc_dest);
     arr = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7 };
     list = L.from_slice_keep_data(arr[0..]);
-    try Test.expect_equal_src(list.remove_filtered(&allocated_dest, alloc_dest, .GROW_EXACT_NEEDED, {}, {}, .RUNTIME_FN_PTR, F.isEven, {}), 4, @src(), "remove_filtered count", .{});
+    try Test.expect_equal_src(list.remove_filtered(&allocated_dest, .PASSED_ALLOCATOR_INTERFACE, alloc_dest, .GROW_EXACT_NEEDED, {}, {}, .RUNTIME_FN_PTR, F.isEven, {}), 4, @src(), "remove_filtered count", .{});
     try expectListEqual(L, list, &.{ 1, 3, 5, 7 }, @src(), "remove_filtered list", .{});
     try expectListEqual(LD, allocated_dest, &.{ 0, 2, 4, 6 }, @src(), "remove_filtered dest", .{});
 

@@ -109,7 +109,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         pub const AABB = AABB2.define_aabb2_type(SIZE_TYPE);
         pub const Rect = Rect2.define_rect2_type(SIZE_TYPE);
         pub const Vec = Vec2.define_vec2_type(SIZE_TYPE);
-        const RowList = ListFull(ConstrainedRow, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
+        const RowList = ListFull(ConstrainedRow, IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, ALLOC_SOURCE);
         const CAN_RELEASE = RELEASE_MODE == .CLAIM_AND_RELEASE;
         const MASTER_LOCK = LOCK_MODE != .NO_LOCKS;
         const Alloc = AllocAdapter(DEF.ALLOC_SOURCE);
@@ -117,7 +117,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         const InitAlloc = Alloc.InitAlloc;
         const HolePool = BitBlockPool(.{
             .ELEM = Hole,
-            .ALLOC_MODE = .PASSED_ALLOCATOR_INTERFACE,
+            .ALLOC_MODE = ALLOC_SOURCE,
             .BACK_POINT_STRATEGY = HOLE_POOL_BACK_STRATEGY,
             .IDX = IDX,
             .LOCK_MODE = LOCK_MODE,
@@ -192,7 +192,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             self.lock_for_write();
             defer self.unlock_for_write();
             self.alloc = Alloc.new_from_init_alloc(alloc);
-            self.constrained_rows = RowList.allocate_new(row_cap, Alloc.init_to_passed_alloc(alloc));
+            self.constrained_rows = RowList.allocate_new(row_cap, alloc);
             self.unconstrained_row = UnconstrainedRow.init(region);
             self.full_region = region;
             self.default_height_fit_threshold = default_height_fit_threshold;
@@ -202,10 +202,10 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 self.holes_pool.init(hole_cap, alloc, io);
             }
         }
-        pub fn init_empty(self: *Self, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
+        pub fn init_empty(self: *Self, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: if (MASTER_LOCK) Io else void) void {
             self.lock_for_write();
             defer self.unlock_for_write();
-            self.alloc = ALLOC.alloc_to_cached_alloc(alloc);
+            self.alloc = Alloc.new_from_init_alloc(alloc);
             self.constrained_rows = RowList{};
             self.unconstrained_row = UnconstrainedRow.init(region);
             self.full_region = region;
@@ -229,12 +229,12 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         }
 
-        pub fn uninit(self: *Self, alloc: ALLOC.FuncParamAlloc()) void {
+        pub fn uninit(self: *Self, alloc: PassedAlloc) void {
             self.lock_for_write();
             defer self.unlock_for_write();
-            self.constrained_rows.free_if_non_zero(ALLOC.get_alloc(alloc, self.alloc));
+            self.constrained_rows.free_if_non_zero(alloc);
             if (comptime CAN_RELEASE) {
-                self.holes_pool.uninit(ALLOC.get_alloc(alloc, self.alloc));
+                self.holes_pool.uninit(alloc);
             }
             self.* = .{};
         }
@@ -259,7 +259,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`rect.size.x == size.y` AND `rect.size.y == size.x`)
-        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.FuncParamAlloc()) ?PackedRect {
+        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedRect {
             self.lock_for_write();
             defer self.unlock_for_write();
             if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
@@ -282,7 +282,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`(aabb.x_max - aabb.x_min) == size.y` AND `(aabb.y_max - aabb.y_min) == size.x`)
-        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.FuncParamAlloc()) ?PackedAABB {
+        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedAABB {
             self.lock_for_write();
             defer self.unlock_for_write();
             if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
@@ -305,7 +305,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             return null;
         }
 
-        fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.FuncParamAlloc()) ?PackedPos {
+        fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedPos {
             const allow_unrotated = rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION;
             const allow_rotated = switch (rotation) {
                 .DO_NOT_ALLOW_ROTATION => false,
@@ -522,14 +522,14 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             return if (best_threshold.kind == .NONE) null else best_threshold;
         }
 
-        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode, alloc: ALLOC.FuncParamAlloc()) PackedPos {
+        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode, alloc: PassedAlloc) PackedPos {
             self.claim_count +|= 1;
             switch (candidate.kind) {
                 .CONSTRAINED => {
                     const row = &self.constrained_rows.zig_slice_entire()[candidate.row_idx];
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool, ALLOC.get_alloc(alloc, self.alloc)), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
@@ -541,7 +541,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 .UNCONSTRAINED => {
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool, ALLOC.get_alloc(alloc, self.alloc)), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
@@ -568,7 +568,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
 
         /// Removes `hole` from `row` and replaces it with up to two smaller holes
         /// covering the area left over by `size`.
-        fn claim_from_hole(row: anytype, hole: *Hole, size: Vec, hole_pool: *HolePool, alloc: Allocator) Vec {
+        fn claim_from_hole(row: anytype, hole: *Hole, size: Vec, hole_pool: *HolePool, alloc: PassedAlloc) Vec {
             const hole_rect = hole.rect;
             remove_hole(row, hole);
 
@@ -610,10 +610,10 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             return hole_rect.pos;
         }
 
-        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool, alloc: ALLOC.FuncParamAlloc()) PackedPos {
+        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool, alloc: PassedAlloc) PackedPos {
             if (!self.unconstrained_row.is_empty()) {
                 const closed_row = self.unconstrained_row.extract_constrained_row(self.full_region);
-                self.constrained_rows.append_one(closed_row, ALLOC.get_alloc(alloc, self.alloc));
+                self.constrained_rows.append_one(closed_row, alloc);
             }
             self.claim_count +|= 1;
             return PackedPos.new(
@@ -623,7 +623,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             );
         }
 
-        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool, alloc: ALLOC.FuncParamAlloc()) ?PackedPos {
+        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool, alloc: PassedAlloc) ?PackedPos {
             if (allow_unrotated and self.unconstrained_row.can_fit_size_on_new_row(size)) {
                 return self.claim_on_new_row(size, false, alloc);
             }
@@ -947,7 +947,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
 
         /// Releases a previously claimed rect so its area can be reused. Only valid
         /// when the packer was constructed with `.CLAIM_AND_RELEASE`.
-        pub fn release_rect(self: *Self, rect: PackedRect, alloc: ALLOC.FuncParamAlloc()) void {
+        pub fn release_rect(self: *Self, rect: PackedRect, alloc: PassedAlloc) void {
             if (comptime CAN_RELEASE) {
                 self.lock_for_write();
                 defer self.unlock_for_write();
@@ -957,7 +957,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         }
 
-        fn release_rect_internal(self: *Self, rect: PackedRect, alloc: ALLOC.FuncParamAlloc()) void {
+        fn release_rect_internal(self: *Self, rect: PackedRect, alloc: PassedAlloc) void {
             const released = rect.rect;
             assert_with_reason(released.to_aabb2().fully_within(self.full_region.to_aabb2()), @src(), "rect is not within packer region", .{});
             assert_with_reason(rect.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for rect is out of bounds for packer", .{});
@@ -967,7 +967,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 self.reset();
                 return;
             }
-            const new_hole = self.holes_pool.claim_slot(ALLOC.get_alloc(alloc, self.alloc));
+            const new_hole = self.holes_pool.claim_slot(alloc);
             if (rect.row_idx == self.constrained_rows.get_len()) {
                 self.unconstrained_row.release_position(released.pos, released.size, new_hole, &self.holes_pool);
                 return;
@@ -977,7 +977,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         }
 
         /// Same as `release_rect`, but accepts the result of `claim_aabb`.
-        pub fn release_aabb(self: *Self, aabb: PackedAABB, alloc: ALLOC.FuncParamAlloc()) void {
+        pub fn release_aabb(self: *Self, aabb: PackedAABB, alloc: PassedAlloc) void {
             if (comptime CAN_RELEASE) {
                 self.lock_for_write();
                 defer self.unlock_for_write();
@@ -987,7 +987,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         }
 
-        fn release_aabb_internal(self: *Self, aabb: PackedAABB, alloc: ALLOC.FuncParamAlloc()) void {
+        fn release_aabb_internal(self: *Self, aabb: PackedAABB, alloc: PassedAlloc) void {
             const released = Rect.new(aabb.aabb.get_min_point(), aabb.aabb.get_size());
             assert_with_reason(aabb.aabb.fully_within(self.full_region.to_aabb2()), @src(), "aabb is not within packer region", .{});
             assert_with_reason(aabb.row_idx <= self.constrained_rows.get_len(), @src(), "row idx for aabb is out of bounds for packer", .{});
@@ -997,7 +997,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 self.reset();
                 return;
             }
-            const new_hole = self.holes_pool.claim_slot(ALLOC.get_alloc(alloc, self.alloc));
+            const new_hole = self.holes_pool.claim_slot(alloc);
             if (aabb.row_idx == self.constrained_rows.get_len()) {
                 self.unconstrained_row.release_position(released.pos, released.size, new_hole, &self.holes_pool);
                 return;
@@ -1051,7 +1051,7 @@ pub fn RowPackedAtlas(
 ) type {
     return struct {
         const Self = @This();
-        pub const Packer = RowPacker(PACKER_DEF.with_alloc(.PASSED_ALLOCATOR_INTERFACE));
+        pub const Packer = RowPacker(PACKER_DEF);
         pub const Rect = Packer.Rect;
         pub const PackedRect = Packer.PackedRect;
         pub const PackedAABB = Packer.PackedAABB;
@@ -1065,15 +1065,17 @@ pub fn RowPackedAtlas(
         const LOCK_MODE = PACKER_DEF.LOCK_MODE;
         const MASTER_LOCK = LOCK_MODE != .NO_LOCKS;
         const Alloc = AllocAdapter(PACKER_DEF.ALLOC_SOURCE);
+        const PassedAlloc = Alloc.PassedAlloc;
+        const InitAlloc = Alloc.InitAlloc;
 
         hash_map: Map = .{},
         packer: Packer = .{},
         alloc: Alloc = .{},
 
-        pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: Allocator, io: if (MASTER_LOCK) Io else void) void {
-            self.hash_map = Map.init_capacity(@intCast(hash_map_cap), alloc);
+        pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: if (MASTER_LOCK) Io else void) void {
+            self.alloc = Alloc.new_from_init_alloc(alloc);
+            self.hash_map = Map.init_capacity(@intCast(hash_map_cap), self.alloc.get_alloc(Alloc.init_to_passed_alloc(alloc)));
             self.packer.init(@intCast(row_pack_cap), hole_cap, region, default_height_fit_threshold, alloc, io);
-            self.alloc = ALLOC.alloc_to_cached_alloc(alloc);
         }
 
         pub fn clear_entire_atlas(self: *Self) void {
@@ -1081,17 +1083,17 @@ pub fn RowPackedAtlas(
             self.packer.reset();
         }
 
-        pub fn uninit(self: *Self, alloc: ALLOC.Fn()) void {
-            self.hash_map.uninit(ALLOC.get_alloc(alloc, self.alloc));
-            self.packer.uninit(ALLOC.get_alloc(alloc, self.alloc));
+        pub fn uninit(self: *Self, alloc: PassedAlloc) void {
+            self.hash_map.uninit(self.alloc.get_alloc(alloc));
+            self.packer.uninit(alloc);
         }
 
-        pub fn claim_rect(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.Fn()) ?PackedRect {
+        pub fn claim_rect(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedRect {
             const hash_parts = Map.hash_parts(key);
             assert_with_reason(!self.hash_map.contains_hash_parts(key, hash_parts), @src(), "key `{}` is already claimed in the atlas", .{key});
-            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, ALLOC.get_alloc(alloc, self.alloc));
+            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc);
             if (possible_rect) |packed_rect| {
-                self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, ALLOC.get_alloc(alloc, self.alloc));
+                self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, self.alloc.get_alloc(alloc));
                 return packed_rect;
             }
             return null;
@@ -1102,16 +1104,16 @@ pub fn RowPackedAtlas(
         pub fn lookup_rect(self: *Self, key: KEY) PackedRect {
             return self.hash_map.get(key);
         }
-        pub fn release_rect(self: *Self, key: KEY, alloc: ALLOC.Fn()) void {
+        pub fn release_rect(self: *Self, key: KEY, alloc: PassedAlloc) void {
             const packed_rect = self.hash_map.remove_key(key);
-            self.packer.release_rect(packed_rect, ALLOC.get_alloc(alloc, self.alloc));
+            self.packer.release_rect(packed_rect, alloc);
         }
-        pub fn claim_aabb(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: ALLOC.Fn()) ?PackedAABB {
+        pub fn claim_aabb(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedAABB {
             const hash_parts = Map.hash_parts(key);
             assert_with_reason(!self.hash_map.contains_hash_parts(key, hash_parts), @src(), "key `{}` is already claimed in the atlas", .{key});
-            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, ALLOC.get_alloc(alloc, self.alloc));
+            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc);
             if (possible_rect) |packed_rect| {
-                self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, ALLOC.get_alloc(alloc, self.alloc));
+                self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, self.alloc.get_alloc(alloc));
                 return packed_rect.to_packed_aabb();
             }
             return null;
@@ -1125,9 +1127,9 @@ pub fn RowPackedAtlas(
         pub fn lookup_aabb(self: *Self, key: KEY) PackedAABB {
             return self.hash_map.get(key).to_packed_aabb();
         }
-        pub fn release_aabb(self: *Self, key: KEY, alloc: ALLOC.Fn()) void {
+        pub fn release_aabb(self: *Self, key: KEY, alloc: PassedAlloc) void {
             const packed_rect = self.hash_map.remove_key(key);
-            self.packer.release_rect(packed_rect, ALLOC.get_alloc(alloc, self.alloc));
+            self.packer.release_rect(packed_rect, alloc);
         }
     };
 }
