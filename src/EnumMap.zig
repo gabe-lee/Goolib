@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 const meta = std.meta;
 const math = std.math;
 const Log2Int = math.Log2Int;

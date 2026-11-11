@@ -30,7 +30,7 @@ const crypto = std.crypto;
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ArrayList = std.ArrayListUnmanaged;
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 const Assert = Root.Assert;
 
 const assert_with_reason = Assert.assert_with_reason;

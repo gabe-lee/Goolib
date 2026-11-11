@@ -961,7 +961,7 @@ pub fn DefineLayoutManager(comptime T_DIMENSION: type, comptime T_DIMENSION_SMAL
             };
         }
 
-        fn auto_debug(_: *LayoutManager, comptime _: ?std.builtin.SourceLocation) void {
+        fn auto_debug(_: *LayoutManager, comptime _: ?std.lang.SourceLocation) void {
             if (EXTRA_DEBUG and Assert.IS_DEBUG) {
                 // for (self.elems.ptr[0..self.elems.len], 0..) |elem, i| {
                 //     assert_with_reason_debug_only(@intFromPtr(elem.requester.object) != 0, src_loc, "elem {d} requester pointer is 0", .{i});

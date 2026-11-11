@@ -37,7 +37,7 @@ comptime {
 const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
@@ -392,7 +392,7 @@ pub const MatrixDef = struct {
             else => assert_unreachable(@src(), "invalid matrix payload type `{s}`", .{@typeName(MAT)}),
         };
     }
-    pub fn assert_is_matrix(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, mat: anytype) void {
+    pub fn assert_is_matrix(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, mat: anytype) void {
         const MAT = @TypeOf(mat);
         switch (MAT) {
             DEF.Matrix(), DEF.MatrixRef(), DEF.MatrixRefConst() => {},
@@ -402,7 +402,7 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_is_matrix_ref(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, mat: anytype) void {
+    pub fn assert_is_matrix_ref(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, mat: anytype) void {
         const MAT = @TypeOf(mat);
         switch (MAT) {
             DEF.MatrixRef(), DEF.MatrixRefConst() => {},
@@ -412,7 +412,7 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_is_matrix_ref_mutable(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, mat: anytype) void {
+    pub fn assert_is_matrix_ref_mutable(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, mat: anytype) void {
         const MAT = @TypeOf(mat);
         switch (MAT) {
             DEF.MatrixRef() => {},
@@ -422,7 +422,7 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_is_major(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, major: anytype) void {
+    pub fn assert_is_major(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, major: anytype) void {
         const MAJOR = @TypeOf(major);
         switch (MAJOR) {
             DEF.Major(), *DEF.Major(), *const DEF.Major(), DEF.MajorSlice(), DEF.MajorSliceConst() => {},
@@ -432,7 +432,7 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_is_major_ref(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, major: anytype) void {
+    pub fn assert_is_major_ref(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, major: anytype) void {
         const MAJOR = @TypeOf(major);
         switch (MAJOR) {
             *DEF.Major(), *const DEF.Major(), DEF.MajorSlice(), DEF.MajorSliceConst() => {},
@@ -442,7 +442,7 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_is_major_ref_mutable(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation, major: anytype) void {
+    pub fn assert_is_major_ref_mutable(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation, major: anytype) void {
         const MAJOR = @TypeOf(major);
         switch (MAJOR) {
             *DEF.Major(), DEF.MajorSlice() => {},
@@ -452,22 +452,22 @@ pub const MatrixDef = struct {
             },
         }
     }
-    pub fn assert_can_multiply_or_divide(comptime DEF_A: MatrixDef, comptime DEF_B: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_can_multiply_or_divide(comptime DEF_A: MatrixDef, comptime DEF_B: MatrixDef, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(DEF_A.can_multiply(DEF_B), src, "matrix algebraic mutiplication/division is only possible when A_COLS == B_ROWS, got {d} != {d}", .{ DEF_A.COLS, DEF_B.ROWS });
     }
-    pub fn assert_can_add_sub_or_flat_mult_div(comptime DEF_A: MatrixDef, comptime DEF_B: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_can_add_sub_or_flat_mult_div(comptime DEF_A: MatrixDef, comptime DEF_B: MatrixDef, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(DEF_A.can_add(DEF_B), src, "matrix addition/subtraction/'flat multiply'/'flat divide' is only possible when A_COLS {d} == {d} B_COLS and A_ROWS {d} == {d} B_ROWS", .{ DEF_A.COLS, DEF_B.COLS, DEF_A.ROWS, DEF_B.ROWS });
     }
-    pub fn assert_can_get_matrix_one_size_smaller(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_can_get_matrix_one_size_smaller(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(DEF.can_get_matrix_one_size_smaller(), src, "matrix must be at least 2x2 in size in order to get a matrix one size smaller, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
     }
-    pub fn assert_can_get_determinant(comptime DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_can_get_determinant(comptime DEF: MatrixDef, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(DEF.is_square(), src, "matrix must be square in order to get a determinant, got {d}x{d}", .{ DEF.ROWS, DEF.COLS });
     }
-    pub fn assert_same_size(comptime DEF: MatrixDef, comptime OTHER_DEF: MatrixDef, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_same_size(comptime DEF: MatrixDef, comptime OTHER_DEF: MatrixDef, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(DEF.is_same_size(OTHER_DEF), src, "matrices must be same size, got {d}x{d} != {d}x{d}", .{ DEF.ROWS, DEF.COLS, OTHER_DEF.ROWS, OTHER_DEF.COLS });
     }
-    pub fn assert_no_vals_zero_flat(comptime DEF: MatrixDef, mat_flat: DEF.FlatVec(), comptime src: ?std.builtin.SourceLocation, reason: []const u8) void {
+    pub fn assert_no_vals_zero_flat(comptime DEF: MatrixDef, mat_flat: DEF.FlatVec(), comptime src: ?std.lang.SourceLocation, reason: []const u8) void {
         const zero_vec: DEF.FlatVec() = @splat(0);
         assert_with_reason(!@reduce(.Or, mat_flat == zero_vec), src, reason, .{});
     }

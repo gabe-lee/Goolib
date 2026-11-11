@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const builtin = std.builtin;
+const builtin = std.lang;
 const Root = @import("./_root.zig");
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;

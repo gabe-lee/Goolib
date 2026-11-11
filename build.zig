@@ -12,11 +12,11 @@ const FORCE_USE_LLVM: bool = false;
 
 pub const Options = struct {
     TARGET: std.Build.ResolvedTarget,
-    OPTIMIZE: std.builtin.OptimizeMode,
+    OPTIMIZE: std.lang.OptimizeMode,
     USE_LLVM: bool,
     INCLUDE_SDL: bool,
     LINK_TIME_OPTIMIZE: std.zig.LtoMode,
-    PREFERRED_LINKAGE: std.builtin.LinkMode,
+    PREFERRED_LINKAGE: std.lang.LinkMode,
     STRIP_DEBUG: bool,
     POS_INDEPENDANT_CODE: bool,
     SDL_EMSCRIPTEN_PTHREADS: bool,
@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
         .OPTIMIZE = optimize,
         .USE_LLVM = FORCE_USE_LLVM or b.option(bool, "use-llvm", "use the LLVM compiler instead of the native x86-64 compiler (default: .debug = false, .Release___ = true)") orelse if (optimize == .debug) false else true,
         .INCLUDE_SDL = b.option(bool, "include-sdl", "include SDL3 when building (default: true)") orelse true,
-        .PREFERRED_LINKAGE = b.option(std.builtin.LinkMode, "preferred-linkage", "Prefer building statically or dynamically linked libraries (default: static)") orelse .static,
+        .PREFERRED_LINKAGE = b.option(std.lang.LinkMode, "preferred-linkage", "Prefer building statically or dynamically linked libraries (default: static)") orelse .static,
         .STRIP_DEBUG = b.option(bool, "strip-debug", "Strip debug symbols (default: varies)") orelse (optimize != .debug),
         .POS_INDEPENDANT_CODE = b.option(bool, "pos-independant-code", "Produce position-independent code (default: varies)") orelse true,
         .LINK_TIME_OPTIMIZE = b.option(std.zig.LtoMode, "link-time-optimize", "Perform link time optimization (default: varies)") orelse if (optimize == .debug) std.zig.LtoMode.none else std.zig.LtoMode.full,

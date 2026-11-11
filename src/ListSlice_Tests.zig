@@ -66,7 +66,7 @@ fn expectListEqual(
     comptime L: type,
     list: L,
     expected: []const L.LIST_DEF.ELEM,
-    comptime src: std.builtin.SourceLocation,
+    comptime src: std.lang.SourceLocation,
     comptime fail_description: []const u8,
     fail_args: anytype,
 ) !void {
@@ -518,7 +518,7 @@ test "ListSlice -> reverse/rotate/move/swap/shuffle" {
     }
 }
 
-fn expectMultiset(comptime L: type, list: L, comptime N: usize, comptime src: std.builtin.SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
+fn expectMultiset(comptime L: type, list: L, comptime N: usize, comptime src: std.lang.SourceLocation, comptime fail_description: []const u8, fail_args: anytype) !void {
     var seen: [N]u8 = @splat(0);
     for (0..list.get_len()) |i| {
         const v = list.get(@intCast(i));

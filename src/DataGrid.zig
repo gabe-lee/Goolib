@@ -236,10 +236,10 @@ pub fn DataGrid(comptime DEFINITION: GridDefinition) type {
             self.cells.clear();
             self.root_size = .ZERO;
         }
-        fn assert_root(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_root(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_ROOT, src, "grid is not the root grid (it is a region)", .{});
         }
-        fn assert_region(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_region(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_REGION, src, "grid is not a region (it is the root grid)", .{});
         }
 

@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;

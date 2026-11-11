@@ -145,10 +145,10 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
         inline fn mutex_block_idx(idx: IDX) IDX {
             return idx / MUTEX_BLOCK_LEN;
         }
-        inline fn assert_field_access(comptime src: ?std.builtin.SourceLocation) void {
+        inline fn assert_field_access(comptime src: ?std.lang.SourceLocation) void {
             comptime assert_with_reason(FA_MODE != .NOT_SUPPORTED, src, "field access not supported", .{});
         }
-        inline fn assert_tagged_field_active(union_val: ELEM, comptime field: FieldEnum, comptime src: ?std.builtin.SourceLocation) void {
+        inline fn assert_tagged_field_active(union_val: ELEM, comptime field: FieldEnum, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(std.meta.activeTag(union_val) == std.meta.activeTag(@unionInit(ELEM, @tagName(field), undefined)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
         }
         inline fn FieldType(comptime field: FieldEnum) type {
@@ -329,7 +329,7 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             idx: IDX = INVALID_IDX,
             gen: IDX = 0,
 
-            inline fn assert_lockable_idx(self: Key, comptime src: ?std.builtin.SourceLocation) void {
+            inline fn assert_lockable_idx(self: Key, comptime src: ?std.lang.SourceLocation) void {
                 assert_with_reason(self.idx < capacity, src, "key index ({d}) is outside the pool capacity ({d})", .{ self.idx, capacity });
             }
             inline fn to_const(self: Key) ConstKey {
@@ -440,13 +440,13 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
                 unlock_pool_and_index_for_read(mapping_lock);
                 return result;
             }
-            inline fn assert_valid_internal(self: Key, comptime src: ?std.builtin.SourceLocation) void {
+            inline fn assert_valid_internal(self: Key, comptime src: ?std.lang.SourceLocation) void {
                 assert_with_reason(self.idx < maps_len, src, "key points to mapping beyond mapping len ({d} >= len {d})", .{ self.idx, maps_len });
                 assert_with_reason(maps[self.idx].gen == self.gen, src, "key generation does not match mapping generation ({d} != {d})", .{ maps[self.idx].gen, self.gen });
                 assert_with_reason(maps[self.idx].gen & FREE_USED_BIT == USED_STATE, src, "key generation is not in a used state", .{});
                 assert_with_reason(maps[self.idx].idx < vals_len, src, "key points to mapping that points to value index beyond values len ({d} >= len {d})", .{ maps[self.idx].idx, vals_len });
             }
-            pub inline fn assert_valid(self: Key, comptime src: ?std.builtin.SourceLocation) void {
+            pub inline fn assert_valid(self: Key, comptime src: ?std.lang.SourceLocation) void {
                 self.assert_lockable_idx(src);
                 const mapping_lock = lock_pool_and_index_for_read(self.idx);
                 assert_with_reason(self.idx < maps_len, src, "key points to mapping beyond mapping len ({d} >= len {d})", .{ self.idx, maps_len });
@@ -490,10 +490,10 @@ pub fn GlobalMappedKeyPool(comptime DEF: PoolDef) type {
             pub inline fn is_valid(self: ConstKey) bool {
                 return self.to_key().is_valid();
             }
-            inline fn assert_valid_internal(self: ConstKey, comptime src: ?std.builtin.SourceLocation) void {
+            inline fn assert_valid_internal(self: ConstKey, comptime src: ?std.lang.SourceLocation) void {
                 return self.to_key().assert_valid_internal(src);
             }
-            pub inline fn assert_valid(self: ConstKey, comptime src: ?std.builtin.SourceLocation) void {
+            pub inline fn assert_valid(self: ConstKey, comptime src: ?std.lang.SourceLocation) void {
                 return self.to_key().assert_valid(src);
             }
         };

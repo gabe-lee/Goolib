@@ -73,7 +73,7 @@ pub const ErrorBehavior = enum {
     /// Errors only panic in 'safe' modes, otherwise they are 'unreachable'
     ERRORS_ARE_UNREACHABLE,
 
-    pub inline fn handle(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anytype) if (self.does_error()) @TypeOf(err) else noreturn {
+    pub inline fn handle(comptime self: ErrorBehavior, comptime src: ?std.lang.SourceLocation, err: anytype) if (self.does_error()) @TypeOf(err) else noreturn {
         return switch (self) {
             .RETURN_ERRORS => err,
             .RETURN_ERRORS_AND_WARN => warn: {
@@ -91,7 +91,7 @@ pub const ErrorBehavior = enum {
         };
     }
 
-    pub inline fn panic(comptime self: ErrorBehavior, comptime src: ?std.builtin.SourceLocation, err: anyerror) noreturn {
+    pub inline fn panic(comptime self: ErrorBehavior, comptime src: ?std.lang.SourceLocation, err: anyerror) noreturn {
         return switch (self) {
             .ERRORS_PANIC => {
                 Assert.assert_unreachable_always_panic(src, "an error was returned from this function: {s}", .{@errorName(err)});
@@ -535,10 +535,10 @@ pub const Endian = enum(u8) {
     BIG_ENDIAN = 1,
     /// The native endian-ness of the current target. This is usually LITTLE_ENDIAN
     pub const NATIVE = if (build.cpu.arch.endian() == .little) Endian.LITTLE_ENDIAN else Endian.BIG_ENDIAN;
-    pub fn to_zig(self: Endian) std.builtin.Endian {
+    pub fn to_zig(self: Endian) std.lang.Endian {
         return switch (self) {
-            .LITTLE_ENDIAN => std.builtin.Endian.little,
-            .BIG_ENDIAN => std.builtin.Endian.big,
+            .LITTLE_ENDIAN => std.lang.Endian.little,
+            .BIG_ENDIAN => std.lang.Endian.big,
         };
     }
 

@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;

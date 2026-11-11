@@ -23,14 +23,14 @@
 
 const build = @import("builtin");
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const mem = std.mem;
 const math = std.math;
 const crypto = std.crypto;
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const ArrayList = std.ArrayListUnmanaged;
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 const SourceLocation = builtin.SourceLocation;
 
 const Root = @import("./_root.zig");

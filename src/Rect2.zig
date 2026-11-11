@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const math = std.math;
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 const mem = std.mem;
 
 const Root = @import("./_root.zig");

@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -45,7 +45,7 @@ const bit_cast = Root.Cast.bit_cast;
 const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 
-pub fn fmt_src_loc(comptime src: std.builtin.SourceLocation) []const u8 {
+pub fn fmt_src_loc(comptime src: std.lang.SourceLocation) []const u8 {
     return "Zig → " ++ src.module ++ " → " ++ src.file ++ ":" ++ std.fmt.comptimePrint("{d}", .{src.line}) ++ ":" ++ std.fmt.comptimePrint("{d}", .{src.column});
 }
 

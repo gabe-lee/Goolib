@@ -41,7 +41,7 @@ const assert_is_float = Assert.assert_is_float;
 const assert_with_reason = Assert.assert_with_reason;
 const num_cast = Root.Cast.num_cast;
 
-pub fn assert_anytype_is_matrix_and_get_def(val: anytype, src: ?std.builtin.SourceLocation) MatrixDef {
+pub fn assert_anytype_is_matrix_and_get_def(val: anytype, src: ?std.lang.SourceLocation) MatrixDef {
     assert_with_reason(Types.type_has_decl_with_type(@TypeOf(val), "DEF", MatrixDef), src, "type is not a matrix (missing `DEF` declaration with type `MatrixDef`), got type `{s}`", .{@typeName(@TypeOf(val))});
     const MAT = @field(val, "DEF").Matrix();
     assert_with_reason(Types.type_has_field_with_type(@TypeOf(val), "mat", MAT), src, "type is not a matrix (missing `mat` field with type `{s}`), got type `{s}`", .{ @typeName(MAT), @typeName(@TypeOf(val)) });

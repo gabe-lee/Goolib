@@ -163,7 +163,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         };
 
-        fn assert_can_release(src: ?std.builtin.SourceLocation) void {
+        fn assert_can_release(src: ?std.lang.SourceLocation) void {
             assert_with_reason(CAN_RELEASE, src, "cannot release rects when packer defined as .CLAIM_ONLY", .{});
         }
 

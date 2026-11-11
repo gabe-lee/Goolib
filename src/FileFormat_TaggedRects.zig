@@ -52,7 +52,7 @@ pub const VecU16 = Vec2(u16);
 pub const CURR_VERSION: u32 = 1;
 pub const HEADER_SIZE = 16;
 pub const IDENTIFIER_SIZE = 8;
-pub const ENDIAN = std.builtin.Endian.little;
+pub const ENDIAN = std.lang.Endian.little;
 /// "RECT" in little-endian
 pub const MAGIC: u32 = 0x54_43_45_52;
 //                        T  C  E  R

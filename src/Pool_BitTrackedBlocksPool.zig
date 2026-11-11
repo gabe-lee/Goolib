@@ -462,7 +462,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             }
         }
 
-        pub inline fn assert_slot_valid(self: *Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation) void {
+        pub inline fn assert_slot_valid(self: *Self, slot: *const ELEM, comptime src: ?std.lang.SourceLocation) void {
             if (comptime Assert.SHOULD_ASSERT) {
                 _ = self.unwrap_slot_info(slot, src, .READ_POOL_TRANSIENT, .READ_BLOCK_TRANSIENT);
             }
@@ -478,7 +478,7 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             state_bit_idx: IDX,
             state_bit_empty: STATE_INT,
         };
-        fn unwrap_slot_info(self: *Self, slot: *const ELEM, comptime src: ?std.builtin.SourceLocation, comptime pool_lock: PoolLockModeAdv, comptime block_lock: BlockLockModeAdv) SlotInfo {
+        fn unwrap_slot_info(self: *Self, slot: *const ELEM, comptime src: ?std.lang.SourceLocation, comptime pool_lock: PoolLockModeAdv, comptime block_lock: BlockLockModeAdv) SlotInfo {
             switch (comptime pool_lock) {
                 .IGNORE_POOL_LOCK => {},
                 .READ_POOL_KEEP_LOCKED, .READ_POOL_TRANSIENT => self.lock_for_read(),

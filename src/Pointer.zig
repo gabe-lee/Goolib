@@ -31,12 +31,12 @@ const math = std.math;
 const DEBUG = std.debug.print;
 const mem = std.mem;
 const Alignment = std.mem.Alignment;
-const SourceLocation = std.builtin.SourceLocation;
+const SourceLocation = std.lang.SourceLocation;
 
 /// Goolib imports
 const Root = @import("./_root.zig");
 const Cast = Root.Cast;
-const Type = Root.Types;
+const Types = Root.Types;
 const Math = Root.Math;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
@@ -475,10 +475,6 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
 
         /// Casts this opaque pointer handle to the typed wrapper type described by the
         /// requested properties.
-        ///
-        /// When the target is non-nullable, the current pointer is asserted to be non-null.
-        /// When an alignment is requested, the current pointer is asserted to satisfy it.
-        /// `ALIGN` accepts the same forms as `PointerTypeWithTheseProperties`.
         pub inline fn cast_to(
             self: Self,
             comptime NULLABILITY: Nullability,
@@ -1156,6 +1152,274 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         pub inline fn assert_is_within_range_include_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_within_range_include_high(low, high), src, "pointer was not within the given range (or the given range was invalid)", .{});
         }
+
+        //**************************
+        // ADDRESS INTROSPECTION
+        //**************************
+        pub inline fn local_addr(self: Self) Addr {
+            return self.addr;
+        }
+        pub inline fn resolved_addr(self: Self) usize {
+            self.assert_not_null(@src());
+            return switch (comptime SOURCE) {
+                .NATIVE => self.addr,
+                .GLOBAL_RESOLVER => RESOLVE(self.addr),
+            };
+        }
+        pub inline fn resolved_addr_or_null(self: Self) ?usize {
+            return switch (comptime SOURCE) {
+                .NATIVE => if (self.addr == 0) null else self.addr,
+                .GLOBAL_RESOLVER => if (IS_NULL(self.addr)) null else RESOLVE(self.addr),
+            };
+        }
+
+        //**************************
+        // COMPARISON / HASHING
+        //**************************
+        pub inline fn eql(self: Self, other: Self) bool {
+            if (comptime Types.type_is_equatable(Addr)) return self.addr == other.addr;
+            const self_addr = self.resolved_addr_or_null();
+            const other_addr = other.resolved_addr_or_null();
+            if (self_addr) |a| {
+                if (other_addr) |b| return a == b;
+                return false;
+            }
+            return other_addr == null;
+        }
+        pub inline fn eql_native(self: Self, native_ptr: anytype) bool {
+            switch (comptime @typeInfo(@TypeOf(native_ptr))) {
+                .optional => {
+                    if (native_ptr) |p| {
+                        return self.not_null() and self.resolved_addr() == @intFromPtr(p);
+                    }
+                    return self.is_null();
+                },
+                .pointer => {
+                    return self.not_null() and self.resolved_addr() == @intFromPtr(native_ptr);
+                },
+                else => @compileError("eql_native requires a pointer or optional pointer"),
+            }
+        }
+        pub inline fn eql_local(self: Self, other: Self) bool {
+            return std.meta.eql(self.addr, other.addr);
+        }
+        pub inline fn order(self: Self, other: Self) std.math.Order {
+            const self_addr = self.resolved_addr_or_null() orelse 0;
+            const other_addr = other.resolved_addr_or_null() orelse 0;
+            return std.math.order(self_addr, other_addr);
+        }
+        pub inline fn hash(self: Self) u64 {
+            const addr = self.resolved_addr_or_null() orelse 0;
+            return std.hash.Wyhash.hash(0, std.mem.asBytes(&addr));
+        }
+        pub inline fn simple_hash(self: Self) u64 {
+            const addr = self.resolved_addr_or_null() orelse 0;
+            const addr_u64: u64 = @intCast(addr);
+            if (comptime @sizeOf(usize) == 4) {
+                return addr_u64 | (addr_u64 << 32);
+            }
+            return addr_u64;
+        }
+
+        //**************************
+        // SOURCE INTROSPECTION
+        //**************************
+        pub inline fn source_kind(self: Self) PointerSourceKind {
+            _ = self;
+            return switch (comptime SOURCE) {
+                .NATIVE => .NATIVE,
+                .GLOBAL_RESOLVER => .GLOBAL_RESOLVER,
+            };
+        }
+        pub inline fn is_native(self: Self) bool {
+            _ = self;
+            return IS_NATIVE;
+        }
+        pub inline fn is_global_resolver(self: Self) bool {
+            _ = self;
+            return USE_GLOBAL_RESOLVER;
+        }
+
+        //**************************
+        // SIGNED DISTANCE
+        //**************************
+        /// Returns the signed byte distance from `other` to `self` (`self - other`).
+        pub inline fn bytes_from(self: Self, other: Self) isize {
+            self.assert_not_null(@src());
+            other.assert_not_null(@src());
+            const self_addr = self.resolved_addr();
+            const other_addr = other.resolved_addr();
+            return if (self_addr >= other_addr)
+                @as(isize, @intCast(self_addr - other_addr))
+            else
+                -@as(isize, @intCast(other_addr - self_addr));
+        }
+        /// Returns the signed element distance from `other` to `self` (`self - other`).
+        pub inline fn elements_from(self: Self, other: Self, comptime T: type) isize {
+            return @divExact(self.bytes_from(other), @as(isize, @intCast(@sizeOf(T))));
+        }
+        pub inline fn offset_from(self: Self, other: Self) isize {
+            return self.bytes_from(other);
+        }
+        pub inline fn bytes_from_or_null(self: Self, other: Self) ?isize {
+            if (self.is_null() or other.is_null()) return null;
+            return self.bytes_from(other);
+        }
+        pub inline fn bytes_from_orelse_0(self: Self, other: Self) isize {
+            return self.bytes_from_or_null(other) orelse 0;
+        }
+        pub inline fn elements_from_or_null(self: Self, other: Self, comptime T: type) ?isize {
+            if (self.is_null() or other.is_null()) return null;
+            return self.elements_from(other, T);
+        }
+        pub inline fn elements_from_orelse_0(self: Self, other: Self, comptime T: type) isize {
+            return self.elements_from_or_null(other, T) orelse 0;
+        }
+        pub inline fn offset_from_or_null(self: Self, other: Self) ?isize {
+            return self.bytes_from_or_null(other);
+        }
+        pub inline fn offset_from_orelse_0(self: Self, other: Self) isize {
+            return self.bytes_from_orelse_0(other);
+        }
+
+        //**************************
+        // NULL-PRESERVING ARITHMETIC
+        //**************************
+        pub inline fn add_or_null(self: Self, offset: usize) Self {
+            if (self.is_null()) return self;
+            return self.add(offset);
+        }
+        pub inline fn subtract_or_null(self: Self, offset: usize) Self {
+            if (self.is_null()) return self;
+            return self.subtract(offset);
+        }
+        pub inline fn move_or_null(self: Self, offset: isize) Self {
+            if (self.is_null()) return self;
+            return self.move(offset);
+        }
+        pub inline fn typed_add_or_null(self: Self, comptime T: type, offset: usize) Self {
+            if (self.is_null()) return self;
+            return self.typed_add(T, offset);
+        }
+        pub inline fn typed_subtract_or_null(self: Self, comptime T: type, offset: usize) Self {
+            if (self.is_null()) return self;
+            return self.typed_subtract(T, offset);
+        }
+        pub inline fn typed_move_or_null(self: Self, comptime T: type, offset: isize) Self {
+            if (self.is_null()) return self;
+            return self.typed_move(T, offset);
+        }
+
+        //**************************
+        // NULL CONSTRUCTION / MUTATION
+        //**************************
+        pub const NULL = Self{ .addr = AddrNull };
+        pub inline fn new_null() Self {
+            return Self{ .addr = AddrNull };
+        }
+        pub inline fn set_null(self: *Self) void {
+            self.addr = AddrNull;
+        }
+        pub inline fn is_null_or_equal(self: Self, other: Self) bool {
+            return self.eql(other);
+        }
+
+        //**************************
+        // BULK OPERATIONS
+        //**************************
+        pub inline fn memcopy_to(self: Self, comptime T: type, dst: []T) void {
+            @memcpy(dst, self.slice(T, dst.len));
+        }
+        pub inline fn memcopy_from(self: Self, comptime T: type, src: []const T) void {
+            @memcpy(self.slice(T, src.len), src);
+        }
+        pub inline fn memmove_to(self: Self, comptime T: type, dst: []T) void {
+            const src = self.slice(T, dst.len);
+            @memmove(dst, src);
+        }
+        pub inline fn memmove_from(self: Self, comptime T: type, src: []const T) void {
+            const dst = self.slice(T, src.len);
+            @memmove(dst, src);
+        }
+        pub inline fn memset(self: Self, comptime T: type, value: T, len: usize) void {
+            @memset(self.slice(T, len), value);
+        }
+
+        //**************************
+        // BYTE ACCESS
+        //**************************
+        pub inline fn bytes(self: Self, len: anytype) []u8 {
+            return self.slice(u8, len);
+        }
+        pub inline fn const_bytes(self: Self, len: anytype) []const u8 {
+            return self.const_slice(u8, len);
+        }
+
+        //**************************
+        // VOLATILE ACCESS
+        //**************************
+        pub inline fn get_volatile(self: Self, comptime T: type) T {
+            self.assert_not_null(@src());
+            const volatile_ptr: *volatile T = @ptrCast(self.resolve(T));
+            return volatile_ptr.*;
+        }
+        pub inline fn set_volatile(self: Self, comptime T: type, value: T) void {
+            self.assert_not_null(@src());
+            const volatile_ptr: *volatile T = @ptrCast(self.resolve(T));
+            volatile_ptr.* = value;
+        }
+
+        //**************************
+        // ATOMIC ACCESS
+        //**************************
+        pub inline fn atomic_load(self: Self, comptime T: type, comptime ordering: std.lang.AtomicOrder) T {
+            self.assert_not_null(@src());
+            return @atomicLoad(T, self.ptr(T), ordering);
+        }
+        pub inline fn atomic_store(self: Self, comptime T: type, value: T, comptime ordering: std.lang.AtomicOrder) void {
+            self.assert_not_null(@src());
+            @atomicStore(T, self.ptr(T), value, ordering);
+        }
+        pub inline fn atomic_read_modify_write(self: Self, comptime T: type, comptime op: std.lang.AtomicRmwOp, value: T, comptime ordering: std.lang.AtomicOrder) T {
+            self.assert_not_null(@src());
+            return @atomicRmw(T, self.ptr(T), op, value, ordering);
+        }
+        /// Returns `null` when the comparison succeeds, or the previous value when it fails.
+        pub inline fn atomic_compare_exchange_strong(self: Self, comptime T: type, expected: T, new_value: T, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?T {
+            self.assert_not_null(@src());
+            return @cmpxchgStrong(T, self.ptr(T), expected, new_value, success_order, fail_order);
+        }
+        /// Returns `null` when the comparison succeeds, or the previous value when it fails.
+        pub inline fn atomic_compare_exchange_weak(self: Self, comptime T: type, expected: T, new_value: T, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?T {
+            self.assert_not_null(@src());
+            return @cmpxchgWeak(T, self.ptr(T), expected, new_value, success_order, fail_order);
+        }
+
+        //**************************
+        // ANYOPAQUE CONVERSION
+        //**************************
+        pub inline fn to_anyopaque(self: Self) *anyopaque {
+            self.assert_not_null(@src());
+            return @ptrCast(self.resolve(u8));
+        }
+        pub inline fn to_const_anyopaque(self: Self) *const anyopaque {
+            self.assert_not_null(@src());
+            return @ptrCast(self.resolve(u8));
+        }
+        pub inline fn to_anyopaque_or_null(self: Self) ?*anyopaque {
+            if (self.is_null()) return null;
+            return @ptrCast(self.resolve(u8));
+        }
+        pub inline fn to_const_anyopaque_or_null(self: Self) ?*const anyopaque {
+            if (self.is_null()) return null;
+            return @ptrCast(self.resolve(u8));
+        }
+        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+            return Self.new_from_native(void_ptr);
+        }
+        pub inline fn from_const_anyopaque(void_ptr: *const anyopaque) Self {
+            return Self.new_from_native(void_ptr);
+        }
     };
 }
 
@@ -1239,6 +1503,9 @@ fn TypedPointerNormalizeAlign(comptime ALIGN: anytype) ?usize {
     @compileError("unsupported alignment type: " ++ @typeName(T));
 }
 
+fn TypedPointerAddrOf(comptime Self: type) type {
+    return Self.Addr;
+}
 fn TypedPointerElemOf(comptime Self: type) type {
     return Self.Element;
 }
@@ -1256,6 +1523,12 @@ fn TypedPointerArrayPtrOf(comptime Self: type, comptime CONST: bool, comptime LE
 }
 fn TypedPointerVectorPtrOf(comptime Self: type, comptime CONST: bool, comptime LEN: anytype) type {
     return TypedPointerVectorPtrType(Self.Element, Self.ALIGN, CONST, LEN);
+}
+fn TypedPointerVoidPtrOf(comptime Self: type) type {
+    return if (Self.MUTABILITY == .CONST_PTR) *const anyopaque else *anyopaque;
+}
+fn TypedPointerOptionalVoidPtrOf(comptime Self: type) type {
+    return if (Self.MUTABILITY == .CONST_PTR) ?*const anyopaque else ?*anyopaque;
 }
 
 /// The actual implementations used by the typed wrappers below.
@@ -1659,6 +1932,230 @@ const TypedMethods = struct {
     pub fn assert_is_within_range_include_high(self_ptr: anytype, low: anytype, high: anytype, comptime src: ?SourceLocation) void {
         self_ptr.opq.assert_is_within_range_include_high(low.opq, high.opq, src);
     }
+
+    //**************************
+    // ADDRESS INTROSPECTION
+    //**************************
+    pub fn local_addr(self_ptr: anytype) TypedPointerAddrOf(@TypeOf(self_ptr.*)) {
+        return self_ptr.opq.local_addr();
+    }
+    pub fn resolved_addr(self_ptr: anytype) usize {
+        return self_ptr.opq.resolved_addr();
+    }
+    pub fn resolved_addr_or_null(self_ptr: anytype) ?usize {
+        return self_ptr.opq.resolved_addr_or_null();
+    }
+
+    //**************************
+    // COMPARISON / HASHING
+    //**************************
+    pub fn eql(self_ptr: anytype, other: anytype) bool {
+        return self_ptr.opq.eql(other.opq);
+    }
+    pub fn eql_native(self_ptr: anytype, native_ptr: anytype) bool {
+        return self_ptr.opq.eql_native(native_ptr);
+    }
+    pub fn eql_local(self_ptr: anytype, other: anytype) bool {
+        return self_ptr.opq.eql_local(other.opq);
+    }
+    pub fn order(self_ptr: anytype, other: anytype) std.math.Order {
+        return self_ptr.opq.order(other.opq);
+    }
+    pub fn hash(self_ptr: anytype) u64 {
+        return self_ptr.opq.hash();
+    }
+    pub fn simple_hash(self_ptr: anytype) u64 {
+        return self_ptr.opq.simple_hash();
+    }
+
+    //**************************
+    // SOURCE INTROSPECTION
+    //**************************
+    pub fn source_kind(self_ptr: anytype) PointerSourceKind {
+        return self_ptr.opq.source_kind();
+    }
+    pub fn is_native(self_ptr: anytype) bool {
+        return self_ptr.opq.is_native();
+    }
+    pub fn is_global_resolver(self_ptr: anytype) bool {
+        return self_ptr.opq.is_global_resolver();
+    }
+
+    //**************************
+    // SIGNED DISTANCE
+    //**************************
+    pub fn bytes_from(self_ptr: anytype, other: anytype) isize {
+        return self_ptr.opq.bytes_from(other.opq);
+    }
+    pub fn elements_from(self_ptr: anytype, other: anytype) isize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_from(other.opq, Self.Element);
+    }
+    pub fn offset_from(self_ptr: anytype, other: anytype) isize {
+        return self_ptr.opq.offset_from(other.opq);
+    }
+    pub fn bytes_from_or_null(self_ptr: anytype, other: anytype) ?isize {
+        return self_ptr.opq.bytes_from_or_null(other.opq);
+    }
+    pub fn bytes_from_orelse_0(self_ptr: anytype, other: anytype) isize {
+        return self_ptr.opq.bytes_from_orelse_0(other.opq);
+    }
+    pub fn elements_from_or_null(self_ptr: anytype, other: anytype) ?isize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_from_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_from_orelse_0(self_ptr: anytype, other: anytype) isize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_from_orelse_0(other.opq, Self.Element);
+    }
+    pub fn offset_from_or_null(self_ptr: anytype, other: anytype) ?isize {
+        return self_ptr.opq.offset_from_or_null(other.opq);
+    }
+    pub fn offset_from_orelse_0(self_ptr: anytype, other: anytype) isize {
+        return self_ptr.opq.offset_from_orelse_0(other.opq);
+    }
+
+    //**************************
+    // NULL-PRESERVING ARITHMETIC
+    //**************************
+    pub fn add_or_null(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_add_or_null(Self.Element, offset) };
+    }
+    pub fn subtract_or_null(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_subtract_or_null(Self.Element, offset) };
+    }
+    pub fn move_or_null(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_move_or_null(Self.Element, offset) };
+    }
+
+    //**************************
+    // ADDITIONAL CASTS
+    //**************************
+    pub fn to_non_null(self_ptr: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        .NEVER_NULL,
+        @TypeOf(self_ptr.*).MUTABILITY,
+        @TypeOf(self_ptr.*).Element,
+        @TypeOf(self_ptr.*).ALIGN,
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(.NEVER_NULL, Self.MUTABILITY, Self.Element, Self.ALIGN);
+    }
+    pub fn to_unaligned(self_ptr: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        @TypeOf(self_ptr.*).NULLABILITY,
+        @TypeOf(self_ptr.*).MUTABILITY,
+        @TypeOf(self_ptr.*).Element,
+        null,
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(Self.NULLABILITY, Self.MUTABILITY, Self.Element, null);
+    }
+    pub fn to_mutable(self_ptr: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        @TypeOf(self_ptr.*).NULLABILITY,
+        .MUT_PTR,
+        @TypeOf(self_ptr.*).Element,
+        @TypeOf(self_ptr.*).ALIGN,
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(Self.NULLABILITY, .MUT_PTR, Self.Element, Self.ALIGN);
+    }
+
+    //**************************
+    // NULL CONSTRUCTION / MUTATION
+    //**************************
+    pub fn set_null(self_ptr: anytype) void {
+        self_ptr.opq.set_null();
+    }
+    pub fn is_null_or_equal(self_ptr: anytype, other: anytype) bool {
+        return self_ptr.opq.is_null_or_equal(other.opq);
+    }
+
+    //**************************
+    // BULK OPERATIONS
+    //**************************
+    pub fn memcopy_to(self_ptr: anytype, dst: []TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.memcopy_to(Self.Element, dst);
+    }
+    pub fn memcopy_from(self_ptr: anytype, src: []const TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.memcopy_from(Self.Element, src);
+    }
+    pub fn memmove_to(self_ptr: anytype, dst: []TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.memmove_to(Self.Element, dst);
+    }
+    pub fn memmove_from(self_ptr: anytype, src: []const TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.memmove_from(Self.Element, src);
+    }
+    pub fn memset(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), len: usize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.memset(Self.Element, value, len);
+    }
+
+    //**************************
+    // BYTE ACCESS
+    //**************************
+    pub fn bytes(self_ptr: anytype, len: anytype) []u8 {
+        return self_ptr.opq.bytes(len);
+    }
+    pub fn const_bytes(self_ptr: anytype, len: anytype) []const u8 {
+        return self_ptr.opq.const_bytes(len);
+    }
+
+    //**************************
+    // VOLATILE ACCESS
+    //**************************
+    pub fn get_volatile(self_ptr: anytype) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_volatile(Self.Element);
+    }
+    pub fn set_volatile(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.set_volatile(Self.Element, value);
+    }
+
+    //**************************
+    // ATOMIC ACCESS
+    //**************************
+    pub fn atomic_load(self_ptr: anytype, comptime ordering: std.lang.AtomicOrder) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.atomic_load(Self.Element, ordering);
+    }
+    pub fn atomic_store(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime ordering: std.lang.AtomicOrder) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.atomic_store(Self.Element, value, ordering);
+    }
+    pub fn atomic_read_modify_write(self_ptr: anytype, comptime op: std.lang.AtomicRmwOp, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime ordering: std.lang.AtomicOrder) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.atomic_read_modify_write(Self.Element, op, value, ordering);
+    }
+    pub fn atomic_compare_exchange_strong(self_ptr: anytype, expected: TypedPointerElemOf(@TypeOf(self_ptr.*)), new_value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.atomic_compare_exchange_strong(Self.Element, expected, new_value, success_order, fail_order);
+    }
+    pub fn atomic_compare_exchange_weak(self_ptr: anytype, expected: TypedPointerElemOf(@TypeOf(self_ptr.*)), new_value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.atomic_compare_exchange_weak(Self.Element, expected, new_value, success_order, fail_order);
+    }
+
+    //**************************
+    // VOID POINTER CONVERSION
+    //**************************
+    pub fn to_anyopaque(self_ptr: anytype) TypedPointerVoidPtrOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.MUTABILITY == .CONST_PTR) self_ptr.opq.to_const_anyopaque() else self_ptr.opq.to_anyopaque();
+    }
+    pub fn to_anyopaque_or_null(self_ptr: anytype) TypedPointerOptionalVoidPtrOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.MUTABILITY == .CONST_PTR) self_ptr.opq.to_const_anyopaque_or_null() else self_ptr.opq.to_anyopaque_or_null();
+    }
 };
 
 pub fn Pointer(comptime T: type, comptime SOURCE: PointerSource) type {
@@ -1742,6 +2239,58 @@ pub fn Pointer(comptime T: type, comptime SOURCE: PointerSource) type {
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+            return Self{ .opq = .from_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // BULK WRITE
+        pub const memcopy_from = TypedMethods.memcopy_from;
+        pub const memmove_from = TypedMethods.memmove_from;
+        pub const memset = TypedMethods.memset;
+        pub const bytes = TypedMethods.bytes;
+
+        // VOLATILE / ATOMIC WRITE
+        pub const set_volatile = TypedMethods.set_volatile;
+        pub const atomic_store = TypedMethods.atomic_store;
+        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
+        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
+        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
     };
 }
 
@@ -1844,6 +2393,86 @@ pub fn NullablePointer(comptime T: type, comptime SOURCE: PointerSource) type {
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn new_null() Self {
+            return Self{ .opq = .new_null() };
+        }
+
+        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+            return Self{ .opq = .from_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // SIGNED DISTANCE (NULLABLE)
+        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
+        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
+        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
+        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
+        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
+        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
+
+        // NULL-PRESERVING ARITHMETIC
+        pub const add_or_null = TypedMethods.add_or_null;
+        pub const subtract_or_null = TypedMethods.subtract_or_null;
+        pub const move_or_null = TypedMethods.move_or_null;
+
+        // NULL CONSTRUCTION / MUTATION
+        pub const set_null = TypedMethods.set_null;
+        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
+
+        // ADDITIONAL CASTS
+        pub const to_non_null = TypedMethods.to_non_null;
+
+        // VOID POINTER
+        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
+
+        // BULK WRITE
+        pub const memcopy_from = TypedMethods.memcopy_from;
+        pub const memmove_from = TypedMethods.memmove_from;
+        pub const memset = TypedMethods.memset;
+        pub const bytes = TypedMethods.bytes;
+
+        // VOLATILE / ATOMIC WRITE
+        pub const set_volatile = TypedMethods.set_volatile;
+        pub const atomic_store = TypedMethods.atomic_store;
+        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
+        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
+        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
     };
 }
 
@@ -1926,6 +2555,49 @@ pub fn ConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
+            return Self{ .opq = .from_const_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // ADDITIONAL CASTS
+        pub const to_mutable = TypedMethods.to_mutable;
     };
 }
 
@@ -2022,6 +2694,76 @@ pub fn NullableConstPointer(comptime T: type, comptime SOURCE: PointerSource) ty
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn new_null() Self {
+            return Self{ .opq = .new_null() };
+        }
+
+        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
+            return Self{ .opq = .from_const_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // SIGNED DISTANCE (NULLABLE)
+        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
+        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
+        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
+        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
+        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
+        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
+
+        // NULL-PRESERVING ARITHMETIC
+        pub const add_or_null = TypedMethods.add_or_null;
+        pub const subtract_or_null = TypedMethods.subtract_or_null;
+        pub const move_or_null = TypedMethods.move_or_null;
+
+        // NULL CONSTRUCTION / MUTATION
+        pub const set_null = TypedMethods.set_null;
+        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
+
+        // ADDITIONAL CASTS
+        pub const to_non_null = TypedMethods.to_non_null;
+
+        // VOID POINTER
+        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
+
+        // ADDITIONAL CASTS
+        pub const to_mutable = TypedMethods.to_mutable;
     };
 }
 
@@ -2106,6 +2848,62 @@ pub fn PointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: Pointe
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+            return Self{ .opq = .from_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // ADDITIONAL CASTS
+        pub const to_unaligned = TypedMethods.to_unaligned;
+
+        // BULK WRITE
+        pub const memcopy_from = TypedMethods.memcopy_from;
+        pub const memmove_from = TypedMethods.memmove_from;
+        pub const memset = TypedMethods.memset;
+        pub const bytes = TypedMethods.bytes;
+
+        // VOLATILE / ATOMIC WRITE
+        pub const set_volatile = TypedMethods.set_volatile;
+        pub const atomic_store = TypedMethods.atomic_store;
+        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
+        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
+        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
     };
 }
 
@@ -2208,6 +3006,89 @@ pub fn NullablePointerAlign(comptime T: type, comptime A: usize, comptime SOURCE
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn new_null() Self {
+            return Self{ .opq = .new_null() };
+        }
+
+        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+            return Self{ .opq = .from_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // SIGNED DISTANCE (NULLABLE)
+        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
+        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
+        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
+        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
+        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
+        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
+
+        // NULL-PRESERVING ARITHMETIC
+        pub const add_or_null = TypedMethods.add_or_null;
+        pub const subtract_or_null = TypedMethods.subtract_or_null;
+        pub const move_or_null = TypedMethods.move_or_null;
+
+        // NULL CONSTRUCTION / MUTATION
+        pub const set_null = TypedMethods.set_null;
+        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
+
+        // ADDITIONAL CASTS
+        pub const to_non_null = TypedMethods.to_non_null;
+
+        // VOID POINTER
+        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
+
+        // ADDITIONAL CASTS
+        pub const to_unaligned = TypedMethods.to_unaligned;
+
+        // BULK WRITE
+        pub const memcopy_from = TypedMethods.memcopy_from;
+        pub const memmove_from = TypedMethods.memmove_from;
+        pub const memset = TypedMethods.memset;
+        pub const bytes = TypedMethods.bytes;
+
+        // VOLATILE / ATOMIC WRITE
+        pub const set_volatile = TypedMethods.set_volatile;
+        pub const atomic_store = TypedMethods.atomic_store;
+        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
+        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
+        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
     };
 }
 
@@ -2290,6 +3171,52 @@ pub fn ConstPointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: P
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
+            return Self{ .opq = .from_const_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // ADDITIONAL CASTS
+        pub const to_unaligned = TypedMethods.to_unaligned;
+
+        // ADDITIONAL CASTS
+        pub const to_mutable = TypedMethods.to_mutable;
     };
 }
 
@@ -2386,5 +3313,78 @@ pub fn NullableConstPointerAlign(comptime T: type, comptime A: usize, comptime S
         pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
         pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
         pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+
+        pub inline fn new_null() Self {
+            return Self{ .opq = .new_null() };
+        }
+
+        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
+            return Self{ .opq = .from_const_anyopaque(void_ptr) };
+        }
+
+        // ADDRESS INTROSPECTION
+        pub const local_addr = TypedMethods.local_addr;
+        pub const resolved_addr = TypedMethods.resolved_addr;
+        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
+
+        // COMPARISON / HASHING
+        pub const eql = TypedMethods.eql;
+        pub const eql_native = TypedMethods.eql_native;
+        pub const eql_local = TypedMethods.eql_local;
+        pub const order = TypedMethods.order;
+        pub const hash = TypedMethods.hash;
+        pub const simple_hash = TypedMethods.simple_hash;
+
+        // SOURCE INTROSPECTION
+        pub const source_kind = TypedMethods.source_kind;
+        pub const is_native = TypedMethods.is_native;
+        pub const is_global_resolver = TypedMethods.is_global_resolver;
+
+        // SIGNED DISTANCE
+        pub const bytes_from = TypedMethods.bytes_from;
+        pub const elements_from = TypedMethods.elements_from;
+        pub const offset_from = TypedMethods.offset_from;
+
+        // BULK READ
+        pub const memcopy_to = TypedMethods.memcopy_to;
+        pub const memmove_to = TypedMethods.memmove_to;
+        pub const const_bytes = TypedMethods.const_bytes;
+
+        // VOLATILE / ATOMIC READ
+        pub const get_volatile = TypedMethods.get_volatile;
+        pub const atomic_load = TypedMethods.atomic_load;
+        pub const load = TypedMethods.load;
+
+        // VOID POINTER
+        pub const to_anyopaque = TypedMethods.to_anyopaque;
+
+        // SIGNED DISTANCE (NULLABLE)
+        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
+        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
+        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
+        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
+        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
+        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
+
+        // NULL-PRESERVING ARITHMETIC
+        pub const add_or_null = TypedMethods.add_or_null;
+        pub const subtract_or_null = TypedMethods.subtract_or_null;
+        pub const move_or_null = TypedMethods.move_or_null;
+
+        // NULL CONSTRUCTION / MUTATION
+        pub const set_null = TypedMethods.set_null;
+        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
+
+        // ADDITIONAL CASTS
+        pub const to_non_null = TypedMethods.to_non_null;
+
+        // VOID POINTER
+        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
+
+        // ADDITIONAL CASTS
+        pub const to_unaligned = TypedMethods.to_unaligned;
+
+        // ADDITIONAL CASTS
+        pub const to_mutable = TypedMethods.to_mutable;
     };
 }

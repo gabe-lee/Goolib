@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
@@ -44,8 +44,8 @@ const num_cast = Cast.num_cast;
 
 const Allocator = std.mem.Allocator;
 const Endian = Root.CommonTypes.Endian;
-const Type = std.builtin.Type;
-const TypeId = std.builtin.TypeId;
+const Type = std.lang.Type;
+const TypeId = std.lang.TypeId;
 const Kind = Types.Kind;
 const KindInfo = Types.KindInfo;
 const DefinedLayout = Types.DefinedLayout;

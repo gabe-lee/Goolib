@@ -551,7 +551,7 @@ pub fn name_cast(val: anytype, comptime ENUM_TYPE_FOR_INT: ?type) []const u8 {
 
 pub fn ChangePtrElemSameAttrs(
     comptime source: type,
-    comptime size: std.builtin.Type.Pointer.Size,
+    comptime size: std.lang.Type.Pointer.Size,
     comptime child: type,
 ) type {
     const info = @typeInfo(source).pointer;
@@ -565,7 +565,7 @@ pub fn ChangePtrElemSameAttrs(
 }
 pub fn ChangePtrElemSameAttrsDiffAlign(
     comptime source: type,
-    comptime size: std.builtin.Type.Pointer.Size,
+    comptime size: std.lang.Type.Pointer.Size,
     comptime child: type,
     comptime alignment: usize,
 ) type {

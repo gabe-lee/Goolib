@@ -473,10 +473,10 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             };
         }
 
-        inline fn assert_no_alloc_param(comptime src: ?std.builtin.SourceLocation) void {
+        inline fn assert_no_alloc_param(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!SOURCE.USE_PARAM_TYPE(), src, "cannot call this function if an allocator needs to be passed in manually", .{});
         }
-        inline fn assert_alloc_param(comptime src: ?std.builtin.SourceLocation) void {
+        inline fn assert_alloc_param(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(SOURCE.USE_PARAM_TYPE(), src, "cannot call this function if an allocator DOES NOT need to be passed in manually", .{});
         }
         //*********

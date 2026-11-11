@@ -65,7 +65,7 @@ const SDL3 = Root.SDL3;
 const GPU_VertexElementFormat = SDL3.GPU_VertexElementFormat;
 const InterfaceSignature = Types.InterfaceSignature;
 const MethodDefinition = Types.MethodDefinition;
-const SourceLocation = std.builtin.SourceLocation;
+const SourceLocation = std.lang.SourceLocation;
 
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
@@ -424,7 +424,7 @@ pub fn UniformOrStorageStruct(comptime FIELDS: type, comptime INCLUDE_LAYOUT: In
 
     comptime var struct_field_names: [SLOT_COUNT][]const u8 = undefined;
     comptime var struct_field_types: [SLOT_COUNT]type = undefined;
-    comptime var struct_field_attrs: [SLOT_COUNT]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
+    comptime var struct_field_attrs: [SLOT_COUNT]std.lang.Type.Struct.FieldAttributes = @splat(.{});
 
     comptime var cpu_pad_idx: usize = 0;
     for (all_slots[0..SLOT_COUNT], 0..) |slot, s_i| {
@@ -1928,7 +1928,7 @@ pub const HLSL_Semantic = union(HLSL_SEMANTIC_KIND) {
         return n;
     }
 
-    pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime field_name: []const u8, comptime src: ?std.builtin.SourceLocation) void {
+    pub fn assert_has_allowed_type(self: HLSL_Semantic, gpu_type: GPUType, interp: HLSL_INTERP_KIND, comptime field_name: []const u8, comptime src: ?std.lang.SourceLocation) void {
         if (Assert.should_assert()) {
             const allowed = ALLOWED_TYPES[@backingInt(self)];
             if (allowed.len > 0) {
@@ -2422,7 +2422,7 @@ pub fn VertexShaderInputStruct(
 
             comptime var field_names: [total_fields][]const u8 = undefined;
             comptime var field_types_: [total_fields]type = undefined;
-            comptime var field_attrs: [total_fields]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
+            comptime var field_attrs: [total_fields]std.lang.Type.Struct.FieldAttributes = @splat(.{});
 
             comptime var curr_offset: usize = 0;
             comptime var f_idx: usize = 0;

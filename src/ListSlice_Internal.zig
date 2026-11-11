@@ -279,16 +279,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         //****************
         // ASSERT/UTILS
         //****************
-        fn assert_valid_idx(self: List, idx: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_valid_idx(self: List, idx: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(idx < self.data_len, src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
         }
-        fn assert_idx_plus_count_less_equal_len(self: List, idx: IDX, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_idx_plus_count_less_equal_len(self: List, idx: IDX, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(idx + count <= self.data_len, src, "index plus count `{d} + {d}` is out of bounds (len = {d})", .{ idx, count, self.data_len });
         }
-        fn assert_valid_idx_or_zero_if_len_is_zero(self: List, idx: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_valid_idx_or_zero_if_len_is_zero(self: List, idx: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason((self.data_len == 0 and idx == 0) or (idx < self.data_len), src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
         }
-        fn assert_valid_range(self: List, start: IDX, end_exclusive: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_valid_range(self: List, start: IDX, end_exclusive: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(start <= end_exclusive, src, "start index is after end index exclusive ({d} > {d})", .{ start, end_exclusive });
             assert_with_reason(end_exclusive <= get_len(
                 self,
@@ -296,7 +296,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 self,
             ) });
         }
-        fn assert_valid_range_3(self: List, start: IDX, middle: IDX, end_exclusive: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_valid_range_3(self: List, start: IDX, middle: IDX, end_exclusive: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(start <= middle, src, "start index is after middle index ({d} > {d})", .{ start, middle });
             assert_with_reason(middle <= end_exclusive, src, "middle index is after end_exclusive index ({d} > {d})", .{ middle, end_exclusive });
             assert_with_reason(end_exclusive <= get_len(
@@ -305,16 +305,16 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 self,
             ) });
         }
-        fn assert_valid_idx_or_len(self: List, idx: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_valid_idx_or_len(self: List, idx: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(idx <= self.data_len, src, "index `{d}` is out of bounds (len = {d})", .{ idx, self.data_len });
         }
-        fn assert_count_less_equal_slice_offset(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_count_less_equal_slice_offset(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(count <= get_slice_offset(self), src, "count `{d}` greater than slice offset (offset = {d})", .{ count, get_slice_offset(self) });
         }
-        fn assert_count_less_equal_len(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_count_less_equal_len(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(count <= self.data_len, src, "count `{d}` is greater than len (len = {d})", .{ count, self.data_len });
         }
-        fn assert_count_less_equal_data_unused_space(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_count_less_equal_data_unused_space(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(count <= (get_cap(
                 self,
             ) - get_len(
@@ -325,7 +325,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 self,
             ) });
         }
-        fn assert_count_less_equal_data_unused_space_for_overlapping_copy(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_count_less_equal_data_unused_space_for_overlapping_copy(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(count <= (get_cap(
                 self,
             ) - get_len(
@@ -336,37 +336,37 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 self,
             ) });
         }
-        fn assert_whole_struct_for_ptr(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_whole_struct_for_ptr(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!SPLIT, src, "cannot get whole struct pointer in .SPLIT_FIELDS mode", .{});
         }
-        fn assert_whole_struct_for_zig_slice(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_whole_struct_for_zig_slice(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!SPLIT, src, "cannot get normal slice in .SPLIT_FIELDS mode", .{});
         }
-        fn assert_start_less_end_exclusive(start: IDX, end_excl: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_start_less_end_exclusive(start: IDX, end_excl: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(start < end_excl, src, "start must be <= end_exclusive, got {d} > {d}", .{ start, end_excl });
         }
-        fn assert_start_less_or_equal_end_exclusive(start: IDX, end_excl: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_start_less_or_equal_end_exclusive(start: IDX, end_excl: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(start <= end_excl, src, "start must be <= end_exclusive, got {d} > {d}", .{ start, end_excl });
         }
-        fn assert_serial_indexes(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_serial_indexes(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(SERIAL_IDXS, src, "indexes must be serially in order at this point", .{});
         }
-        fn assert_owned(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_owned(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_OWNED, src, "slice is not owned (reference to memory only)", .{});
         }
-        fn assert_owned_not_allocated(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_owned_not_allocated(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_OWNED and !IS_ALLOCATED, src, "slice is not owned OR list is allocated", .{});
         }
-        fn assert_reference(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_reference(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_REFERENCE, src, "list is not a reference to owned memory", .{});
         }
-        fn assert_reference_mutable(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_reference_mutable(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_REFERENCE and IS_MUTABLE, src, "list/slice is not a mutable reference to owned memory", .{});
         }
-        fn assert_owned_allocated(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_owned_allocated(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(IS_ALLOCATED, src, "cannot alter capacity/memory pointer on non-owned or non-allocated memory", .{});
         }
-        fn assert_len_less_equal_cap(self: List, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_len_less_equal_cap(self: List, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(get_len(
                 self,
             ) <= get_cap(
@@ -375,62 +375,62 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 self,
             ) });
         }
-        fn assert_len_greater_equal_count(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_len_greater_equal_count(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(count <= get_len(
                 self,
             ), src, "count is > len ({d} > {d})", .{ count, self.data_len });
         }
-        fn assert_len_plus_count_less_equal_cap(self: List, count: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_len_plus_count_less_equal_cap(self: List, count: IDX, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason((self.data_len + count) <= get_cap(
                 self,
             ), src, "(len + count) is > cap (({d} + {d}) > {d})", .{ self.data_len, count, get_cap(
                 self,
             ) });
         }
-        fn assert_mutable(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_mutable(comptime src: ?std.lang.SourceLocation) void {
             comptime assert_with_reason(IS_MUTABLE, src, "pointer is not mutable", .{});
         }
-        fn assert_immutable(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_immutable(comptime src: ?std.lang.SourceLocation) void {
             comptime assert_with_reason(!IS_MUTABLE, src, "pointer is mutable", .{});
         }
-        fn assert_split_fields(comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_split_fields(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(SPLIT, src, "fields are not split", .{});
         }
-        fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, data_len: IDX, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_stack_can_support_sort_len(comptime SETTINGS: QuicksortSettings, data_len: IDX, comptime src: ?std.lang.SourceLocation) void {
             const needed_stack_len: u8 = @intCast(std.math.log2_int(IDX, data_len) + 2);
             assert_with_reason(SETTINGS.QUICKSORT_MAX_STACK >= needed_stack_len, src, "the provided `.QUICKSORT_MAX_STACK` setting ({d}) is too small, need stack len {d} for given the data len {d}", .{ SETTINGS.QUICKSORT_MAX_STACK, needed_stack_len, data_len });
         }
-        fn assert_goolib_list(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_goolib_list(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(@hasDecl(T, "LIST_DEF"), src, "type is not a Goolib List, got type `{s}`", .{@typeName(T)});
             assert_with_reason(@TypeOf(@field(T, "LIST_DEF")) == ListDef, src, "type is not a Goolib List (`LIST_DEF` decl is type `{s}`), got type `{s}`", .{ @typeName(@TypeOf(@field(T, "LIST_DEF"))), @typeName(T) });
             assert_with_reason(T == T.LIST_DEF.List(), src, "type is not a Goolib List (`T` != `T.LIST_DEF.List()`, got type `{s}`", .{@typeName(T)});
         }
-        fn assert_goolib_list_ptr(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_goolib_list_ptr(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(Type.type_is_pointer_or_slice(T), src, "type is not a pointer to Goolib List, got type `{s}`", .{@typeName(T)});
             const TT = @typeInfo(T).pointer.child;
             assert_goolib_list(TT, src);
         }
-        fn assert_goolib_list_ptr_get_list_type(comptime T: type, comptime src: ?std.builtin.SourceLocation) type {
+        fn assert_goolib_list_ptr_get_list_type(comptime T: type, comptime src: ?std.lang.SourceLocation) type {
             assert_with_reason(Type.type_is_pointer_or_slice(T), src, "type is not a pointer to Goolib List, got type `{s}`", .{@typeName(T)});
             const TT = @typeInfo(T).pointer.child;
             assert_goolib_list(TT, src);
             return TT;
         }
-        fn assert_goolib_list_ptr_with_same_elem_type_get_list_type(comptime T: type, comptime src: ?std.builtin.SourceLocation) type {
+        fn assert_goolib_list_ptr_with_same_elem_type_get_list_type(comptime T: type, comptime src: ?std.lang.SourceLocation) type {
             assert_with_reason(Type.type_is_pointer_or_slice(T), src, "type is not a pointer to Goolib List, got type `{s}`", .{@typeName(T)});
             const TT = @typeInfo(T).pointer.child;
             assert_goolib_list_with_same_elem(TT, src);
             return TT;
         }
-        fn assert_goolib_list_with_same_elem(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_goolib_list_with_same_elem(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
             assert_goolib_list(T, src);
             assert_with_reason(T.LIST_DEF.ELEM == ELEM, src, "Goolib list does not have matching element type (got `{s}`, need `{s}`)", .{ @typeName(T.LIST_DEF.ELEM), @typeName(ELEM) });
         }
-        fn assert_goolib_list_ptr_with_same_elem(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_goolib_list_ptr_with_same_elem(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
             const TT = assert_goolib_list_ptr_get_list_type(T, src);
             assert_with_reason(TT.LIST_DEF.ELEM == ELEM, src, "Goolib list does not have matching element type (got `{s}`, need `{s}`)", .{ @typeName(TT.LIST_DEF.ELEM), @typeName(ELEM) });
         }
-        inline fn assert_no_mem_overlap(a: []const ELEM, b: []const ELEM, comptime src: ?std.builtin.SourceLocation) void {
+        inline fn assert_no_mem_overlap(a: []const ELEM, b: []const ELEM, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!memory_overlaps(ELEM, a, b), src, "memory slices cannot alias (overlap)", .{});
         }
         inline fn memory_overlaps(comptime T: type, a: []const T, b: []const T) bool {

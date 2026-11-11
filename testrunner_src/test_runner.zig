@@ -47,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
 
     Printer.fmt("\r\x1b[0K", .{}); // beginning of line and clear to end of line
 
-    var after_each: std.ArrayList(std.builtin.TestFn) = .empty;
+    var after_each: std.ArrayList(std.lang.TestFn) = .empty;
     defer after_each.deinit(allocator);
 
     initTestAllocator();
@@ -296,7 +296,7 @@ pub const panic = std.debug.FullPanic(struct {
     }
 }.panicFn);
 
-fn isUnnamed(t: std.builtin.TestFn) bool {
+fn isUnnamed(t: std.lang.TestFn) bool {
     const marker = ".test_";
     const test_name = t.name;
     const index = std.mem.indexOf(u8, test_name, marker) orelse return false;
@@ -313,14 +313,14 @@ fn initTestAllocator() void {
     });
 }
 
-fn isSetup(t: std.builtin.TestFn) bool {
+fn isSetup(t: std.lang.TestFn) bool {
     return std.mem.endsWith(u8, t.name, "tests:beforeAll");
 }
 
-fn isTeardown(t: std.builtin.TestFn) bool {
+fn isTeardown(t: std.lang.TestFn) bool {
     return std.mem.endsWith(u8, t.name, "tests:afterAll");
 }
 
-fn isAfterEach(t: std.builtin.TestFn) bool {
+fn isAfterEach(t: std.lang.TestFn) bool {
     return std.mem.endsWith(u8, t.name, "tests:afterEach");
 }

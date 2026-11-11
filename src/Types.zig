@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
@@ -40,8 +40,8 @@ const assert_unreachable = Assert.assert_unreachable;
 pub const StructFieldAttr = Type.Struct.FieldAttributes;
 pub const UnionFieldAttr = Type.UnionField.Attributes;
 
-pub const Type = std.builtin.Type;
-pub const TypeId = std.builtin.TypeId;
+pub const Type = std.lang.Type;
+pub const TypeId = std.lang.TypeId;
 
 const _TK = @import("./Types_Kind.zig");
 pub const Kind = _TK.Kind;
@@ -355,7 +355,7 @@ pub fn has_len(comptime T: type) bool {
         else => return false,
     }
 }
-pub fn assert_has_len(comptime T: type, comptime src: std.builtin.SourceLocation) void {
+pub fn assert_has_len(comptime T: type, comptime src: std.lang.SourceLocation) void {
     assert_with_reason(has_len(T), src, "type `{s}` has no `len` field", .{@typeName(T)});
 }
 
@@ -1057,10 +1057,10 @@ pub inline fn type_is_union_with_all_fields_same_type(comptime T: type, comptime
     }
     return true;
 }
-pub inline fn type_class(comptime T: type) std.builtin.TypeId {
+pub inline fn type_class(comptime T: type) std.lang.TypeId {
     return comptime std.meta.activeTag(@typeInfo(T));
 }
-pub inline fn type_is_struct_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.builtin.TypeId) bool {
+pub inline fn type_is_struct_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.lang.TypeId) bool {
     const INFO = @typeInfo(T);
     switch (INFO) {
         .@"struct" => {},
@@ -1072,7 +1072,7 @@ pub inline fn type_is_struct_with_all_fields_same_type_class(comptime T: type, c
     }
     return true;
 }
-pub inline fn type_is_union_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.builtin.TypeId) bool {
+pub inline fn type_is_union_with_all_fields_same_type_class(comptime T: type, comptime TYPE_ID: std.lang.TypeId) bool {
     const INFO = @typeInfo(T);
     switch (INFO) {
         .@"union" => {},
@@ -1978,16 +1978,16 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
     const INFO = @typeInfo(STRUCT_TYPE);
     switch (INFO) {
         .@"struct" => |STRUCT| {
-            // comptime var new_fields: [STRUCT.field_names.len]std.builtin.Type.StructField = undefined;
+            // comptime var new_fields: [STRUCT.field_names.len]std.lang.Type.StructField = undefined;
             comptime var field_names: [STRUCT.field_names.len][]const u8 = undefined;
             comptime var field_types: [STRUCT.field_names.len]type = undefined;
-            comptime var field_attrs: [STRUCT.field_names.len]std.builtin.Type.Struct.FieldAttributes = undefined;
+            comptime var field_attrs: [STRUCT.field_names.len]std.lang.Type.Struct.FieldAttributes = undefined;
             inline for (STRUCT.field_names, STRUCT.field_types, STRUCT.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
                 switch (@typeInfo(field_type_)) {
                     .pointer => |P| {
                         field_names[f] = field_name;
                         field_types[f] = P.child;
-                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                        field_attrs[f] = std.lang.Type.Struct.FieldAttributes{
                             .@"align" = field_attr.alignment,
                             .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
@@ -1996,7 +1996,7 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
                     .array => |A| {
                         field_names[f] = field_name;
                         field_types[f] = A.child;
-                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                        field_attrs[f] = std.lang.Type.Struct.FieldAttributes{
                             .@"align" = field_attr.alignment,
                             .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
@@ -2005,7 +2005,7 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
                     .vector => |V| {
                         field_names[f] = field_name;
                         field_types[f] = V.child;
-                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                        field_attrs[f] = std.lang.Type.Struct.FieldAttributes{
                             .@"align" = field_attr.alignment,
                             .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = null,
@@ -2014,7 +2014,7 @@ pub fn make_temp_value_struct_from_struct_type(comptime STRUCT_TYPE: type) type 
                     else => {
                         field_names[f] = field_name;
                         field_types[f] = field_type_;
-                        field_attrs[f] = std.builtin.Type.Struct.FieldAttributes{
+                        field_attrs[f] = std.lang.Type.Struct.FieldAttributes{
                             .@"align" = field_attr.alignment,
                             .@"comptime" = field_attr.is_comptime,
                             .default_value_ptr = field_attr.default_value_ptr,
@@ -2054,16 +2054,16 @@ pub fn error_union_error(comptime T: type) type {
 /// create a bare union type with the same fields as the tagged union
 ///
 /// This does not and *cannot* copy static declarations
-pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptime NEW_LAYOUT: ?std.builtin.Type.ContainerLayout) type {
+pub fn bare_union_with_same_fields_as_tagged_union(comptime UNION: type, comptime NEW_LAYOUT: ?std.lang.Type.ContainerLayout) type {
     const TAGGED_INFO = @typeInfo(UNION).@"union";
     const NUM_FIELDS = TAGGED_INFO.field_names.len;
     comptime var field_names: [NUM_FIELDS][]const u8 = undefined;
     comptime var field_types: [NUM_FIELDS]type = undefined;
-    comptime var field_attrs: [NUM_FIELDS]std.builtin.Type.UnionField.Attributes = undefined;
+    comptime var field_attrs: [NUM_FIELDS]std.lang.Type.UnionField.Attributes = undefined;
     inline for (TAGGED_INFO.field_names, TAGGED_INFO.field_types, TAGGED_INFO.field_attrs, 0..) |field_name, field_type_, field_attr, f| {
         field_names[f] = field_name;
         field_types[f] = field_type_;
-        field_attrs[f] = std.builtin.Type.UnionField.Attributes{ .@"align" = field_attr.alignment };
+        field_attrs[f] = std.lang.Type.UnionField.Attributes{ .@"align" = field_attr.alignment };
     }
     return @Union(if (NEW_LAYOUT) |LAY| LAY else TAGGED_INFO.layout, null, &field_names, &field_types, &field_attrs);
 }
@@ -2072,10 +2072,10 @@ pub const DefinedLayout = enum(u8) {
     EXTERN,
     PACKED,
 
-    pub inline fn to_native(comptime self: DefinedLayout) std.builtin.Type.ContainerLayout {
+    pub inline fn to_native(comptime self: DefinedLayout) std.lang.Type.ContainerLayout {
         return switch (self) {
-            .EXTERN => std.builtin.Type.ContainerLayout.@"extern",
-            .PACKED => std.builtin.Type.ContainerLayout.@"packed",
+            .EXTERN => std.lang.Type.ContainerLayout.@"extern",
+            .PACKED => std.lang.Type.ContainerLayout.@"packed",
         };
     }
 };
@@ -2328,6 +2328,6 @@ pub fn StructWithAllFieldsSameType(comptime FIELDS: type, comptime TYPE: type) t
     const NUM_FIELDS = enum_defined_field_count(FIELDS);
     comptime var names: [NUM_FIELDS][:0]const u8 = undefined;
     comptime var types: [NUM_FIELDS]type = @splat(TYPE);
-    comptime var attrs: [NUM_FIELDS]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
+    comptime var attrs: [NUM_FIELDS]std.lang.Type.Struct.FieldAttributes = @splat(.{});
     return @Struct(.auto, null, names[0..], &types, &attrs);
 }

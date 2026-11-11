@@ -252,10 +252,10 @@ pub const LifeCycle = enum(u8) {
     DOWNLOAD_FROM_GPU,
     WAITING_FOR_GPU_COMPLETION_FENCE,
 
-    pub fn assert(self: LifeCycle, comptime need: LifeCycle, comptime src_loc: ?std.builtin.SourceLocation) void {
+    pub fn assert(self: LifeCycle, comptime need: LifeCycle, comptime src_loc: ?std.lang.SourceLocation) void {
         assert_with_reason(self == need, src_loc, "need stage {s}, but was in stage {s}", .{ @tagName(need), @tagName(self) });
     }
-    pub fn assert_any(self: LifeCycle, comptime needs: []const LifeCycle, comptime src_loc: ?std.builtin.SourceLocation) void {
+    pub fn assert_any(self: LifeCycle, comptime needs: []const LifeCycle, comptime src_loc: ?std.lang.SourceLocation) void {
         inline for (needs) |need| {
             if (need == self) return;
         }
@@ -1056,7 +1056,7 @@ pub fn GraphicsController(
         var types: [_NUM_UNIFORM_STRUCTS]type = undefined;
         var names: [_NUM_UNIFORM_STRUCTS][:0]const u8 = undefined;
         var offsets: [_NUM_UNIFORM_STRUCTS]u32 = undefined;
-        const attrs: [_NUM_UNIFORM_STRUCTS]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
+        const attrs: [_NUM_UNIFORM_STRUCTS]std.lang.Type.Struct.FieldAttributes = @splat(.{});
         for (UNIFORM_STRUCT_DEFINITIONS) |def| {
             const idx = @backingInt(def.name);
             assert_with_reason(defined[idx] == false, @src(), "uniform `{s}` was defined more than once", .{@tagName(def.name)});
@@ -2615,73 +2615,73 @@ pub fn GraphicsController(
                 };
             }
         };
-        fn assert_no_downloads_occured_for_submit(self: *const Controller, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_no_downloads_occured_for_submit(self: *const Controller, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!self.download_occured, src, "no download must have occured during the command buffer when calling this function", .{});
         }
-        fn assert_window_initialized(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_window_initialized(self: *const Controller, name: WindowName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.windows_init[@backingInt(name)] == true, src, "window `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_window_NOT_initialized(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_window_NOT_initialized(self: *const Controller, name: WindowName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.windows_init[@backingInt(name)] == false, src, "window `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_window_claimed(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_window_claimed(self: *const Controller, name: WindowName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.windows_claimed[@backingInt(name)] == true, src, "window `{s}` was not claimed", .{@tagName(name)});
         }
-        fn assert_window_NOT_claimed(self: *const Controller, name: WindowName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_window_NOT_claimed(self: *const Controller, name: WindowName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.windows_claimed[@backingInt(name)] == false, src, "window `{s}` was already claimed", .{@tagName(name)});
         }
-        fn assert_vert_buffer_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_vert_buffer_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.vertex_buffers_init[@backingInt(name)] == true, src, "vertex buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_vert_buffer_NOT_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_vert_buffer_NOT_initialized(self: *const Controller, name: VertexBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.vertex_buffers_init[@backingInt(name)] == false, src, "vertex buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_storage_buffer_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_storage_buffer_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.storage_buffers_init[@backingInt(name)] == true, src, "storage buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_storage_buffer_NOT_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_storage_buffer_NOT_initialized(self: *const Controller, name: StorageBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.storage_buffers_init[@backingInt(name)] == false, src, "storage buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_index_buffer_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_index_buffer_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.index_buffers_init[@backingInt(name)] == true, src, "index buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_index_buffer_NOT_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_index_buffer_NOT_initialized(self: *const Controller, name: IndexBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.index_buffers_init[@backingInt(name)] == false, src, "index buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_indirect_buffer_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_indirect_buffer_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.indirect_draw_buffers_init[@backingInt(name)] == true, src, "indirect draw buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_indirect_buffer_NOT_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_indirect_buffer_NOT_initialized(self: *const Controller, name: IndirectDrawBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.indirect_draw_buffers_init[@backingInt(name)] == false, src, "indirect draw buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_download_buffer_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_download_buffer_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.download_buffers_init[@backingInt(name)] == true, src, "download transfer buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_download_buffer_NOT_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_download_buffer_NOT_initialized(self: *const Controller, name: DownloadBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.download_buffers_init[@backingInt(name)] == false, src, "download transfer buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_upload_buffer_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_upload_buffer_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.upload_buffers_init[@backingInt(name)] == true, src, "upload transfer buffer `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_upload_buffer_NOT_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_upload_buffer_NOT_initialized(self: *const Controller, name: UploadBufferName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.upload_buffers_init[@backingInt(name)] == false, src, "upload transfer buffer `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_texture_initialized(self: *const Controller, name: TextureName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_texture_initialized(self: *const Controller, name: TextureName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.textures_init[@backingInt(name)] == true, src, "texture `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_texture_NOT_initialized(self: *const Controller, name: TextureName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_texture_NOT_initialized(self: *const Controller, name: TextureName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.textures_init[@backingInt(name)] == false, src, "texture `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_sampler_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_sampler_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.samplers_init[@backingInt(name)] == true, src, "sampler `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_sampler_NOT_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_sampler_NOT_initialized(self: *const Controller, name: SamplerName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.samplers_init[@backingInt(name)] == false, src, "sampler `{s}` was already initialized", .{@tagName(name)});
         }
-        fn assert_fence_initialized(self: *const Controller, name: FenceName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_fence_initialized(self: *const Controller, name: FenceName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.fences_init[@backingInt(name)] == true, src, "fence `{s}` was not initialized", .{@tagName(name)});
         }
-        fn assert_fence_NOT_initialized(self: *const Controller, name: FenceName, comptime src: ?std.builtin.SourceLocation) void {
+        fn assert_fence_NOT_initialized(self: *const Controller, name: FenceName, comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(self.fences_init[@backingInt(name)] == false, src, "fence `{s}` was already initialized", .{@tagName(name)});
         }
 
@@ -3645,7 +3645,7 @@ pub fn GraphicsController(
         pub const CopyPass = struct {
             controller: *Controller,
 
-            fn assert_same_buffer_kind(source: BufferLocation, dest: BufferLocation, comptime src: ?std.builtin.SourceLocation) void {
+            fn assert_same_buffer_kind(source: BufferLocation, dest: BufferLocation, comptime src: ?std.lang.SourceLocation) void {
                 const src_kind: GPUBufferKind = std.meta.activeTag(source.buffer);
                 const dst_kind: GPUBufferKind = std.meta.activeTag(dest.buffer);
                 assert_with_reason(src_kind == dst_kind, src, "cannot copy from a `{s}` buffer to a `{s}` buffer", .{ @tagName(src_kind), @tagName(dst_kind) });
@@ -3708,7 +3708,7 @@ pub fn GraphicsController(
                 self.controller.sdl_render_pass.set_stencil_reference_val(ref_val);
             }
 
-            fn assert_valid_idx_buffer_end(self: RenderPass, first_idx: u32, num_indexes: u32, comptime src: ?std.builtin.SourceLocation) void {
+            fn assert_valid_idx_buffer_end(self: RenderPass, first_idx: u32, num_indexes: u32, comptime src: ?std.lang.SourceLocation) void {
                 const end_index_excl = first_idx + num_indexes;
                 const byte_end_exclusive = INTERNAL.INDEX_BUFFER_TAGS[@backingInt(self.controller.bound_index_buffer)].size() * (end_index_excl);
                 assert_with_reason(self.controller.index_buffer_byte_caps[@backingInt(self.controller.bound_index_buffer)] >= byte_end_exclusive, src, "index buffer `{s}` does not have at least {d} indexes (start {d} + count {d})", .{ @tagName(self.controller.bound_index_buffer), end_index_excl, first_idx, num_indexes });

@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
@@ -39,9 +39,9 @@ const CyclesPossible = Root.CommonTypes.CyclesPossible;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
 
-const Type = std.builtin.Type;
-const TypeId = std.builtin.TypeId;
-/// This is an alternative representation of `std.builtin.TypeId`
+const Type = std.lang.Type;
+const TypeId = std.lang.TypeId;
+/// This is an alternative representation of `std.lang.TypeId`
 pub const Kind = enum(std.meta.Tag(TypeId)) {
     TYPE = @backingInt(TypeId.type),
     VOID = @backingInt(TypeId.void),
@@ -75,7 +75,7 @@ pub const Kind = enum(std.meta.Tag(TypeId)) {
     pub inline fn type_is_same_kind(comptime K: Kind, comptime T: type) bool {
         return get_kind(T) == K;
     }
-    pub inline fn assert_type_is_same_kind(comptime K: Kind, comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_type_is_same_kind(comptime K: Kind, comptime T: type, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(type_is_same_kind(K, T), src, "type `{s}` does not match needed kind `{s}`, got kind `{s}`", .{ @typeName(T), @tagName(K), @tagName(get_kind(T)) });
     }
 
@@ -173,31 +173,31 @@ pub const Kind = enum(std.meta.Tag(TypeId)) {
         return K == .ENUM_LITERAL;
     }
 };
-/// This is an alternative representation of `std.builtin.Type`
+/// This is an alternative representation of `std.lang.Type`
 pub const KindInfo = union(Kind) {
     TYPE: void,
     VOID: void,
     BOOL: void,
     NO_RETURN: void,
-    INT: std.builtin.Type.Int,
-    FLOAT: std.builtin.Type.Float,
-    POINTER: std.builtin.Type.Pointer,
-    ARRAY: std.builtin.Type.Array,
-    STRUCT: std.builtin.Type.Struct,
+    INT: std.lang.Type.Int,
+    FLOAT: std.lang.Type.Float,
+    POINTER: std.lang.Type.Pointer,
+    ARRAY: std.lang.Type.Array,
+    STRUCT: std.lang.Type.Struct,
     COMPTIME_FLOAT: void,
     COMPTIME_INT: void,
     UNDEFINED: void,
     NULL: void,
-    OPTIONAL: std.builtin.Type.Optional,
-    ERROR_UNION: std.builtin.Type.ErrorUnion,
-    ERROR_SET: std.builtin.Type.ErrorSet,
-    ENUM: std.builtin.Type.Enum,
-    UNION: std.builtin.Type.Union,
-    FUNCTION: std.builtin.Type.Fn,
-    OPAQUE: std.builtin.Type.Opaque,
-    FRAME: std.builtin.Type.Frame,
-    ANYFRAME: std.builtin.Type.AnyFrame,
-    VECTOR: std.builtin.Type.Vector,
+    OPTIONAL: std.lang.Type.Optional,
+    ERROR_UNION: std.lang.Type.ErrorUnion,
+    ERROR_SET: std.lang.Type.ErrorSet,
+    ENUM: std.lang.Type.Enum,
+    UNION: std.lang.Type.Union,
+    FUNCTION: std.lang.Type.Fn,
+    OPAQUE: std.lang.Type.Opaque,
+    FRAME: std.lang.Type.Frame,
+    ANYFRAME: std.lang.Type.AnyFrame,
+    VECTOR: std.lang.Type.Vector,
     ENUM_LITERAL: void,
 
     pub inline fn kind(comptime K: KindInfo) Kind {
@@ -213,7 +213,7 @@ pub const KindInfo = union(Kind) {
     pub inline fn type_is_same_kind(comptime K: KindInfo, comptime T: type) bool {
         return Kind.get_kind(T) == K.kind();
     }
-    pub inline fn assert_type_is_same_kind(comptime K: KindInfo, comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_type_is_same_kind(comptime K: KindInfo, comptime T: type, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(type_is_same_kind(K, T), src, "type `{s}` does not match needed kind `{s}`, got kind `{s}`", .{ @typeName(T), @tagName(K), @tagName(Kind.get_kind(T)) });
     }
 
@@ -507,7 +507,7 @@ pub const KindInfo = union(Kind) {
             else => return false,
         }
     }
-    pub inline fn assert_is_indexable(comptime K: KindInfo, comptime src: std.builtin.SourceLocation) void {
+    pub inline fn assert_is_indexable(comptime K: KindInfo, comptime src: std.lang.SourceLocation) void {
         assert_with_reason(K.is_indexable(), src, "kind `{s}` is not indexible, must be a many-item pointer, slice, or pointer to an array", .{@tagName(K)});
     }
     pub inline fn has_len(comptime K: KindInfo) bool {
@@ -530,7 +530,7 @@ pub const KindInfo = union(Kind) {
     pub inline fn has_indexable_child_that_matches(comptime K: KindInfo, comptime KK: KindInfo) bool {
         return K.is_indexable() and KK.is_indexable() and K.indexed_child_type() == KK.indexed_child_type();
     }
-    pub inline fn assert_has_indexable_child_kind(comptime K: KindInfo, comptime KK: Kind, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_has_indexable_child_kind(comptime K: KindInfo, comptime KK: Kind, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(K.has_indexable_child_kind(KK), src, "kind {any} does not have an indexable child kind `{s}`", .{ K, @tagName(KK) });
     }
     pub inline fn has_indexable_child_type(comptime K: KindInfo, comptime TT: type) bool {
@@ -539,7 +539,7 @@ pub const KindInfo = union(Kind) {
         }
         return K.is_indexable() and K.has_child_type(TT);
     }
-    pub inline fn assert_has_indexable_child_type(comptime K: KindInfo, comptime TT: type, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_has_indexable_child_type(comptime K: KindInfo, comptime TT: type, comptime src: ?std.lang.SourceLocation) void {
         assert_with_reason(K.has_indexable_child_type(TT), src, "kind {any} does not have an indexable child type `{s}`", .{ K, @typeName(TT) });
     }
 

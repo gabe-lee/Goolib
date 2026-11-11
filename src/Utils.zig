@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -1362,7 +1362,7 @@ pub fn type_hash32_as_hex_string(comptime T: type) []const u8 {
     return comptime hash_as_str_res.slice();
 }
 
-pub fn src_loc_hash(comptime src: std.builtin.SourceLocation) u64 {
+pub fn src_loc_hash(comptime src: std.lang.SourceLocation) u64 {
     var h = std.hash.Wyhash.init(0);
     h.update(src.module);
     h.update(src.file);

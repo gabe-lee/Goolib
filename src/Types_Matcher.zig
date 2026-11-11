@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const math = std.math;
@@ -38,8 +38,8 @@ const assert_in_comptime = Assert.assert_in_comptime;
 
 const DEBUG = std.debug.print;
 
-pub const Type = std.builtin.Type;
-pub const TypeId = std.builtin.TypeId;
+pub const Type = std.lang.Type;
+pub const TypeId = std.lang.TypeId;
 
 pub const Kind = Root.Types.Kind;
 pub const KindInfo = Root.Types.KindInfo;

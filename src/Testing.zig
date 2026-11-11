@@ -28,7 +28,7 @@ const testing = std.testing;
 const Root = @import("./_root.zig");
 const Utils = Root.Utils;
 const MathX = Root.Math;
-const SourceLocation = std.builtin.SourceLocation;
+const SourceLocation = std.lang.SourceLocation;
 
 pub inline fn skip_if(condition: bool) error{SkipZigTest}!void {
     if (condition) {

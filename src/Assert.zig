@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const build = @import("builtin");
 const Allocator = std.mem.Allocator;
@@ -227,7 +227,7 @@ pub fn assert_comptime_write_failure(comptime src: ?SourceLocation, err: anyerro
     unreachable;
 }
 
-pub fn assert_field_is_type(comptime field: std.builtin.Type.StructField, comptime T: type) void {
+pub fn assert_field_is_type(comptime field: std.lang.Type.StructField, comptime T: type) void {
     assert_with_reason(field.type == T, @src(), "field `{s}` was type `{s}`, but needed to be type `{s}`", .{ field.name, @typeName(field.type), @typeName(T) });
 }
 

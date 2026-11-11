@@ -39,7 +39,7 @@ const MethodDefinition = Types.MethodDefinition;
 const Growth = Common.GrowthModel;
 const ErrorBehavior = Common.ErrorBehavior;
 const AssertBehavior = Common.AssertBehavior;
-const SourceLocation = std.builtin.SourceLocation;
+const SourceLocation = std.lang.SourceLocation;
 const Alloc = Utils.Alloc;
 const AllocClearOld = Alloc.ClearOldMode;
 const AllocInitNew = Alloc.InitNew;
@@ -195,32 +195,32 @@ const IndexedGetOnlyInterface = Types.InterfaceSignature{
     .struct_fields = &GetSetFields,
 };
 
-pub fn assert_type_has_indexed_indirect_get_and_set(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_indexed_indirect_get_and_set(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     IndexedIndirectInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_type_has_indexed_direct_get_and_set(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_indexed_direct_get_and_set(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     IndexedDirectInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_type_has_direct_get_and_set(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_direct_get_and_set(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     ScalarDirectInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_type_has_indirect_get_and_set(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_indirect_get_and_set(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     ScalarIndirectInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_type_has_get_only(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_get_only(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     ScalarGetOnlyInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_type_has_indexed_get_only(comptime T: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_type_has_indexed_get_only(comptime T: type, comptime src: ?std.lang.SourceLocation) void {
     IndexedGetOnlyInterface.assert_type_fulfills(T, src);
 }
-pub fn assert_getset_has_elem_type(comptime T: type, comptime ELEM: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_getset_has_elem_type(comptime T: type, comptime ELEM: type, comptime src: ?std.lang.SourceLocation) void {
     Assert.assert_with_reason(Types.type_has_decl_with_type_and_val(T, "ELEM", type, ELEM), src, "type `{s}` does not have necessary decl `pub const ELEM = {s};`", .{ @typeName(T), @typeName(ELEM) });
 }
-pub fn assert_getset_has_elem_class(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_getset_has_elem_class(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime src: ?std.lang.SourceLocation) void {
     Assert.assert_with_reason(Types.type_has_decl_with_type(T, "ELEM", type), src, "type `{s}` does not have necessary decl `pub const ELEM = <type>;`", .{@typeName(T)});
     Assert.assert_with_reason(@typeInfo(@field(T, "ELEM")) == TYPE_ID, src, "type `{s}.ELEM` is not the type category `{s}`", .{ @typeName(T), @tagName(TYPE_ID) });
 }
-pub fn assert_getset_has_elem_class_with_child_type(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime CHILD_TYPE: type, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_getset_has_elem_class_with_child_type(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime CHILD_TYPE: type, comptime src: ?std.lang.SourceLocation) void {
     Assert.assert_with_reason(Types.type_has_decl_with_type(T, "ELEM", type), src, "type `{s}` does not have necessary decl `pub const ELEM = <type>;`", .{@typeName(T)});
     Assert.assert_with_reason(@typeInfo(@field(T, "ELEM")) == TYPE_ID, src, "type `{s}.ELEM` is not the type category `{s}`", .{ @typeName(T), @tagName(TYPE_ID) });
     const CHILD: type = switch (@typeInfo(@field(T, "ELEM"))) {
@@ -231,7 +231,7 @@ pub fn assert_getset_has_elem_class_with_child_type(comptime T: type, comptime T
     };
     Assert.assert_with_reason(CHILD == CHILD_TYPE, src, "type `{s}` has wrong child type `{s}`, need `{s}`", .{ @typeName(T), @typeName(CHILD), @typeName(CHILD_TYPE) });
 }
-pub fn assert_getset_has_elem_class_with_child_class(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime CHILD_ID: Types.TypeId, comptime src: ?std.builtin.SourceLocation) void {
+pub fn assert_getset_has_elem_class_with_child_class(comptime T: type, comptime TYPE_ID: Types.TypeId, comptime CHILD_ID: Types.TypeId, comptime src: ?std.lang.SourceLocation) void {
     Assert.assert_with_reason(Types.type_has_decl_with_type(T, "ELEM", type), src, "type `{s}` does not have necessary decl `pub const ELEM = <type>;`", .{@typeName(T)});
     Assert.assert_with_reason(@typeInfo(@field(T, "ELEM")) == TYPE_ID, src, "type `{s}.ELEM` is not the type category `{s}`", .{ @typeName(T), @tagName(TYPE_ID) });
     const CHILD: type = switch (@typeInfo(@field(T, "ELEM"))) {
@@ -540,7 +540,7 @@ pub const TypeWithElemRequirements = struct {
     TYPE: type,
     REQ: ElemRequirement,
 
-    pub inline fn assert_valid(comptime self: TypeWithElemRequirements, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: TypeWithElemRequirements, comptime src: ?std.lang.SourceLocation) void {
         switch (self.REQ) {
             .ANY => {},
             .KIND => |K| {
@@ -733,7 +733,7 @@ pub const GetOrGetSetDirect_WithReq = union(GetSetKind) {
     GET_ONLY: TypeWithElemRequirements,
     GET_AND_SET: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetOrGetSetDirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetOrGetSetDirect_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .GET_ONLY => |TR| {
                 assert_type_has_get_only(TR.TYPE, src);
@@ -758,7 +758,7 @@ pub const GetOrGetSetIndirect_WithReq = union(GetSetKind) {
     GET_ONLY: TypeWithElemRequirements,
     GET_AND_SET: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetOrGetSetIndirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetOrGetSetIndirect_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .GET_ONLY => |TR| {
                 assert_type_has_get_only(TR.TYPE, src);
@@ -783,7 +783,7 @@ pub const GetOrGetSetDirectIndexed_WithReq = union(GetSetKind) {
     GET_ONLY: TypeWithElemRequirements,
     GET_AND_SET: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetOrGetSetDirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetOrGetSetDirectIndexed_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .GET_ONLY => |TR| {
                 assert_type_has_indexed_get_only(TR.TYPE, src);
@@ -809,7 +809,7 @@ pub const GetOrGetSetIndirectIndexed_WithReq = union(GetSetKind) {
     GET_ONLY: TypeWithElemRequirements,
     GET_AND_SET: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetOrGetSetIndirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetOrGetSetIndirectIndexed_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .GET_ONLY => |TR| {
                 assert_type_has_indexed_get_only(TR.TYPE, src);
@@ -835,7 +835,7 @@ pub const GetSetDirectOrIndirectIndexed_WithReq = union(DirectIndirectKind) {
     DIRECT: TypeWithElemRequirements,
     INDIRECT: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirectIndexed_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirectIndexed_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .DIRECT => |TR| {
                 assert_type_has_indexed_direct_get_and_set(TR.TYPE, src);
@@ -860,7 +860,7 @@ pub const GetSetDirectOrIndirect_WithReq = union(DirectIndirectKind) {
     DIRECT: TypeWithElemRequirements,
     INDIRECT: TypeWithElemRequirements,
 
-    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirect_WithReq, comptime src: ?std.builtin.SourceLocation) void {
+    pub inline fn assert_valid(comptime self: GetSetDirectOrIndirect_WithReq, comptime src: ?std.lang.SourceLocation) void {
         switch (self) {
             .DIRECT => |TR| {
                 assert_type_has_direct_get_and_set(TR.TYPE, src);

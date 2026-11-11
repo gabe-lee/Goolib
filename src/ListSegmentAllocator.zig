@@ -457,7 +457,7 @@ pub fn ListSegmentAllocator(comptime T: type) type {
             }
         }
 
-        fn debug_logical_no_gaps(self: *Self, comptime src: std.builtin.SourceLocation) void {
+        fn debug_logical_no_gaps(self: *Self, comptime src: std.lang.SourceLocation) void {
             const logical_indexes = self.segment_list.sort_lists[@backingInt(SORT_NAMES.LOGICAL)].idx_list;
             var offset: u32 = 0;
             for (logical_indexes.ptr[0..logical_indexes.len], 0..) |idx, idx_idx| {
@@ -467,7 +467,7 @@ pub fn ListSegmentAllocator(comptime T: type) type {
             }
         }
 
-        fn debug_print_nearby_logicals(self: *Self, logical_sort_idx: usize, comptime CONTEXT: []const u8, comptime src: std.builtin.SourceLocation) void {
+        fn debug_print_nearby_logicals(self: *Self, logical_sort_idx: usize, comptime CONTEXT: []const u8, comptime src: std.lang.SourceLocation) void {
             const logical_indexes = self.segment_list.sort_lists[@backingInt(SORT_NAMES.LOGICAL)].idx_list;
             const USED = [5]u8{ 'U', 'S', 'E', 'D', ' ' };
             const FREE = [5]u8{ 'F', 'R', 'E', 'E', ' ' };
@@ -592,7 +592,7 @@ pub fn ListSegmentAllocator(comptime T: type) type {
         }
 
         pub const Internal = struct {
-            pub fn debug_print_nearby_logicals(self: *Self, logical_sort_idx: usize, comptime CONTEXT: []const u8, comptime src: std.builtin.SourceLocation) void {
+            pub fn debug_print_nearby_logicals(self: *Self, logical_sort_idx: usize, comptime CONTEXT: []const u8, comptime src: std.lang.SourceLocation) void {
                 self.debug_print_nearby_logicals(logical_sort_idx, CONTEXT, src);
             }
         };

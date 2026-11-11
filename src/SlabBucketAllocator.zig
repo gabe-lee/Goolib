@@ -608,7 +608,7 @@ pub fn SimpleBucketAllocator(comptime _DEFINITION: SBA_Definition) type {
                 blocks: usize = 0,
                 len: usize = 0,
             };
-            pub fn check_buckets_and_blocks(self: *Self, comptime src: std.builtin.SourceLocation) void {
+            pub fn check_buckets_and_blocks(self: *Self, comptime src: std.lang.SourceLocation) void {
                 var slab_size_list: List(BlockAndLen) = List(BlockAndLen).init_capacity(self.slabs.len, self.meta_alloc);
                 defer slab_size_list.free(self.meta_alloc);
                 slab_size_list.len = self.slabs.len;

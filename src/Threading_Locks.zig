@@ -25,7 +25,7 @@ const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
 const assert = std.debug.assert;
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;

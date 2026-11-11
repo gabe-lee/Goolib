@@ -743,7 +743,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     assert_field_access();
                     return FIELDS_TYPES[@backingInt(field)];
                 }
-                inline fn assert_tagged_field_active(active_tag: std.meta.Tag(TYPE), comptime field: FIELDS_ENUM, comptime src: ?std.builtin.SourceLocation) void {
+                inline fn assert_tagged_field_active(active_tag: std.meta.Tag(TYPE), comptime field: FIELDS_ENUM, comptime src: ?std.lang.SourceLocation) void {
                     assert_with_reason(active_tag == @field(std.meta.Tag(TYPE), @tagName(field)), src, "field `{s}` was not active on the union, cannot get it", .{@tagName(field)});
                 }
                 const DataBlock = struct {

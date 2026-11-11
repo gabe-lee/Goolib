@@ -18,7 +18,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const preferred_linkage = b.option(
-        std.builtin.LinkMode,
+        std.lang.LinkMode,
         "preferred_linkage",
         "Prefer building statically or dynamically linked libraries (default: static)",
     ) orelse .static;

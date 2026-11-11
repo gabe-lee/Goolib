@@ -2680,7 +2680,7 @@ pub fn CompactCoupledAllocationSystem(comptime _DEFINITION: CCAS_Definition) typ
                 lock_data,
                 lock_data_and_meta,
             };
-            pub fn check_buckets_and_blocks(comptime src: std.builtin.SourceLocation, comptime need_lock: NeedLock) void {
+            pub fn check_buckets_and_blocks(comptime src: std.lang.SourceLocation, comptime need_lock: NeedLock) void {
                 if (need_lock == .lock_meta or need_lock == .lock_data_and_meta) lock_meta();
                 if (need_lock == .lock_data or need_lock == .lock_data_and_meta) lock_data();
                 for (STATE.buckets[0..], 0..) |bucket, b| {

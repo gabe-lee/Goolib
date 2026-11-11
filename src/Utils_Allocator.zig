@@ -22,7 +22,7 @@
 // 3. This notice may not be removed or altered from any source distribution.
 
 const std = @import("std");
-const builtin = std.builtin;
+const builtin = std.lang;
 const SourceLocation = builtin.SourceLocation;
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -371,7 +371,7 @@ pub fn SmartAllocComptimeSettings(comptime CHILD_TYPE: type) type {
         CLEAR_OLD_MODE: ?ClearOldMode = null,
         GROW_MODE: ?GrowthMode = null,
         ERROR_MODE: ErrorBehavior = .ERRORS_ARE_UNREACHABLE,
-        CALLSITE: ?std.builtin.SourceLocation = null,
+        CALLSITE: ?std.lang.SourceLocation = null,
         CALLSITE_FMT: ?[]const u8 = null,
         CALLSITE_ARGS_OPAQUE: ?*const anyopaque = null,
         CALLSITE_ARGS_TYPE: ?type = null,

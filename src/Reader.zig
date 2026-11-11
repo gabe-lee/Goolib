@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const build = @import("builtin");
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 const math = std.math;
 const meta = std.meta;
 const mem = std.mem;

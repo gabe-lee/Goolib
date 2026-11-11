@@ -40,8 +40,8 @@ const Assert = Root.Assert;
 const Sort = Root.Sort;
 const Allocator = std.mem.Allocator;
 const KindInfo = Types.KindInfo;
-const StructField = std.builtin.Type.StructField;
-const EnumField = std.builtin.Type.EnumField;
+const StructField = std.lang.Type.StructField;
+const EnumField = std.lang.Type.EnumField;
 const IoWriter = std.Io.Writer;
 const IoReader = std.Io.Reader;
 const util_secure_memset = Utils.Mem.secure_memset;
@@ -152,7 +152,7 @@ pub const SeekResult = struct {
     pub fn check_error(self: SeekResult) SeekError!void {
         if (self.err) |err| return err;
     }
-    pub fn assert_no_error(self: SeekResult, comptime src: std.builtin.SourceLocation) void {
+    pub fn assert_no_error(self: SeekResult, comptime src: std.lang.SourceLocation) void {
         self.check_error() catch |err| assert_unreachable_err(src, err);
     }
     pub fn check_error_constrained(self: SeekResult) CannotSeekError!void {
@@ -161,7 +161,7 @@ pub const SeekResult = struct {
             else => |e| return @errorCast(e),
         };
     }
-    pub fn assert_no_error_constrained(self: SeekResult, comptime src: std.builtin.SourceLocation) void {
+    pub fn assert_no_error_constrained(self: SeekResult, comptime src: std.lang.SourceLocation) void {
         self.check_error_constrained() catch |err| assert_unreachable_err(src, err);
     }
 };
@@ -173,7 +173,7 @@ pub const ReadResult = struct {
     pub fn check_error(self: ReadResult) ReadError!void {
         if (self.err) |err| return err;
     }
-    pub fn assert_no_error(self: ReadResult, comptime src: std.builtin.SourceLocation) void {
+    pub fn assert_no_error(self: ReadResult, comptime src: std.lang.SourceLocation) void {
         self.check_error() catch |err| assert_unreachable_err(src, err);
     }
 };
@@ -185,7 +185,7 @@ pub const WriteResult = struct {
     pub fn check_error(self: WriteResult) WriteError!void {
         if (self.err) |err| return err;
     }
-    pub fn assert_no_error(self: WriteResult, comptime src: std.builtin.SourceLocation) void {
+    pub fn assert_no_error(self: WriteResult, comptime src: std.lang.SourceLocation) void {
         self.check_error() catch |err| assert_unreachable_err(src, err);
     }
 };
@@ -197,7 +197,7 @@ pub const ReadWriteResult = struct {
     pub fn check_error(self: ReadWriteResult) ReadWriteError!void {
         if (self.err) |err| return err;
     }
-    pub fn assert_no_error(self: ReadWriteResult, comptime src: std.builtin.SourceLocation) void {
+    pub fn assert_no_error(self: ReadWriteResult, comptime src: std.lang.SourceLocation) void {
         self.check_error() catch |err| assert_unreachable_err(src, err);
     }
 };

@@ -31,7 +31,7 @@ const std = @import("std");
 const math = std.math;
 const build = @import("builtin");
 const assert = std.debug.assert;
-const Type = std.builtin.Type;
+const Type = std.lang.Type;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;
@@ -312,7 +312,7 @@ pub fn largest_int_type_for_math(comptime A: type, comptime B: type, comptime AB
     const max_b_bits = IB.bits - sign_b_bits;
     const max_val_bits: u16 = @max(max_a_bits, max_b_bits);
     const max_sign_bits: u16 = @max(sign_a_bits, sign_b_bits);
-    const final_signed: std.builtin.Signedness = if (max_sign_bits == 1) .signed else .unsigned;
+    const final_signed: std.lang.Signedness = if (max_sign_bits == 1) .signed else .unsigned;
     const final_bits: u16 = @min(max_val_bits + max_sign_bits, ABSOLUTE_MAX_BITS);
     return @Int(final_signed, final_bits);
 }

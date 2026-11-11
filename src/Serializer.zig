@@ -707,7 +707,7 @@
 //     PTR_SENTINEL: ?*const anyopaque = null,
 //     HAS_SENTINEL: bool = false,
 //     ARRAY_CAN_BE_BULK_COPIED: bool = false,
-//     POINTER_KIND: std.builtin.Type.Pointer.Size = .slice,
+//     POINTER_KIND: std.lang.Type.Pointer.Size = .slice,
 //     IS_NUMERIC_PATTERN: bool = false,
 //     IS_STRUCT_PATTERN: bool = false,
 //     IS_VALID: bool = false,
@@ -776,7 +776,7 @@
 //             self.cached_tag_field = null;
 //             self.cached_tag_type = void;
 //             const KIND_INFO = KindInfo.get_kind_info(self.object_type);
-//             const _STRUCT: ?std.builtin.Type.Struct = if (KIND_INFO == .STRUCT) KIND_INFO.STRUCT else null;
+//             const _STRUCT: ?std.lang.Type.Struct = if (KIND_INFO == .STRUCT) KIND_INFO.STRUCT else null;
 //             const routine_start = self.ops_len;
 //             switch (self.object_settings.CUSTOM_ROUTINE) {
 //                 .CUSTOM_COMPTIME_MANAGER_OPS_ROUTINE => |routine| {
@@ -828,20 +828,20 @@
 //         return idx;
 //     }
 
-//     pub fn assert_cached_len_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_LEN: []const u8, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_cached_len_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_LEN: []const u8, comptime src: std.lang.SourceLocation) void {
 //         assert_with_reason(self.cached_len_field != null and std.mem.eql(u8, EXPECTED_CACHED_LEN, self.cached_len_field.?), src, "expected cached len field `{s}` did not match the recorded cached len field `{s}`, logic error likely", .{ EXPECTED_CACHED_LEN, if (self.cached_len_field) |cached| cached else NO_LEN_CACHE });
 //     }
 
-//     pub fn assert_cached_tag_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_cached_tag_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime src: std.lang.SourceLocation) void {
 //         assert_with_reason(self.cached_tag_field != null and std.mem.eql(u8, EXPECTED_CACHED_TAG, self.cached_tag_field.?), src, "expected cached tag field `{s}` did not match the recorded cached tag field `{s}`, logic error likely", .{ EXPECTED_CACHED_TAG, if (self.cached_tag_field) |cached| cached else NO_LEN_CACHE });
 //     }
 
-//     pub fn assert_cached_tag_and_type_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime EXPECTED_TAG_TYPE: type, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_cached_tag_and_type_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_TAG: []const u8, comptime EXPECTED_TAG_TYPE: type, comptime src: std.lang.SourceLocation) void {
 //         assert_with_reason(self.cached_tag_field != null and std.mem.eql(u8, EXPECTED_CACHED_TAG, self.cached_tag_field.?), src, "expected cached tag field `{s}` did not match the recorded cached tag field `{s}`, logic error likely", .{ EXPECTED_CACHED_TAG, if (self.cached_tag_field) |cached| cached else NO_LEN_CACHE });
 //         assert_with_reason(self.cached_tag_type == EXPECTED_TAG_TYPE, src, "expected cached tag type `{s}` did not match the recorded cached tag type `{s}`, logic error likely", .{ @typeName(EXPECTED_TAG_TYPE), @typeName(self.cached_tag_type) });
 //     }
 
-//     pub fn assert_cached_null_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_NULL: []const u8, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_cached_null_match(comptime self: *const DataOpBuilderInternal, comptime EXPECTED_CACHED_NULL: []const u8, comptime src: std.lang.SourceLocation) void {
 //         assert_with_reason(self.cached_null_field != null and std.mem.eql(u8, EXPECTED_CACHED_NULL, self.cached_null_field.?), src, "expected cached null field `{s}` did not match the recorded cached null field `{s}`, logic error likely", .{ EXPECTED_CACHED_NULL, if (self.cached_null_field) |cached| cached else NO_NULL_CACHE });
 //     }
 
@@ -2013,7 +2013,7 @@
 //     const SEPARATED_STRUCT_FIELDS_TYPE = struct {
 //         NAME: [_FINAL_NUM_ALLOCS][]const u8 = undefined,
 //         TYPE: [_FINAL_NUM_ALLOCS]type = @splat(Allocator),
-//         ATTR: [_FINAL_NUM_ALLOCS]std.builtin.Type.Struct.FieldAttributes = @splat(std.builtin.Type.Struct.FieldAttributes{
+//         ATTR: [_FINAL_NUM_ALLOCS]std.lang.Type.Struct.FieldAttributes = @splat(std.lang.Type.Struct.FieldAttributes{
 //             .@"align" = @alignOf(Allocator),
 //             .@"comptime" = false,
 //             .default_value_ptr = @ptrCast(&DummyAllocator.allocator_panic_free_noop),

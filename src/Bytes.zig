@@ -24,7 +24,7 @@
 const std = @import("std");
 const build = @import("builtin");
 const mem = std.mem;
-const Endian = std.builtin.Endian;
+const Endian = std.lang.Endian;
 
 const Root = @import("./_root.zig");
 const Assert = Root.Assert;

@@ -23,7 +23,7 @@
 
 // const std = @import("std");
 // const build = @import("builtin");
-// const builtin = std.builtin;
+// const builtin = std.lang;
 // const SourceLocation = builtin.SourceLocation;
 // const mem = std.mem;
 // const assert = std.debug.assert;
@@ -111,12 +111,12 @@
 //     SET_CUSTOM,
 //     INVALID,
 
-//     pub fn assert_valid(comptime self: @This(), comptime category: []const u8, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_valid(comptime self: @This(), comptime category: []const u8, comptime src: std.lang.SourceLocation) void {
 //         assert_with_reason(self == .DEFAULT or self == .SET_CUSTOM, src, "SearchPackage settings category `{s}` was never initialized or was invalidated by an later setting (`{s}`)", .{ category, @tagName(self) });
 //     }
 // } else enum(u0) {
 //     _NONE = 0,
-//     pub fn assert_valid(comptime self: @This(), comptime category: []const u8, comptime src: std.builtin.SourceLocation) void {
+//     pub fn assert_valid(comptime self: @This(), comptime category: []const u8, comptime src: std.lang.SourceLocation) void {
 //         _ = self;
 //         _ = category;
 //         _ = src;
@@ -173,7 +173,7 @@
 //     VALID_RESULT_CONTAINER: BuilderValidation = .UNINITIALIZED,
 //     VALID_COMPARE_FUNCS: BuilderValidation = .DEFAULT,
 
-//     fn assert_valid(comptime self: SearchPackage, comptime src: std.builtin.SourceLocation) void {
+//     fn assert_valid(comptime self: SearchPackage, comptime src: std.lang.SourceLocation) void {
 //         self.VALID_DATA_CONTAINER.assert_valid("DATA_CONTAINER", src);
 //         self.VALID_SEARCH_CONTAINER.assert_valid("SEARCH_CONTAINER", src);
 //         self.VALID_RESULT_CONTAINER.assert_valid("RESULT_CONTAINER", src);
