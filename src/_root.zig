@@ -77,7 +77,7 @@ pub const Measurement = @import("./Measurement.zig");
 pub const MSDF_Generator_Bezier = @import("./MSDF_Generator_Bezier.zig");
 pub const Observer = @import("./Observer.zig");
 pub const ParametricStateSystem = @import("./ParametricStateSystem.zig");
-// pub const ParamTable = @import("./ParamTable.zig");
+pub const Pointer = @import("./Pointer.zig");
 pub const Pool = @import("./Pool.zig");
 // pub const Quicksort = @import("./Quicksort.zig");
 pub const QuickWriter = @import("./QuickWriter.zig");
@@ -150,6 +150,7 @@ comptime {
         _ = @import("./MSDF_Generator_Bezier.zig");
         _ = @import("./Observer.zig");
         _ = @import("./ParametricStateSystem.zig");
+        _ = @import("./Pointer.zig");
         // _ = @import("./ParamTable.zig");
         _ = @import("./Pool.zig");
         // _ = @import("./Quicksort.zig");

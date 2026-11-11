@@ -92,6 +92,7 @@ pub inline fn assert_with_reason(condition: bool, comptime src_loc: ?SourceLocat
     const in_comptime = @inComptime();
     if (in_comptime or build.mode == .debug or build.mode == .safe) {
         if (!condition) {
+            @setEvalBranchQuota(20000);
             if (in_comptime) {
                 @compileError(std.fmt.comptimePrint(err_header(in_comptime, src_loc, reason_fmt), reason_args));
             } else {

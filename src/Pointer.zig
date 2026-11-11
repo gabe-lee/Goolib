@@ -55,6 +55,12 @@ const num_cast = Cast.num_cast;
 
 const DEBUG_VAL = Utils.DebugPrint.debug_val;
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./Pointer_Tests.zig");
+    }
+}
+
 pub const PointerSourceKind = enum {
     NATIVE,
     GLOBAL_RESOLVER,
@@ -71,7 +77,7 @@ pub const Mutability = enum {
 };
 
 pub const Nullability = enum {
-    ALWAYS_VALID,
+    NEVER_NULL,
     NULLABLE,
 };
 
@@ -164,9 +170,9 @@ pub const AutoIntegerGlobalPointerResolver = struct {
     pub fn to_global_resolver(comptime self: AutoIntegerGlobalPointerResolver) GlobalPointerResolver {
         const PROTO = IntegerResolverProto(self.LOCAL_TYPE);
         return GlobalPointerResolver{
-            .ADD_FUNC = @ptrCast(PROTO.add),
-            .SUBTRACT_FUNC = @ptrCast(PROTO.sub),
-            .IS_NULL_FUNC = @ptrCast(PROTO.is_null),
+            .ADD_FUNC = @ptrCast(&PROTO.add),
+            .SUBTRACT_FUNC = @ptrCast(&PROTO.sub),
+            .IS_NULL_FUNC = @ptrCast(&PROTO.is_null),
             .LOCAL_NULL_VALUE = @ptrCast(&PROTO.NULL_VAL),
             .LOCAL_TYPE = self.LOCAL_TYPE,
             .RESOLVE_FUNC = self.RESOLVE_FUNC,
@@ -404,7 +410,11 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn new_from_native(any_ptr: anytype) Self {
             assert_native(@src());
-            return Self{ .addr = @intFromPtr(any_ptr) };
+            if (comptime IS_NATIVE) {
+                return Self{ .addr = @intFromPtr(any_ptr) };
+            } else {
+                unreachable;
+            }
         }
 
         pub inline fn assert_native(comptime src: ?SourceLocation) void {
@@ -446,13 +456,13 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
 
         pub inline fn is_null(self: Self) bool {
             return switch (comptime SOURCE) {
-                .NATIVE => self.addr == null,
+                .NATIVE => self.addr == 0,
                 .GLOBAL_RESOLVER => IS_NULL(self.addr),
             };
         }
         pub inline fn not_null(self: Self) bool {
             return switch (comptime SOURCE) {
-                .NATIVE => self.addr != null,
+                .NATIVE => self.addr != 0,
                 .GLOBAL_RESOLVER => !IS_NULL(self.addr),
             };
         }
@@ -461,6 +471,34 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn assert_null(self: Self, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_null(), src, "pointer was not null", .{});
+        }
+
+        /// Casts this opaque pointer handle to the typed wrapper type described by the
+        /// requested properties.
+        ///
+        /// When the target is non-nullable, the current pointer is asserted to be non-null.
+        /// When an alignment is requested, the current pointer is asserted to satisfy it.
+        /// `ALIGN` accepts the same forms as `PointerTypeWithTheseProperties`.
+        pub inline fn cast_to(
+            self: Self,
+            comptime NULLABILITY: Nullability,
+            comptime MUTABILITY: Mutability,
+            comptime T: type,
+            comptime ALIGN: anytype,
+        ) PointerWithProperties(SOURCE, NULLABILITY, MUTABILITY, T, TypedPointerNormalizeAlign(ALIGN)) {
+            const A = comptime TypedPointerNormalizeAlign(ALIGN);
+            if (comptime NULLABILITY == .NEVER_NULL) {
+                self.assert_not_null(@src());
+            }
+            if (comptime A) |a| {
+                // A null nullable pointer has no meaningful alignment to check.
+                if (comptime NULLABILITY == .NEVER_NULL) {
+                    self.assert_aligned(a, @src());
+                } else if (self.not_null()) {
+                    self.assert_aligned(a, @src());
+                }
+            }
+            return .{ .opq = self };
         }
 
         pub inline fn is_aligned(self: Self, alignment: usize) bool {
@@ -512,7 +550,7 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
 
         inline fn assert_contiguous_known_new(original_addr: Addr, new_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
             if (comptime ASSERT_CONTIG) {
-                always_assert_contiguous(original_addr, new_addr, DIR, offset, src);
+                always_assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
         }
         inline fn always_assert_contiguous_known_new(original_addr: Addr, new_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
@@ -578,18 +616,18 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn slice(self: Self, comptime T: type, len: anytype) []T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             return self.resolve(T)[0..len];
         }
         pub inline fn array_ptr(self: Self, comptime T: type, comptime LEN: anytype) *[LEN]T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve(T));
         }
         pub inline fn vector_ptr(self: Self, comptime T: type, comptime LEN: anytype) *@Vector(LEN, T) {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve(T));
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve(T)));
         }
         //**********************
         // ____ _____ PTR ALIGN
@@ -604,18 +642,18 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn slice_aligned(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             return self.resolve_aligned(T, A)[0..len];
         }
         pub inline fn array_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) [LEN]T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_aligned(T, A));
         }
         pub inline fn vector_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) @Vector(LEN, T) {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_aligned(T, A));
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_aligned(T, A)));
         }
         //**********************
         // ____ CONST PTR _____
@@ -630,18 +668,18 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn const_slice(self: Self, comptime T: type, len: anytype) []const T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             return self.resolve(T)[0..len];
         }
         pub inline fn const_array_ptr(self: Self, comptime T: type, comptime LEN: anytype) *const [LEN]T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve(T));
         }
         pub inline fn const_vector_ptr(self: Self, comptime T: type, comptime LEN: anytype) *const @Vector(LEN, T) {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve(T));
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve(T)));
         }
         //**********************
         // ____ CONST PTR ALIGN
@@ -656,18 +694,18 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn const_slice_aligned(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) const T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             return self.resolve_aligned(T, A)[0..len];
         }
         pub inline fn const_array_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const [LEN]T {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_aligned(T, A));
         }
         pub inline fn const_vector_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const @Vector(LEN, T) {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_aligned(T, A));
+            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_aligned(T, A)));
         }
         //**********************
         // NULL _____ PTR _____
@@ -679,19 +717,19 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             return @ptrCast(self.resolve_null(T));
         }
         pub inline fn slice_or_null(self: Self, comptime T: type, len: anytype) ?[]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             if (self.resolve_null(T)) |ptr_| {
                 return ptr_[0..len];
             }
             return null;
         }
         pub inline fn array_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*[LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_null(T));
         }
         pub inline fn vector_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*@Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_null(T));
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_null(T)));
         }
         //**********************
         // NULL _____ PTR ALIGN
@@ -702,20 +740,20 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         pub inline fn ptr_many_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?[*]align(A) T {
             return @ptrCast(self.resolve_null_aligned(T, A));
         }
-        pub inline fn slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+        pub inline fn slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) ?[]align(A) T {
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             if (self.resolve_null_aligned(T, A)) |ptr_| {
                 return ptr_[0..len];
             }
             return null;
         }
         pub inline fn array_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_null_aligned(T, A));
         }
         pub inline fn vector_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_null_aligned(T, A));
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_null_aligned(T, A)));
         }
         //**********************
         // NULL CONST PTR _____
@@ -727,43 +765,43 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             return @ptrCast(self.resolve_null(T));
         }
         pub inline fn const_slice_or_null(self: Self, comptime T: type, len: anytype) ?[]const T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             if (self.resolve_null(T)) |ptr_| {
                 return ptr_[0..len];
             }
             return null;
         }
         pub inline fn const_array_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*const [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_null(T));
         }
         pub inline fn const_vector_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*const @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_null(T));
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_null(T)));
         }
         //**********************
         // NULL CONST PTR ALIGN
         //**********************
-        pub inline fn const_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize) *align(A) const T {
+        pub inline fn const_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?*align(A) const T {
             return @ptrCast(self.resolve_null_aligned(T, A));
         }
-        pub inline fn const_ptr_many_aligned_or_null(self: Self, comptime T: type, comptime A: usize) [*]align(A) const T {
+        pub inline fn const_ptr_many_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?[*]align(A) const T {
             return self.resolve_null_aligned(T, A);
         }
-        pub inline fn const_slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) const T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) - 1, @src());
+        pub inline fn const_slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) ?[]align(A) const T {
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
             if (self.resolve_null_aligned(T, A)) |ptr_| {
                 return ptr_[0..len];
             }
             return null;
         }
-        pub inline fn const_array_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
+        pub inline fn const_array_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) const [LEN]T {
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
             return @ptrCast(self.resolve_null_aligned(T, A));
         }
-        pub inline fn const_vector_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) - 1, @src());
-            return @ptrCast(self.resolve_null_aligned(T, A));
+        pub inline fn const_vector_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) const @Vector(LEN, T) {
+            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
+            return @ptrCast(@alignCast(self.resolve_null_aligned(T, A)));
         }
         //***********
         // GET / SET
@@ -880,11 +918,11 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn typed_add_assert_contiguous(self: Self, comptime T: type, offset: usize) Self {
             assert_contiguous(self.addr, .ADD, @sizeOf(T) * offset, @src());
-            return self.typed_add(offset);
+            return self.typed_add(T, offset);
         }
         pub inline fn typed_add_in_place_assert_contiguous(self: *Self, comptime T: type, offset: usize) void {
             assert_contiguous(self.addr, .ADD, @sizeOf(T) * offset, @src());
-            self.typed_add_in_place(offset);
+            self.typed_add_in_place(T, offset);
         }
 
         pub inline fn subtract(self: Self, offset: usize) Self {
@@ -913,11 +951,11 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn typed_subtract_assert_contiguous(self: Self, comptime T: type, offset: usize) Self {
             assert_contiguous(self.addr, .SUB, @sizeOf(T) * offset, @src());
-            return self.typed_subtract(offset);
+            return self.typed_subtract(T, offset);
         }
         pub inline fn typed_subtract_in_place_assert_contiguous(self: *Self, comptime T: type, offset: usize) void {
             assert_contiguous(self.addr, .SUB, @sizeOf(T) * offset, @src());
-            self.typed_subtract_in_place(offset);
+            self.typed_subtract_in_place(T, offset);
         }
 
         pub inline fn move(self: Self, offset: isize) Self {
@@ -1112,272 +1150,1241 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             const high_addr = @intFromPtr(high.resolve(u8));
             return low_addr <= self_addr and self_addr <= high_addr;
         }
-        pub inline fn assert_is_within_range_exclude_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) bool {
+        pub inline fn assert_is_within_range_exclude_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_within_range_exclude_high(low, high), src, "pointer was not within the given range (or the given range was invalid)", .{});
         }
-        pub inline fn assert_is_within_range_include_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) bool {
+        pub inline fn assert_is_within_range_include_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_within_range_include_high(low, high), src, "pointer was not within the given range (or the given range was invalid)", .{});
         }
     };
 }
 
+/// Selects the typed pointer wrapper that matches the requested properties.
+///
+/// `ALIGN == null` selects an unaligned wrapper; any non-null value selects the
+/// corresponding aligned wrapper. `ALIGN` may be a plain byte count, an optional
+/// byte count, a `PowerOf2`, a `std.mem.Alignment`, or an `AlignmentSource`.
+pub fn PointerWithProperties(
+    comptime SOURCE: PointerSource,
+    comptime NULLABILITY: Nullability,
+    comptime MUTABILITY: Mutability,
+    comptime T: type,
+    comptime ALIGN: anytype,
+) type {
+    const A = comptime TypedPointerNormalizeAlign(ALIGN);
+    return switch (NULLABILITY) {
+        .NEVER_NULL => switch (MUTABILITY) {
+            .MUT_PTR => if (A) |a| PointerAlign(T, a, SOURCE) else Pointer(T, SOURCE),
+            .CONST_PTR => if (A) |a| ConstPointerAlign(T, a, SOURCE) else ConstPointer(T, SOURCE),
+        },
+        .NULLABLE => switch (MUTABILITY) {
+            .MUT_PTR => if (A) |a| NullablePointerAlign(T, a, SOURCE) else NullablePointer(T, SOURCE),
+            .CONST_PTR => if (A) |a| NullableConstPointerAlign(T, a, SOURCE) else NullableConstPointer(T, SOURCE),
+        },
+    };
+}
+
+//******************************
+// TYPED WRAPPER HELPERS
+//******************************
+
+fn TypedPointerPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
+    if (ALIGN) |a| {
+        return if (CONST) *align(a) const Elem else *align(a) Elem;
+    } else {
+        return if (CONST) *const Elem else *Elem;
+    }
+}
+fn TypedPointerManyPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
+    if (ALIGN) |a| {
+        return if (CONST) [*]align(a) const Elem else [*]align(a) Elem;
+    } else {
+        return if (CONST) [*]const Elem else [*]Elem;
+    }
+}
+fn TypedPointerSliceType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
+    if (ALIGN) |a| {
+        return if (CONST) []align(a) const Elem else []align(a) Elem;
+    } else {
+        return if (CONST) []const Elem else []Elem;
+    }
+}
+fn TypedPointerArrayPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool, comptime LEN: anytype) type {
+    if (ALIGN) |a| {
+        return if (CONST) *align(a) const [LEN]Elem else *align(a) [LEN]Elem;
+    } else {
+        return if (CONST) *const [LEN]Elem else *[LEN]Elem;
+    }
+}
+fn TypedPointerVectorPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool, comptime LEN: anytype) type {
+    if (ALIGN) |a| {
+        return if (CONST) *align(a) const @Vector(LEN, Elem) else *align(a) @Vector(LEN, Elem);
+    } else {
+        return if (CONST) *const @Vector(LEN, Elem) else *@Vector(LEN, Elem);
+    }
+}
+
+fn TypedPointerNormalizeAlign(comptime ALIGN: anytype) ?usize {
+    const T = @TypeOf(ALIGN);
+    if (T == @TypeOf(null)) return null;
+    if (T == comptime_int) return ALIGN;
+    if (T == usize) return ALIGN;
+    if (T == ?usize) return ALIGN;
+    if (T == PowerOf2) return ALIGN.value_as_type(usize);
+    if (T == ?PowerOf2) return if (ALIGN) |p| p.value_as_type(usize) else null;
+    if (T == mem.Alignment) return ALIGN.toByteUnits();
+    if (T == ?mem.Alignment) return if (ALIGN) |a| a.toByteUnits() else null;
+    if (T == AlignmentSource) return ALIGN.calc();
+    if (T == ?AlignmentSource) return if (ALIGN) |a| a.calc() else null;
+    @compileError("unsupported alignment type: " ++ @typeName(T));
+}
+
+fn TypedPointerElemOf(comptime Self: type) type {
+    return Self.Element;
+}
+fn TypedPointerPtrOf(comptime Self: type, comptime CONST: bool) type {
+    return TypedPointerPtrType(Self.Element, Self.ALIGN, CONST);
+}
+fn TypedPointerManyPtrOf(comptime Self: type, comptime CONST: bool) type {
+    return TypedPointerManyPtrType(Self.Element, Self.ALIGN, CONST);
+}
+fn TypedPointerSliceOf(comptime Self: type, comptime CONST: bool) type {
+    return TypedPointerSliceType(Self.Element, Self.ALIGN, CONST);
+}
+fn TypedPointerArrayPtrOf(comptime Self: type, comptime CONST: bool, comptime LEN: anytype) type {
+    return TypedPointerArrayPtrType(Self.Element, Self.ALIGN, CONST, LEN);
+}
+fn TypedPointerVectorPtrOf(comptime Self: type, comptime CONST: bool, comptime LEN: anytype) type {
+    return TypedPointerVectorPtrType(Self.Element, Self.ALIGN, CONST, LEN);
+}
+
+/// The actual implementations used by the typed wrappers below.
+///
+/// These are generic over the wrapper type so that the wrappers can pick and choose
+/// which operations are exposed for their mode (mutable/const, nullable/non-null, aligned/unaligned).
+const TypedMethods = struct {
+    //***********
+    // CASTS
+    //***********
+    pub fn cast_to(
+        self_ptr: anytype,
+        comptime NULLABILITY: Nullability,
+        comptime MUTABILITY: Mutability,
+        comptime T: type,
+        comptime ALIGN: anytype,
+    ) PointerWithProperties(@TypeOf(self_ptr.*).Source, NULLABILITY, MUTABILITY, T, TypedPointerNormalizeAlign(ALIGN)) {
+        return self_ptr.opq.cast_to(NULLABILITY, MUTABILITY, T, ALIGN);
+    }
+    pub fn to_const(self_ptr: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        @TypeOf(self_ptr.*).NULLABILITY,
+        .CONST_PTR,
+        @TypeOf(self_ptr.*).Element,
+        @TypeOf(self_ptr.*).ALIGN,
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(Self.NULLABILITY, .CONST_PTR, Self.Element, Self.ALIGN);
+    }
+    pub fn to_align(self_ptr: anytype, comptime ALIGN: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        @TypeOf(self_ptr.*).NULLABILITY,
+        @TypeOf(self_ptr.*).MUTABILITY,
+        @TypeOf(self_ptr.*).Element,
+        TypedPointerNormalizeAlign(ALIGN),
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(Self.NULLABILITY, Self.MUTABILITY, Self.Element, ALIGN);
+    }
+    pub fn to_nullable(self_ptr: anytype) PointerWithProperties(
+        @TypeOf(self_ptr.*).Source,
+        .NULLABLE,
+        @TypeOf(self_ptr.*).MUTABILITY,
+        @TypeOf(self_ptr.*).Element,
+        @TypeOf(self_ptr.*).ALIGN,
+    ) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.cast_to(.NULLABLE, Self.MUTABILITY, Self.Element, Self.ALIGN);
+    }
+
+    //***********
+    // NULL CHECKS
+    //***********
+    pub fn is_null(self_ptr: anytype) bool {
+        return self_ptr.opq.is_null();
+    }
+    pub fn not_null(self_ptr: anytype) bool {
+        return self_ptr.opq.not_null();
+    }
+    pub fn assert_not_null(self_ptr: anytype, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_not_null(src);
+    }
+    pub fn assert_null(self_ptr: anytype, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_null(src);
+    }
+
+    //***********
+    // ALIGNMENT
+    //***********
+    pub fn is_aligned(self_ptr: anytype, alignment: usize) bool {
+        return self_ptr.opq.is_aligned(alignment);
+    }
+    pub fn is_aligned_any(self_ptr: anytype, alignment: usize) bool {
+        return self_ptr.opq.is_aligned_any(alignment);
+    }
+    pub fn is_aligned_log_2(self_ptr: anytype, alignment_log_2: u8) bool {
+        return self_ptr.opq.is_aligned_log_2(alignment_log_2);
+    }
+    pub fn is_aligned_pow_2(self_ptr: anytype, alignment_pow_2: PowerOf2) bool {
+        return self_ptr.opq.is_aligned_pow_2(alignment_pow_2);
+    }
+    pub fn is_aligned_std_mem(self_ptr: anytype, alignment: mem.Alignment) bool {
+        return self_ptr.opq.is_aligned_std_mem(alignment);
+    }
+    pub fn assert_aligned(self_ptr: anytype, alignment: usize, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_aligned(alignment, src);
+    }
+    pub fn assert_aligned_any(self_ptr: anytype, alignment: usize, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_aligned_any(alignment, src);
+    }
+    pub fn assert_aligned_log_2(self_ptr: anytype, alignment_log_2: u8, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_aligned_log_2(alignment_log_2, src);
+    }
+    pub fn assert_aligned_pow_2(self_ptr: anytype, alignment_pow_2: PowerOf2, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_aligned_pow_2(alignment_pow_2, src);
+    }
+    pub fn assert_aligned_std_mem(self_ptr: anytype, alignment: mem.Alignment, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_aligned_std_mem(alignment, src);
+    }
+
+    //**********************
+    // MUTABLE PTR
+    //**********************
+    pub fn ptr_mut(self_ptr: anytype) TypedPointerPtrOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_aligned(Self.Element, a) else self_ptr.opq.ptr(Self.Element);
+    }
+    pub fn ptr_many_mut(self_ptr: anytype) TypedPointerManyPtrOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_many_aligned(Self.Element, a) else self_ptr.opq.ptr_many(Self.Element);
+    }
+    pub fn slice_mut(self_ptr: anytype, len: anytype) TypedPointerSliceOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.slice_aligned(Self.Element, a, len) else self_ptr.opq.slice(Self.Element, len);
+    }
+    pub fn array_ptr_mut(self_ptr: anytype, comptime LEN: anytype) TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), false, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.array_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.array_ptr(Self.Element, LEN);
+    }
+    pub fn vector_ptr_mut(self_ptr: anytype, comptime LEN: anytype) TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), false, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.vector_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.vector_ptr(Self.Element, LEN);
+    }
+
+    //**********************
+    // CONST PTR
+    //**********************
+    pub fn ptr_const(self_ptr: anytype) TypedPointerPtrOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_aligned(Self.Element, a) else self_ptr.opq.const_ptr(Self.Element);
+    }
+    pub fn ptr_many_const(self_ptr: anytype) TypedPointerManyPtrOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_many_aligned(Self.Element, a) else self_ptr.opq.const_ptr_many(Self.Element);
+    }
+    pub fn slice_const(self_ptr: anytype, len: anytype) TypedPointerSliceOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_slice_aligned(Self.Element, a, len) else self_ptr.opq.const_slice(Self.Element, len);
+    }
+    pub fn array_ptr_const(self_ptr: anytype, comptime LEN: anytype) TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), true, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_array_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.const_array_ptr(Self.Element, LEN);
+    }
+    pub fn vector_ptr_const(self_ptr: anytype, comptime LEN: anytype) TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), true, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_vector_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.const_vector_ptr(Self.Element, LEN);
+    }
+
+    //**********************
+    // NULLABLE MUTABLE PTR
+    //**********************
+    pub fn ptr_mut_or_null(self_ptr: anytype) ?TypedPointerPtrOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_aligned_or_null(Self.Element, a) else self_ptr.opq.ptr_or_null(Self.Element);
+    }
+    pub fn ptr_many_mut_or_null(self_ptr: anytype) ?TypedPointerManyPtrOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_many_aligned_or_null(Self.Element, a) else self_ptr.opq.ptr_many_or_null(Self.Element);
+    }
+    pub fn slice_mut_or_null(self_ptr: anytype, len: anytype) ?TypedPointerSliceOf(@TypeOf(self_ptr.*), false) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.slice_aligned_or_null(Self.Element, a, len) else self_ptr.opq.slice_or_null(Self.Element, len);
+    }
+    pub fn array_ptr_mut_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), false, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.array_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.array_ptr_or_null(Self.Element, LEN);
+    }
+    pub fn vector_ptr_mut_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), false, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.vector_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.vector_ptr_or_null(Self.Element, LEN);
+    }
+
+    //**********************
+    // NULLABLE CONST PTR
+    //**********************
+    pub fn ptr_const_or_null(self_ptr: anytype) ?TypedPointerPtrOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_aligned_or_null(Self.Element, a) else self_ptr.opq.const_ptr_or_null(Self.Element);
+    }
+    pub fn ptr_many_const_or_null(self_ptr: anytype) ?TypedPointerManyPtrOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_many_aligned_or_null(Self.Element, a) else self_ptr.opq.const_ptr_many_or_null(Self.Element);
+    }
+    pub fn slice_const_or_null(self_ptr: anytype, len: anytype) ?TypedPointerSliceOf(@TypeOf(self_ptr.*), true) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_slice_aligned_or_null(Self.Element, a, len) else self_ptr.opq.const_slice_or_null(Self.Element, len);
+    }
+    pub fn array_ptr_const_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), true, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_array_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.const_array_ptr_or_null(Self.Element, LEN);
+    }
+    pub fn vector_ptr_const_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), true, LEN) {
+        const Self = @TypeOf(self_ptr.*);
+        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_vector_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.const_vector_ptr_or_null(Self.Element, LEN);
+    }
+
+    //***********
+    // GET / SET
+    //***********
+    pub fn get(self_ptr: anytype) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get(Self.Element);
+    }
+    pub fn get_or_null(self_ptr: anytype) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_or_null(Self.Element);
+    }
+    pub fn get_orelse(self_ptr: anytype, default: TypedPointerElemOf(@TypeOf(self_ptr.*))) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_orelse(Self.Element, default);
+    }
+    pub fn get_at_index(self_ptr: anytype, index: usize) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_at_index(Self.Element, index);
+    }
+    pub fn get_at_index_or_null(self_ptr: anytype, index: usize) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_at_index_or_null(Self.Element, index);
+    }
+    pub fn get_at_index_orelse(self_ptr: anytype, index: usize, default: TypedPointerElemOf(@TypeOf(self_ptr.*))) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.get_at_index_orelse(Self.Element, index, default);
+    }
+    pub fn set(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.set(Self.Element, val);
+    }
+    pub fn set_if_not_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.set_if_not_null(Self.Element, val);
+    }
+    pub fn set_if_not_null_return_ptr_is_NOT_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.set_if_not_null_return_ptr_is_NOT_null(Self.Element, val);
+    }
+    pub fn set_if_not_null_return_ptr_IS_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.set_if_not_null_return_ptr_IS_null(Self.Element, val);
+    }
+    pub fn set_at_index(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.set_at_index(Self.Element, index, val);
+    }
+    pub fn set_at_index_if_not_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.set_at_index_if_not_null(Self.Element, index, val);
+    }
+    pub fn set_at_index_if_not_null_return_ptr_is_NOT_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.set_at_index_if_not_null_return_ptr_is_NOT_null(Self.Element, index, val);
+    }
+    pub fn set_at_index_if_not_null_return_ptr_IS_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.set_at_index_if_not_null_return_ptr_IS_null(Self.Element, index, val);
+    }
+
+    //**************************
+    // ADDRESS ADD / SUB / MOVE
+    //**************************
+    pub fn add(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_add(Self.Element, offset) };
+    }
+    pub fn add_in_place(self_ptr: anytype, offset: usize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_add_in_place(Self.Element, offset);
+    }
+    pub fn add_assert_contiguous(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_add_assert_contiguous(Self.Element, offset) };
+    }
+    pub fn add_in_place_assert_contiguous(self_ptr: anytype, offset: usize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_add_in_place_assert_contiguous(Self.Element, offset);
+    }
+    pub fn subtract(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_subtract(Self.Element, offset) };
+    }
+    pub fn subtract_in_place(self_ptr: anytype, offset: usize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_subtract_in_place(Self.Element, offset);
+    }
+    pub fn subtract_assert_contiguous(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_subtract_assert_contiguous(Self.Element, offset) };
+    }
+    pub fn subtract_in_place_assert_contiguous(self_ptr: anytype, offset: usize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_subtract_in_place_assert_contiguous(Self.Element, offset);
+    }
+    pub fn move(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_move(Self.Element, offset) };
+    }
+    pub fn move_in_place(self_ptr: anytype, offset: isize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_move_in_place(Self.Element, offset);
+    }
+    pub fn move_assert_contiguous(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
+        const Self = @TypeOf(self_ptr.*);
+        return Self{ .opq = self_ptr.opq.typed_move_assert_contiguous(Self.Element, offset) };
+    }
+    pub fn move_in_place_assert_contiguous(self_ptr: anytype, offset: isize) void {
+        const Self = @TypeOf(self_ptr.*);
+        self_ptr.opq.typed_move_in_place_assert_contiguous(Self.Element, offset);
+    }
+
+    //**************************
+    // ELEMENTS BETWEEN (NON-NULL)
+    //**************************
+    pub fn elements_between_self_low_other_high_exclude(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_exclude(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_exclude(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_exclude(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_low_other_high_include(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_include(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_include(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_include(other.opq, Self.Element);
+    }
+    pub fn elements_between_exclude_high(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_exclude_high(other.opq, Self.Element);
+    }
+    pub fn elements_between_include_high(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_include_high(other.opq, Self.Element);
+    }
+
+    //**************************
+    // ELEMENTS BETWEEN (NULLABLE)
+    //**************************
+    pub fn elements_between_self_low_other_high_exclude_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_exclude_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_low_other_high_exclude_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_exclude_orelse_0(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_exclude_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_exclude_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_exclude_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_exclude_orelse_0(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_low_other_high_include_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_include_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_low_other_high_include_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_low_other_high_include_orelse_0(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_include_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_include_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_self_high_other_low_include_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_self_high_other_low_include_orelse_0(other.opq, Self.Element);
+    }
+    pub fn elements_between_exclude_high_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_exclude_high_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_exclude_high_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_exclude_high_orelse_0(other.opq, Self.Element);
+    }
+    pub fn elements_between_include_high_or_null(self_ptr: anytype, other: anytype) ?usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_include_high_or_null(other.opq, Self.Element);
+    }
+    pub fn elements_between_include_high_orelse_0(self_ptr: anytype, other: anytype) usize {
+        const Self = @TypeOf(self_ptr.*);
+        return self_ptr.opq.elements_between_include_high_orelse_0(other.opq, Self.Element);
+    }
+
+    //**************************
+    // RANGES
+    //**************************
+    pub fn is_within_range_exclude_high(self_ptr: anytype, low: anytype, high: anytype) bool {
+        return self_ptr.opq.is_within_range_exclude_high(low.opq, high.opq);
+    }
+    pub fn is_within_range_include_high(self_ptr: anytype, low: anytype, high: anytype) bool {
+        return self_ptr.opq.is_within_range_include_high(low.opq, high.opq);
+    }
+    pub fn assert_is_within_range_exclude_high(self_ptr: anytype, low: anytype, high: anytype, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_is_within_range_exclude_high(low.opq, high.opq, src);
+    }
+    pub fn assert_is_within_range_include_high(self_ptr: anytype, low: anytype, high: anytype, comptime src: ?SourceLocation) void {
+        self_ptr.opq.assert_is_within_range_include_high(low.opq, high.opq, src);
+    }
+};
+
 pub fn Pointer(comptime T: type, comptime SOURCE: PointerSource) type {
     return struct {
         const Self = @This();
+
+        pub const Source = SOURCE;
         pub const Opaque = PointerOpaque(SOURCE);
         pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = null;
+        pub const NULLABILITY: Nullability = .NEVER_NULL;
+        pub const MUTABILITY: Mutability = .MUT_PTR;
 
         opq: Opaque,
 
         pub inline fn new(addr: Addr) Self {
             return Self{ .opq = .new(addr) };
         }
-        pub inline fn new_from_native(T_ptr: *T) Self {
-            return Self{ .opq = .new_from_native(T_ptr) };
+        pub inline fn new_from_native(native_ptr: *T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-
         pub inline fn assert_native(comptime src: ?SourceLocation) void {
             Opaque.assert_native(src);
         }
 
-        pub inline fn is_null(self: Self) bool {
-            return self.opq.is_null();
-        }
-        pub inline fn not_null(self: Self) bool {
-            return self.opq.not_null();
-        }
-        pub inline fn assert_not_null(self: Self, comptime src: ?SourceLocation) void {
-            self.opq.assert_not_null(src);
-        }
-        pub inline fn assert_null(self: Self, comptime src: ?SourceLocation) void {
-            self.opq.assert_null(src);
-        }
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
 
-        pub inline fn is_aligned(self: Self, alignment: usize) bool {
-            return self.opq.is_aligned(alignment);
-        }
-        pub inline fn is_aligned_any(self: Self, alignment: usize) bool {
-            return self.opq.is_aligned_any(alignment);
-        }
-        pub inline fn is_aligned_log_2(self: Self, alignment_log_2: u8) bool {
-            return self.opq.is_aligned_log_2(alignment_log_2);
-        }
-        pub inline fn is_aligned_pow_2(self: Self, alignment_pow_2: PowerOf2) bool {
-            return self.opq.is_aligned_pow_2(alignment_pow_2);
-        }
-        pub inline fn is_aligned_std_mem(self: Self, alignment: mem.Alignment) bool {
-            return self.is_aligned_std_mem(alignment);
-        }
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
 
-        pub inline fn assert_aligned(self: Self, alignment: usize, comptime src: ?SourceLocation) void {
-            self.opq.assert_aligned(alignment, src);
-        }
-        pub inline fn assert_aligned_any(self: Self, alignment: usize, comptime src: ?SourceLocation) void {
-            self.opq.assert_aligned_any(alignment, src);
-        }
-        pub inline fn assert_aligned_log_2(self: Self, alignment_log_2: u8, comptime src: ?SourceLocation) void {
-            self.opq.assert_aligned_log_2(alignment_log_2, src);
-        }
-        pub inline fn assert_aligned_pow_2(self: Self, alignment_pow_2: PowerOf2, comptime src: ?SourceLocation) void {
-            self.opq.assert_aligned_pow_2(alignment_pow_2, src);
-        }
-        pub inline fn assert_aligned_std_mem(self: Self, alignment: mem.Alignment, comptime src: ?SourceLocation) void {
-            self.opq.assert_aligned_std_mem(alignment, src);
-        }
+        // POINTER ACCESS
+        pub const ptr = TypedMethods.ptr_mut;
+        pub const ptr_many = TypedMethods.ptr_many_mut;
+        pub const slice = TypedMethods.slice_mut;
+        pub const array_ptr = TypedMethods.array_ptr_mut;
+        pub const vector_ptr = TypedMethods.vector_ptr_mut;
 
-        //**********************
-        // ____ _____ PTR _____
-        //**********************
-        pub inline fn ptr(self: Self) *T {
-            return self.opq.ptr(T);
-        }
-        pub inline fn ptr_many(self: Self) [*]T {
-            return self.opq.ptr_many(T);
-        }
-        pub inline fn slice(self: Self, len: anytype) []T {
-            return self.opq.slice(T, len);
-        }
-        pub inline fn array_ptr(self: Self, comptime LEN: anytype) *[LEN]T {
-            return self.opq.array_ptr(T, LEN);
-        }
-        pub inline fn vector_ptr(self: Self, comptime LEN: anytype) *@Vector(LEN, T) {
-            return self.opq.vector_ptr(T, LEN);
-        }
-        //**********************
-        // ____ CONST PTR _____
-        //**********************
-        pub inline fn const_ptr(self: Self) *const T {
-            return self.opq.const_ptr(T);
-        }
-        pub inline fn const_ptr_many(self: Self) [*]const T {
-            return self.opq.const_ptr_many(T);
-        }
-        pub inline fn const_slice(self: Self, len: anytype) []const T {
-            return self.opq.const_slice(T, len);
-        }
-        pub inline fn const_array_ptr(self: Self, comptime LEN: anytype) *const [LEN]T {
-            return self.opq.const_array_ptr(T, LEN);
-        }
-        pub inline fn const_vector_ptr(self: Self, comptime LEN: anytype) *const @Vector(LEN, T) {
-            return self.opq.const_vector_ptr(T, LEN);
-        }
-        //***********
         // GET / SET
-        //***********
-        pub inline fn get(self: Self) T {
-            return self.opq.get(T);
-        }
-        pub inline fn get_or_null(self: Self) ?T {
-            return self.opq.get_or_null(T);
-        }
-        pub inline fn get_orelse(self: Self, default: T) T {
-            return self.opq.get_orelse(T, default);
-        }
-        pub inline fn get_at_index(self: Self, index: usize) T {
-            return self.opq.get_at_index(T, index);
-        }
-        pub inline fn get_at_index_or_null(self: Self, index: usize) ?T {
-            return self.opq.get_at_index_or_null(T, index);
-        }
-        pub inline fn get_at_index_orelse(self: Self, index: usize, default: T) T {
-            return self.opq.get_at_index_orelse(T, index, default);
-        }
-        pub inline fn set(self: Self, val: T) void {
-            self.opq.set(T, val);
-        }
-        pub inline fn set_if_not_null(self: Self, val: T) void {
-            self.opq.set_if_not_null(T, val);
-        }
-        pub inline fn set_if_not_null_return_ptr_is_NOT_null(self: Self, val: T) bool {
-            return self.opq.set_if_not_null_return_ptr_is_NOT_null(T, val);
-        }
-        pub inline fn set_if_not_null_return_ptr_IS_null(self: Self, val: T) bool {
-            return self.opq.set_if_not_null_return_ptr_IS_null(T, val);
-        }
-        pub inline fn set_at_index(self: Self, index: usize, val: T) void {
-            self.opq.set_at_index(T, index, val);
-        }
-        pub inline fn set_at_index_if_not_null(self: Self, index: usize, val: T) void {
-            self.opq.set_at_index_if_not_null(T, index, val);
-        }
-        pub inline fn set_at_index_if_not_null_return_ptr_is_NOT_null(self: Self, index: usize, val: T) bool {
-            return self.opq.set_at_index_if_not_null_return_ptr_is_NOT_null(T, index, val);
-        }
-        pub inline fn set_at_index_if_not_null_return_ptr_IS_null(self: Self, index: usize, val: T) bool {
-            return self.opq.set_at_index_if_not_null_return_ptr_IS_null(T, index, val);
-        }
-        //**************************
+        pub const get = TypedMethods.get;
+        pub const get_at_index = TypedMethods.get_at_index;
+        pub const set = TypedMethods.set;
+        pub const set_at_index = TypedMethods.set_at_index;
+
         // ADDRESS ADD / SUB / MOVE
-        //**************************
-        pub inline fn add(self: Self, offset: usize) Self {
-            return Self{ .opq = self.opq.typed_add(T, offset) };
-        }
-        pub inline fn add_in_place(self: *Self, offset: usize) void {
-            self.opq.typed_add_in_place(T, offset);
-        }
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
 
-        pub inline fn add_assert_contiguous(self: Self, offset: usize) Self {
-            return Self{ .opq = self.opq.typed_add_assert_contiguous(T, offset) };
-        }
-        pub inline fn add_in_place_assert_contiguous(self: *Self, offset: usize) void {
-            self.opq.typed_add_in_place_assert_contiguous(T, offset);
-        }
-
-        pub inline fn subtract(self: Self, offset: usize) Self {
-            return Self{ .opq = self.opq.typed_subtract(T, offset) };
-        }
-        pub inline fn subtract_in_place(self: *Self, offset: usize) void {
-            self.opq.typed_subtract_in_place(T, offset);
-        }
-
-        pub inline fn subtract_assert_contiguous(self: Self, offset: usize) Self {
-            return Self{ .opq = self.opq.typed_subtract_assert_contiguous(T, offset) };
-        }
-        pub inline fn subtract_in_place_assert_contiguous(self: *Self, offset: usize) void {
-            self.opq.typed_subtract_in_place_assert_contiguous(T, offset);
-        }
-
-        pub inline fn move(self: Self, offset: isize) Self {
-            return Self{ .opq = self.opq.typed_move(T, offset) };
-        }
-        pub inline fn move_in_place(self: *Self, offset: isize) void {
-            self.opq.move_in_place(offset);
-        }
-
-        pub inline fn move_assert_contiguous(self: Self, offset: isize) Self {
-            return Self{ .opq = self.opq.typed_move_assert_contiguous(T, offset) };
-        }
-        pub inline fn move_in_place_assert_contiguous(self: *Self, offset: isize) void {
-            self.opq.move_in_place_assert_contiguous(offset);
-        }
-        //**************************
         // ELEMENTS BETWEEN
-        //**************************
-        pub inline fn elements_between_self_low_other_high_exclude(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_low_other_high_exclude(other.opq, T);
+        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
+        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
+        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
+        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
+        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
+        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn NullablePointer(comptime T: type, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = null;
+        pub const NULLABILITY: Nullability = .NULLABLE;
+        pub const MUTABILITY: Mutability = .MUT_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_self_low_other_high_exclude_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_self_low_other_high_exclude_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_self_low_other_high_exclude_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_low_other_high_exclude_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn elements_between_self_high_other_low_exclude(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_high_other_low_exclude(other.opq, T);
+
+        // NULL CHECKS
+        pub const is_null = TypedMethods.is_null;
+        pub const not_null = TypedMethods.not_null;
+        pub const assert_not_null = TypedMethods.assert_not_null;
+        pub const assert_null = TypedMethods.assert_null;
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const ptr_or_null = TypedMethods.ptr_mut_or_null;
+        pub const ptr_many_or_null = TypedMethods.ptr_many_mut_or_null;
+        pub const slice_or_null = TypedMethods.slice_mut_or_null;
+        pub const array_ptr_or_null = TypedMethods.array_ptr_mut_or_null;
+        pub const vector_ptr_or_null = TypedMethods.vector_ptr_mut_or_null;
+
+        // GET / SET
+        pub const get_or_null = TypedMethods.get_or_null;
+        pub const get_orelse = TypedMethods.get_orelse;
+        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
+        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
+        pub const set_if_not_null = TypedMethods.set_if_not_null;
+        pub const set_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_if_not_null_return_ptr_is_NOT_null;
+        pub const set_if_not_null_return_ptr_IS_null = TypedMethods.set_if_not_null_return_ptr_IS_null;
+        pub const set_at_index_if_not_null = TypedMethods.set_at_index_if_not_null;
+        pub const set_at_index_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_at_index_if_not_null_return_ptr_is_NOT_null;
+        pub const set_at_index_if_not_null_return_ptr_IS_null = TypedMethods.set_at_index_if_not_null_return_ptr_IS_null;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
+        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
+        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
+        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
+        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
+        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
+        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
+        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
+        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
+        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
+        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
+        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn ConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = null;
+        pub const NULLABILITY: Nullability = .NEVER_NULL;
+        pub const MUTABILITY: Mutability = .CONST_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_self_high_other_low_exclude_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_self_high_other_low_exclude_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *const T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_self_high_other_low_exclude_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_high_other_low_exclude_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn elements_between_self_low_other_high_include(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_low_other_high_include(other.opq, T);
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const const_ptr = TypedMethods.ptr_const;
+        pub const const_ptr_many = TypedMethods.ptr_many_const;
+        pub const const_slice = TypedMethods.slice_const;
+        pub const const_array_ptr = TypedMethods.array_ptr_const;
+        pub const const_vector_ptr = TypedMethods.vector_ptr_const;
+
+        // GET
+        pub const get = TypedMethods.get;
+        pub const get_at_index = TypedMethods.get_at_index;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
+        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
+        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
+        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
+        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
+        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn NullableConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = null;
+        pub const NULLABILITY: Nullability = .NULLABLE;
+        pub const MUTABILITY: Mutability = .CONST_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_self_low_other_high_include_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_self_low_other_high_include_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *const T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_self_low_other_high_include_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_low_other_high_include_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn elements_between_self_high_other_low_include(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_high_other_low_include(other.opq, T);
+
+        // NULL CHECKS
+        pub const is_null = TypedMethods.is_null;
+        pub const not_null = TypedMethods.not_null;
+        pub const assert_not_null = TypedMethods.assert_not_null;
+        pub const assert_null = TypedMethods.assert_null;
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const const_ptr_or_null = TypedMethods.ptr_const_or_null;
+        pub const const_ptr_many_or_null = TypedMethods.ptr_many_const_or_null;
+        pub const const_slice_or_null = TypedMethods.slice_const_or_null;
+        pub const const_array_ptr_or_null = TypedMethods.array_ptr_const_or_null;
+        pub const const_vector_ptr_or_null = TypedMethods.vector_ptr_const_or_null;
+
+        // GET
+        pub const get_or_null = TypedMethods.get_or_null;
+        pub const get_orelse = TypedMethods.get_orelse;
+        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
+        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
+        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
+        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
+        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
+        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
+        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
+        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
+        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
+        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
+        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
+        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
+        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn PointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = A;
+        pub const NULLABILITY: Nullability = .NEVER_NULL;
+        pub const MUTABILITY: Mutability = .MUT_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_self_high_other_low_include_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_self_high_other_low_include_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *align(A) T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_self_high_other_low_include_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_self_high_other_low_include_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn elements_between_exclude_high(self: Self, other: Self) usize {
-            return self.opq.elements_between_exclude_high(other.opq, T);
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const ptr = TypedMethods.ptr_mut;
+        pub const ptr_many = TypedMethods.ptr_many_mut;
+        pub const slice = TypedMethods.slice_mut;
+        pub const array_ptr = TypedMethods.array_ptr_mut;
+        pub const vector_ptr = TypedMethods.vector_ptr_mut;
+
+        // GET / SET
+        pub const get = TypedMethods.get;
+        pub const get_at_index = TypedMethods.get_at_index;
+        pub const set = TypedMethods.set;
+        pub const set_at_index = TypedMethods.set_at_index;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
+        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
+        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
+        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
+        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
+        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn NullablePointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = A;
+        pub const NULLABILITY: Nullability = .NULLABLE;
+        pub const MUTABILITY: Mutability = .MUT_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_exclude_high_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_exclude_high_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *align(A) T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_exclude_high_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_exclude_high_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn elements_between_include_high(self: Self, other: Self) usize {
-            return self.opq.elements_between_include_high(other.opq, T);
+
+        // NULL CHECKS
+        pub const is_null = TypedMethods.is_null;
+        pub const not_null = TypedMethods.not_null;
+        pub const assert_not_null = TypedMethods.assert_not_null;
+        pub const assert_null = TypedMethods.assert_null;
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const ptr_or_null = TypedMethods.ptr_mut_or_null;
+        pub const ptr_many_or_null = TypedMethods.ptr_many_mut_or_null;
+        pub const slice_or_null = TypedMethods.slice_mut_or_null;
+        pub const array_ptr_or_null = TypedMethods.array_ptr_mut_or_null;
+        pub const vector_ptr_or_null = TypedMethods.vector_ptr_mut_or_null;
+
+        // GET / SET
+        pub const get_or_null = TypedMethods.get_or_null;
+        pub const get_orelse = TypedMethods.get_orelse;
+        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
+        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
+        pub const set_if_not_null = TypedMethods.set_if_not_null;
+        pub const set_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_if_not_null_return_ptr_is_NOT_null;
+        pub const set_if_not_null_return_ptr_IS_null = TypedMethods.set_if_not_null_return_ptr_IS_null;
+        pub const set_at_index_if_not_null = TypedMethods.set_at_index_if_not_null;
+        pub const set_at_index_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_at_index_if_not_null_return_ptr_is_NOT_null;
+        pub const set_at_index_if_not_null_return_ptr_IS_null = TypedMethods.set_at_index_if_not_null_return_ptr_IS_null;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
+        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
+        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
+        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
+        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
+        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
+        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
+        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
+        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
+        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
+        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
+        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn ConstPointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = A;
+        pub const NULLABILITY: Nullability = .NEVER_NULL;
+        pub const MUTABILITY: Mutability = .CONST_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn elements_between_include_high_or_null(self: Self, other: Self) ?usize {
-            return self.opq.elements_between_include_high_or_null(other.opq, T);
+        pub inline fn new_from_native(native_ptr: *align(A) const T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn elements_between_include_high_orelse_0(self: Self, other: Self) usize {
-            return self.opq.elements_between_include_high_orelse_0(other.opq, T);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn is_within_range_exclude_high(self: Self, low: Self, high: Self) bool {
-            return self.opq.is_within_range_exclude_high(low.opq, high.opq);
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const const_ptr = TypedMethods.ptr_const;
+        pub const const_ptr_many = TypedMethods.ptr_many_const;
+        pub const const_slice = TypedMethods.slice_const;
+        pub const const_array_ptr = TypedMethods.array_ptr_const;
+        pub const const_vector_ptr = TypedMethods.vector_ptr_const;
+
+        // GET
+        pub const get = TypedMethods.get;
+        pub const get_at_index = TypedMethods.get_at_index;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
+        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
+        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
+        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
+        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
+        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
+    };
+}
+
+pub fn NullableConstPointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
+    return struct {
+        const Self = @This();
+
+        pub const Source = SOURCE;
+        pub const Opaque = PointerOpaque(SOURCE);
+        pub const Addr = Opaque.Addr;
+        pub const Element = T;
+        pub const ALIGN: ?usize = A;
+        pub const NULLABILITY: Nullability = .NULLABLE;
+        pub const MUTABILITY: Mutability = .CONST_PTR;
+
+        pub const cast_to = TypedMethods.cast_to;
+        pub const to_const = TypedMethods.to_const;
+        pub const to_align = TypedMethods.to_align;
+        pub const to_nullable = TypedMethods.to_nullable;
+
+        opq: Opaque,
+
+        pub inline fn new(addr: Addr) Self {
+            return Self{ .opq = .new(addr) };
         }
-        pub inline fn is_within_range_include_high(self: Self, low: Self, high: Self) bool {
-            return self.opq.is_within_range_exclude_high(low.opq, high.opq);
+        pub inline fn new_from_native(native_ptr: *align(A) const T) Self {
+            return Self{ .opq = .new_from_native(native_ptr) };
         }
-        pub inline fn assert_is_within_range_exclude_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) bool {
-            self.opq.assert_is_within_range_exclude_high(low.opq, high.opq, src);
+        pub inline fn assert_native(comptime src: ?SourceLocation) void {
+            Opaque.assert_native(src);
         }
-        pub inline fn assert_is_within_range_include_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) bool {
-            self.opq.assert_is_within_range_include_high(low.opq, high.opq, src);
-        }
+
+        // NULL CHECKS
+        pub const is_null = TypedMethods.is_null;
+        pub const not_null = TypedMethods.not_null;
+        pub const assert_not_null = TypedMethods.assert_not_null;
+        pub const assert_null = TypedMethods.assert_null;
+
+        // ALIGNMENT
+        pub const is_aligned = TypedMethods.is_aligned;
+        pub const is_aligned_any = TypedMethods.is_aligned_any;
+        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
+        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
+        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
+        pub const assert_aligned = TypedMethods.assert_aligned;
+        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
+        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
+        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
+        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
+
+        // POINTER ACCESS
+        pub const const_ptr_or_null = TypedMethods.ptr_const_or_null;
+        pub const const_ptr_many_or_null = TypedMethods.ptr_many_const_or_null;
+        pub const const_slice_or_null = TypedMethods.slice_const_or_null;
+        pub const const_array_ptr_or_null = TypedMethods.array_ptr_const_or_null;
+        pub const const_vector_ptr_or_null = TypedMethods.vector_ptr_const_or_null;
+
+        // GET
+        pub const get_or_null = TypedMethods.get_or_null;
+        pub const get_orelse = TypedMethods.get_orelse;
+        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
+        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
+
+        // ADDRESS ADD / SUB / MOVE
+        pub const add = TypedMethods.add;
+        pub const add_in_place = TypedMethods.add_in_place;
+        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
+        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
+        pub const subtract = TypedMethods.subtract;
+        pub const subtract_in_place = TypedMethods.subtract_in_place;
+        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
+        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
+        pub const move = TypedMethods.move;
+        pub const move_in_place = TypedMethods.move_in_place;
+        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
+        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
+
+        // ELEMENTS BETWEEN
+        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
+        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
+        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
+        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
+        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
+        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
+        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
+        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
+        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
+        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
+        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
+        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
+
+        // RANGES
+        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
+        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
+        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
+        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
     };
 }
