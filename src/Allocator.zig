@@ -34,6 +34,15 @@ const Types = Root.Types;
 const Utils = Root.Utils;
 const assert_with_reason = Assert.assert_with_reason;
 const assert_unreachable = Assert.assert_unreachable;
+const PointerModule = Root.Pointer;
+const PointerSourceDef = PointerModule.PointerSource;
+const PointerOpaqueFn = PointerModule.PointerOpaque;
+const PointerFn = PointerModule.Pointer;
+const PointerAlignFn = PointerModule.PointerAlign;
+const NullablePointerFn = PointerModule.NullablePointer;
+const NullablePointerAlignFn = PointerModule.NullablePointerAlign;
+const Math = Root.Math;
+const num_cast = Math.num_cast;
 
 pub const Infallible = @import("./Allocator_Infallible.zig");
 pub const Dummy = @import("./Allocator_Dummy.zig");
@@ -65,14 +74,62 @@ pub const CompliantAllocIfaceAdapter = struct {
     alloc: Allocator = Dummy.allocator_panic_free_noop,
 };
 
-pub fn assert_type_is_compliant_allocator_static(comptime T: type) void {
+pub fn is_compliant_goolib_allocator_static(comptime T: type) struct { bool, PointerSourceDef } {
+    if (!Types.type_has_decl_with_type(T, "POINTER_SOURCE", PointerSourceDef)) return .{ false, PointerSourceDef.native_pointer() };
+    const SOURCE: PointerSourceDef = @field(T, "POINTER_SOURCE");
+    const PointerOpq = PointerOpaqueFn(SOURCE);
+
+    if (!Types.type_has_decl_with_type(T, "free_raw_opq", fn (PointerOpq, usize, ?Alignment) void)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn free_raw_opq(ptr: PointerOpaque(POINTER_SOURCE), len: usize, alignment: ?Alignment) void` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "remap_raw_opq", fn (PointerOpq, usize, usize, ?Alignment) ?PointerOpq)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn remap_raw_opq(ptr: PointerOpaque(POINTER_SOURCE), old_len: usize, new_len: usize, alignment: ?Alignment) ?PointerOpaque(POINTER_SOURCE)` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "resize_raw_opq", fn (PointerOpq, usize, usize, ?Alignment) bool)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn resize_raw_opq(ptr: PointerOpaque(POINTER_SOURCE), old_len: usize, new_len: usize, alignment: ?Alignment) bool` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "alloc_raw_opq", fn (usize, ?Alignment) ?PointerOpq)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn alloc_raw_opq(len: usize, alignment: ?Alignment) ?PointerOpaque(POINTER_SOURCE)` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    return .{ true, SOURCE };
+}
+
+pub fn is_compliant_goolib_allocator_instantiated(comptime T: type) struct { bool, PointerSourceDef } {
+    if (!Types.type_has_decl_with_type(T, "POINTER_SOURCE", PointerSourceDef)) return .{ false, PointerSourceDef.native_pointer() };
+    const SOURCE: PointerSourceDef = @field(T, "POINTER_SOURCE");
+    const PointerOpq = PointerOpaqueFn(SOURCE);
+
+    if (!Types.type_has_decl_with_type(T, "free_raw_opq", fn (*T, PointerOpq, usize, ?Alignment) void)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn free_raw_opq(allocator: *T, ptr: PointerOpaque(POINTER_SOURCE), len: usize, alignment: ?Alignment) void` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "remap_raw_opq", fn (*T, PointerOpq, usize, usize, ?Alignment) PointerOpq)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn remap_raw_opq(allocator: *T, ptr: PointerOpaque(POINTER_SOURCE), old_len: usize, new_len: usize, alignment: ?Alignment) PointerOpaque(POINTER_SOURCE)` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "resize_raw_opq", fn (*T, PointerOpq, usize, usize, ?Alignment) bool)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn resize_raw_opq(allocator: *T, ptr: PointerOpaque(POINTER_SOURCE), old_len: usize, new_len: usize, alignment: ?Alignment) bool` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    if (!Types.type_has_decl_with_type(T, "alloc_raw_opq", fn (*T, usize, ?Alignment) PointerOpq)) {
+        Assert.warn_unconditional(@src(), "type `{s}` declared a `pub const POINTER_SOURCE: PointerSource` declaration, but was missing a `pub fn alloc_raw_opq(allocator: *T, len: usize, alignment: ?Alignment) PointerOpaque(POINTER_SOURCE)` function", .{});
+        return .{ false, PointerSourceDef.native_pointer() };
+    }
+    return .{ true, SOURCE };
+}
+
+pub fn assert_type_is_compliant_native_allocator_static(comptime T: type) void {
     assert_with_reason(Types.type_has_decl_with_type(T, "free_raw", fn ([]u8, ?Alignment) void), @src(), "type `{s}` is missing the `pub fn free_raw(memory: []u8, alignment: ?Alignment) void` static function", .{@typeName(T)});
     assert_with_reason(Types.type_has_decl_with_type(T, "remap_raw", fn ([]u8, usize, ?Alignment) ?[*]u8), @src(), "type `{s}` is missing the `pub fn remap_raw(memory: []u8, new_len: usize, alignment: ?Alignment) ?[*]u8` static function", .{@typeName(T)});
     assert_with_reason(Types.type_has_decl_with_type(T, "resize_raw", fn ([]u8, usize, ?Alignment) bool), @src(), "type `{s}` is missing the `pub fn resize_raw(memory: []u8, new_len: usize, alignment: ?Alignment) bool` static function", .{@typeName(T)});
     assert_with_reason(Types.type_has_decl_with_type(T, "alloc_raw", fn (usize, ?Alignment) ?[*]u8), @src(), "type `{s}` is missing the `pub fn alloc_raw(size: usize, alignment: ?Alignment) ?[*]u8` static function", .{@typeName(T)});
 }
 
-pub fn assert_type_is_compliant_allocator_local(comptime T: type) void {
+pub fn assert_type_is_compliant_native_allocator_instantiated(comptime T: type) void {
     assert_with_reason(Types.type_has_decl_with_type(T, "free_raw", fn (*T, []u8, ?Alignment) void), @src(), "type `{s}` is missing the `pub fn free_raw(self: *Self, memory: []u8, alignment: ?Alignment) void` method", .{@typeName(T)});
     assert_with_reason(Types.type_has_decl_with_type(T, "remap_raw", fn (*T, []u8, usize, ?Alignment) ?[*]u8), @src(), "type `{s}` is missing the `pub fn remap_raw(self: *Self, memory: []u8, new_len: usize, alignment: ?Alignment) ?[*]u8` method", .{@typeName(T)});
     assert_with_reason(Types.type_has_decl_with_type(T, "resize_raw", fn (*T, []u8, usize, ?Alignment) bool), @src(), "type `{s}` is missing the `pub fn resize_raw(self: *Self, : []u8, new_len: usize, alignment: ?Alignment) bool` method", .{@typeName(T)});
@@ -305,18 +362,44 @@ pub const AllocSource = union(AllocSourceKind) {
     }
 };
 
+pub noinline fn ALLOCATOR_ADAPTER_GENERIC_ID() u64 {
+    return comptime Utils.src_loc_hash(@src());
+}
 pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
-    const GEN_ID_ = Utils.src_loc_hash(@src());
+    comptime var PTR_SRC: PointerSourceDef = PointerSourceDef.native_pointer();
+    comptime var HAS_SRC: bool = false;
     switch (comptime SOURCE) {
-        .COMPILANT_GLOBAL_ALLOCATOR => |T| assert_type_is_compliant_allocator_static(T),
-        .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |INFO| assert_type_is_compliant_allocator_local(INFO.INSTANTIATED_ALLOC),
-        .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| assert_type_is_compliant_allocator_local(T),
-        .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| assert_type_is_compliant_allocator_local(T),
+        .COMPILANT_GLOBAL_ALLOCATOR => |T| {
+            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_static(T);
+            if (!HAS_SRC) {
+                assert_type_is_compliant_native_allocator_static(T);
+            }
+        },
+        .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |INFO| {
+            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
+            if (!HAS_SRC) {
+                assert_type_is_compliant_native_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
+            }
+        },
+        .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| {
+            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
+            if (!HAS_SRC) {
+                assert_type_is_compliant_native_allocator_instantiated(T);
+            }
+        },
+        .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| {
+            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
+            if (!HAS_SRC) {
+                assert_type_is_compliant_native_allocator_instantiated(T);
+            }
+        },
         else => {},
     }
+    const PTR_SRC_ = PTR_SRC;
+    const HAS_SRC_ = HAS_SRC;
     return struct {
         const Self = @This();
-        pub const GENERIC_ID = GEN_ID_;
+        pub const GENERIC_ID = ALLOCATOR_ADAPTER_GENERIC_ID();
 
         const C: ConstAlloc = ConstAllocInit;
         f: CachedAlloc = CachedAllocInit,
@@ -329,6 +412,30 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         pub const ConstAllocInit = SOURCE.CONST_TYPE_INIT();
         pub const InitAlloc = SOURCE.INIT_TYPE();
         pub const NilInitAlloc = SOURCE.NIL_INIT_TYPE();
+        pub const PointerSource = PTR_SRC_;
+        const HAS_PTR_SRC = HAS_SRC_;
+        pub const POINTER_SOURCE_IS_NATIVE = PointerSource == .NATIVE;
+        pub const PointerOpaque = PointerOpaqueFn(PointerSource);
+        pub const NullablePointerU8 = NullablePointerFn(u8, PointerSource);
+        pub fn NullablePointerU8Align(comptime A: usize) type {
+            return NullablePointerAlignFn(u8, A, PointerSource);
+        }
+        pub fn NullablePointer(comptime T: type) type {
+            return NullablePointerFn(T, PointerSource);
+        }
+        pub fn NullablePointerAlign(comptime T: type, comptime A: usize) type {
+            return NullablePointerAlignFn(T, A, PointerSource);
+        }
+        pub const PointerU8 = PointerFn(u8, PointerSource);
+        pub fn PointerU8Align(comptime A: usize) type {
+            return PointerAlignFn(u8, A, PointerSource);
+        }
+        pub fn Pointer(comptime T: type) type {
+            return PointerFn(T, PointerSource);
+        }
+        pub fn PointerAlign(comptime T: type, comptime A: usize) type {
+            return PointerAlignFn(T, A, PointerSource);
+        }
 
         pub const VTABLE: Allocator.VTable = .{
             .alloc = alloc_impl,
@@ -472,7 +579,9 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
                 else => unreachable,
             };
         }
-
+        inline fn assert_native_source(comptime src: ?std.lang.SourceLocation) void {
+            assert_with_reason(POINTER_SOURCE_IS_NATIVE, src, "cannot call this function if the PointerSource is not native", .{});
+        }
         inline fn assert_no_alloc_param(comptime src: ?std.lang.SourceLocation) void {
             assert_with_reason(!SOURCE.USE_PARAM_TYPE(), src, "cannot call this function if an allocator needs to be passed in manually", .{});
         }
@@ -482,19 +591,29 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
         //*********
         // ALLOC
         //*********
-        pub inline fn alloc_raw(self: Self, size: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
+        pub inline fn alloc_raw(self: Self, size: usize, alignment: ?Alignment, alloc_param: PassedAlloc) PointerOpaque {
             switch (comptime SOURCE) {
-                .NEVER_ALLOCATES => return null,
+                .NEVER_ALLOCATES => return PointerOpaque.NULL,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
+                    assert_native_source(@src());
                     const alloc = self.get_alloc_internal(alloc_param);
-                    return alloc.rawAlloc(size, alignment orelse Alignment.@"1", @returnAddress());
+                    const p = alloc.rawAlloc(size, alignment orelse Alignment.@"1", @returnAddress());
+                    return PointerOpaque{ .addr = @intFromPtr(p) };
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
-                    return C.alloc_raw(size, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return C.alloc_raw_opq(size, alignment);
+                    } else {
+                        PointerOpaque{ .addr = @intFromPtr(C.alloc_raw(size, alignment)) };
+                    }
                 },
                 .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {
                     const alloc = self.get_instantiated_compliant_alloc_ptr(alloc_param);
-                    return alloc.alloc_raw(size, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return alloc.alloc_raw_opq(size, alignment);
+                    } else {
+                        PointerOpaque{ .addr = @intFromPtr(alloc.alloc_raw(size, alignment)) };
+                    }
                 },
             }
         }
@@ -503,42 +622,48 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            return self.alloc_raw(len, alignment, {});
+            return self.alloc_raw(len, alignment, {}).ptr_many_or_null(u8);
         }
-        pub inline fn alloc_types(self: Self, comptime T: type, count: usize, alloc_param: PassedAlloc) ?[]T {
-            const ptr = self.alloc_raw(@sizeOf(T) * count, Alignment.fromByteUnits(@alignOf(T)), alloc_param) orelse return null;
-            const t_ptr: [*]T = @ptrCast(@alignCast(ptr));
-            return t_ptr[0..count];
+        pub inline fn alloc_types(self: Self, comptime T: type, count: anytype, alloc_param: PassedAlloc) NullablePointer(T) {
+            const ptr = self.alloc_raw(@sizeOf(T) * num_cast(count, usize), Alignment.fromByteUnits(@alignOf(T)), alloc_param);
+            return ptr.cast_to(.NULLABLE, .MUT_PTR, T, null);
         }
-        pub inline fn alloc_types_with_align(self: Self, comptime T: type, count: usize, comptime alignment: Alignment, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
-            const ptr = self.alloc_raw(@sizeOf(T) * count, alignment, alloc_param) orelse return null;
-            const t_ptr: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(ptr));
-            return t_ptr[0..count];
+        pub inline fn alloc_types_with_align(self: Self, comptime T: type, count: anytype, comptime alignment: Alignment, alloc_param: PassedAlloc) NullablePointerAlign(T, alignment.toByteUnits()) {
+            const ptr = self.alloc_raw(@sizeOf(T) * num_cast(count, usize), alignment, alloc_param);
+            return ptr.cast_to(.NULLABLE, .MUT_PTR, T, alignment);
         }
-        pub inline fn alloc_bytes(self: Self, size: usize, alloc_param: PassedAlloc) ?[]u8 {
-            const ptr = self.alloc_raw(size, null, alloc_param) orelse return null;
-            return ptr[0..size];
+        pub inline fn alloc_bytes(self: Self, size: anytype, alloc_param: PassedAlloc) NullablePointerU8 {
+            const ptr = self.alloc_raw(num_cast(size, usize), null, alloc_param);
+            return ptr.cast_to(.NULLABLE, .MUT_PTR, u8, null);
         }
-        pub inline fn alloc_bytes_with_align(self: Self, size: usize, comptime alignment: Alignment, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
-            const ptr: [*]align(alignment.toByteUnits()) u8 = @alignCast(self.alloc_raw(size, alignment, alloc_param) orelse return null);
-            return ptr[0..size];
+        pub inline fn alloc_bytes_with_align(self: Self, size: anytype, comptime alignment: Alignment, alloc_param: PassedAlloc) NullablePointerU8Align(alignment.toByteUnits()) {
+            const ptr = self.alloc_raw(num_cast(size, usize), alignment, alloc_param);
+            return ptr.cast_to(.NULLABLE, .MUT_PTR, u8, alignment);
         }
         //*********
         // RESIZE
         //*********
-        pub inline fn resize_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) bool {
+        pub inline fn resize_raw(self: Self, ptr: PointerOpaque, old_len: usize, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) bool {
             switch (comptime SOURCE) {
                 .NEVER_ALLOCATES => return false,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
                     const alloc = self.get_alloc_internal(alloc_param);
-                    return alloc.rawResize(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
+                    return alloc.rawResize(ptr.slice(u8, old_len), alignment orelse Alignment.@"1", new_len, @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
-                    return C.resize_raw(memory, new_len, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return C.resize_raw_opq(ptr, old_len, new_len, alignment);
+                    } else {
+                        return C.resize_raw(ptr.slice(u8, old_len), new_len, alignment);
+                    }
                 },
                 .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {
                     const alloc = self.get_instantiated_compliant_alloc_ptr(alloc_param);
-                    return alloc.resize_raw(memory, new_len, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return alloc.resize_raw_opq(ptr, old_len, new_len, alignment);
+                    } else {
+                        return alloc.resize_raw(ptr.slice(u8, old_len), new_len, alignment);
+                    }
                 },
             }
         }
@@ -547,36 +672,46 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            return self.resize_raw(memory, new_len, alignment, {});
+            return self.resize_raw(PointerOpaque.new_from_native(memory.ptr), memory.len, new_len, alignment, {});
         }
-        pub inline fn resize_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: PassedAlloc) bool {
-            return self.resize_raw(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param);
+        pub inline fn resize_types(self: Self, comptime T: type, ptr: Pointer(T), old_count: anytype, new_count: anytype, alloc_param: PassedAlloc) bool {
+            return self.resize_raw(ptr.opq, num_cast(old_count, usize) * @sizeOf(T), num_cast(new_count, usize) * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param);
         }
-        pub inline fn resize_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: PassedAlloc) bool {
-            return self.resize_raw(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment, alloc_param);
+        pub inline fn resize_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: PointerAlign(T, alignment.toByteUnits()), old_count: anytype, new_count: anytype, alloc_param: PassedAlloc) bool {
+            return self.resize_raw(ptr.opq, num_cast(old_count, usize) * @sizeOf(T), num_cast(new_count, usize) * @sizeOf(T), alignment, alloc_param);
         }
-        pub inline fn resize_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: PassedAlloc) bool {
-            return self.resize_raw(memory, new_len, null, alloc_param);
+        pub inline fn resize_bytes(self: Self, ptr: PointerU8, old_len: anytype, new_len: anytype, alloc_param: PassedAlloc) bool {
+            return self.resize_raw(ptr.opq, num_cast(old_len, usize), num_cast(new_len, usize), null, alloc_param);
         }
-        pub inline fn resize_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: PassedAlloc) bool {
-            return self.resize_raw(@alignCast(memory), new_len, alignment, alloc_param);
+        pub inline fn resize_bytes_with_align(self: Self, comptime alignment: Alignment, ptr: PointerU8Align(alignment.toByteUnits()), old_len: anytype, new_len: anytype, alloc_param: PassedAlloc) bool {
+            return self.resize_raw(ptr.opq, num_cast(old_len, usize), num_cast(new_len, usize), alignment, alloc_param);
         }
         //*********
         // REMAP
         //*********
-        pub inline fn remap_raw(self: Self, memory: []u8, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
+        pub inline fn remap_raw(self: Self, ptr: PointerOpaque, old_len: usize, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) PointerOpaque {
             switch (comptime SOURCE) {
-                .NEVER_ALLOCATES => return null,
+                .NEVER_ALLOCATES => return PointerOpaque.NULL,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
+                    assert_native_source(@src());
                     const alloc = self.get_alloc_internal(alloc_param);
-                    return alloc.rawRemap(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
+                    const p = alloc.rawRemap(ptr, alignment orelse Alignment.@"1", new_len, @returnAddress());
+                    return PointerOpaque{ .addr = @intFromPtr(p) };
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
-                    return C.remap_raw(memory, new_len, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return C.remap_raw_opq(ptr, old_len, new_len, alignment);
+                    } else {
+                        PointerOpaque{ .addr = @intFromPtr(C.remap_raw(ptr.slice(u8, old_len), new_len, alignment)) };
+                    }
                 },
                 .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {
                     const alloc = self.get_instantiated_compliant_alloc_ptr(alloc_param);
-                    return alloc.remap_raw(memory, new_len, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        return alloc.remap_raw_opq(ptr, old_len, new_len, alignment);
+                    } else {
+                        PointerOpaque{ .addr = @intFromPtr(alloc.remap_raw(ptr.slice(u8, old_len), new_len, alignment)) };
+                    }
                 },
             }
         }
@@ -585,51 +720,49 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            return self.remap_raw(memory, new_len, alignment, {});
+            return self.remap_raw(PointerOpaque.new_from_native(memory.ptr), memory.len, new_len, alignment, {}).ptr_many_or_null(u8);
         }
-        pub inline fn remap_types(self: Self, comptime T: type, memory: []T, new_count: usize, alloc_param: PassedAlloc) ?[]T {
-            if (self.remap_raw(@as([*]u8, @ptrCast(memory.ptr))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param)) |new_mem| {
-                const new_cast_mem: [*]T = @ptrCast(@alignCast(new_mem));
-                return new_cast_mem[0..new_count];
-            }
-            return null;
+        pub inline fn remap_types(self: Self, comptime T: type, ptr: Pointer(T), old_count: anytype, new_count: anytype, alloc_param: PassedAlloc) NullablePointer(T) {
+            const p = self.remap_raw(ptr.opq, num_cast(old_count, usize) * @sizeOf(T), num_cast(new_count, usize) * @sizeOf(T), null, alloc_param);
+            return p.cast_to(.NULLABLE, .MUT_PTR, T, null);
         }
-        pub inline fn remap_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, new_count: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) T {
-            if (self.remap_raw(@as([*]u8, @ptrCast(@alignCast(memory.ptr)))[0 .. memory.len * @sizeOf(T)], new_count * @sizeOf(T), alignment, alloc_param)) |new_mem| {
-                const new_cast_mem: [*]align(alignment.toByteUnits()) T = @ptrCast(@alignCast(new_mem));
-                return new_cast_mem[0..new_count];
-            }
-            return null;
+        pub inline fn remap_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: PointerAlign(T, alignment.toByteUnits()), old_count: anytype, new_count: anytype, alloc_param: PassedAlloc) NullablePointerAlign(T, alignment.toByteUnits()) {
+            const p = self.remap_raw(ptr.opq, num_cast(old_count, usize) * @sizeOf(T), num_cast(new_count, usize) * @sizeOf(T), alignment, alloc_param);
+            return p.cast_to(.NULLABLE, .MUT_PTR, T, alignment);
         }
-        pub inline fn remap_bytes(self: Self, memory: []u8, new_len: usize, alloc_param: PassedAlloc) ?[]u8 {
-            if (self.remap_raw(memory, new_len, null, alloc_param)) |new_mem| {
-                return new_mem[0..new_len];
-            }
-            return null;
+        pub inline fn remap_bytes(self: Self, ptr: PointerU8, old_len: anytype, new_len: anytype, alloc_param: PassedAlloc) NullablePointerU8 {
+            const p = self.remap_raw(ptr.opq, num_cast(old_len, usize), num_cast(new_len, usize), null, alloc_param);
+            return p.cast_to(.NULLABLE, .MUT_PTR, u8, null);
         }
-        pub inline fn remap_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, new_len: usize, alloc_param: PassedAlloc) ?[]align(alignment.toByteUnits()) u8 {
-            if (self.remap_raw(@alignCast(memory), new_len, alignment, alloc_param)) |new_mem| {
-                const new_cast_mem: [*]align(alignment.toByteUnits()) u8 = @ptrCast(@alignCast(new_mem));
-                return new_cast_mem[0..new_len];
-            }
-            return null;
+        pub inline fn remap_bytes_with_align(self: Self, comptime alignment: Alignment, ptr: PointerU8Align(alignment.toByteUnits()), old_len: anytype, new_len: anytype, alloc_param: PassedAlloc) NullablePointerU8Align(alignment.toByteUnits()) {
+            const p = self.remap_raw(ptr.opq, num_cast(old_len, usize), num_cast(new_len, usize), alignment, alloc_param);
+            return p.cast_to(.NULLABLE, .MUT_PTR, u8, alignment);
         }
         //*********
         // FREE
         //*********
-        pub inline fn free_raw(self: Self, memory: []u8, alignment: ?Alignment, alloc_param: PassedAlloc) void {
+        pub inline fn free_raw(self: Self, ptr: PointerOpaque, len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) void {
             switch (comptime SOURCE) {
                 .NEVER_ALLOCATES => return,
                 .PASSED_ALLOCATOR_INTERFACE, .CACHED_ALLOCATOR_INTERFACE, .COMPTIME_ALLOCATOR_INTERFACE_PTR => {
+                    assert_native_source(@src());
                     const alloc = self.get_alloc_internal(alloc_param);
-                    return alloc.rawFree(memory, alignment orelse Alignment.@"1", @returnAddress());
+                    alloc.rawFree(ptr.slice(u8, len), alignment orelse Alignment.@"1", @returnAddress());
                 },
                 .COMPILANT_GLOBAL_ALLOCATOR => {
-                    return C.free_raw(memory, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        C.raw_free_opq(ptr, len, alignment);
+                    } else {
+                        C.free_raw(ptr.slice(u8, len), alignment);
+                    }
                 },
                 .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR, .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => {
                     const alloc = self.get_instantiated_compliant_alloc_ptr(alloc_param);
-                    alloc.free_raw(memory, alignment);
+                    if (comptime HAS_PTR_SRC) {
+                        alloc.raw_free_opq(ptr, len, alignment);
+                    } else {
+                        alloc.free_raw(ptr.slice(u8, len), alignment);
+                    }
                 },
             }
         }
@@ -638,27 +771,24 @@ pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
             assert_no_alloc_param(@src());
             _ = ret_addr;
             const self: *Self = @ptrCast(@alignCast(self_opaque));
-            self.free_raw(memory, alignment, {});
+            self.free_raw(PointerOpaque.new_from_native(memory.ptr), memory.len, alignment, {});
         }
-        pub inline fn free_types(self: Self, comptime T: type, memory: []T, alloc_param: PassedAlloc) void {
-            const raw_ptr: [*]u8 = @ptrCast(memory.ptr);
-            const raw_len = memory.len * @sizeOf(T);
-            self.free_raw(raw_ptr[0..raw_len], Alignment.fromByteUnits(@alignOf(T)), alloc_param);
+        pub inline fn free_types(self: Self, comptime T: type, ptr: Pointer(T), len: anytype, alloc_param: PassedAlloc) void {
+            self.free_raw(ptr.opq, num_cast(len, usize) * @sizeOf(T), Alignment.fromByteUnits(@alignOf(T)), alloc_param);
         }
-        pub inline fn free_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, memory: []align(alignment.toByteUnits()) T, alloc_param: PassedAlloc) void {
-            const raw_ptr: [*]u8 = @ptrCast(@alignCast(memory.ptr));
-            const raw_len = memory.len * @sizeOf(T);
-            self.free_raw(raw_ptr[0..raw_len], alignment, alloc_param);
+        pub inline fn free_types_with_align(self: Self, comptime alignment: Alignment, comptime T: type, ptr: PointerAlign(T, alignment.toByteUnits()), len: anytype, alloc_param: PassedAlloc) void {
+            self.free_raw(ptr.opq, num_cast(len, usize) * @sizeOf(T), alignment, alloc_param);
         }
-        pub inline fn free_bytes(self: Self, memory: []u8, alloc_param: PassedAlloc) void {
-            self.free_raw(memory, null, alloc_param);
+        pub inline fn free_bytes(self: Self, ptr: PointerU8, len: anytype, alloc_param: PassedAlloc) void {
+            self.free_raw(ptr.opq, num_cast(len, usize), null, alloc_param);
         }
-        pub inline fn free_bytes_with_align(self: Self, comptime alignment: Alignment, memory: []align(alignment.toByteUnits()) u8, alloc_param: PassedAlloc) void {
-            self.free_raw(@alignCast(memory), alignment, alloc_param);
+        pub inline fn free_bytes_with_align(self: Self, comptime alignment: Alignment, ptr: PointerU8Align(alignment.toByteUnits()), len: anytype, alloc_param: PassedAlloc) void {
+            self.free_raw(ptr.opq, num_cast(len, usize), alignment, alloc_param);
         }
         //*********
         // REALLOC
         //*********
+        //CHECKPOINT update realloc and other helpers to use new Pointer API
         pub fn realloc_raw(self: Self, memory: []u8, data_len: usize, new_len: usize, alignment: ?Alignment, alloc_param: PassedAlloc) ?[*]u8 {
             if (comptime SOURCE.CAN_NEVER_ALLOCATE()) return null;
             if (new_len == 0) {

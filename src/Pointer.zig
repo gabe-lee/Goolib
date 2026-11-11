@@ -82,14 +82,14 @@ pub const Nullability = enum {
 };
 
 pub const AlignmentSource = union(enum) {
-    NATIVE: type,
+    NATIVE: void,
     BYTES: usize,
     LOG_2: u8,
     POWER_OF_2: PowerOf2,
     STD_MEM_ALIGN: mem.Alignment,
 
-    pub fn native_align(comptime T: type) AlignmentSource {
-        return AlignmentSource{ .NATIVE = T };
+    pub fn native_align() AlignmentSource {
+        return AlignmentSource{ .NATIVE = {} };
     }
     pub fn bytes_align(comptime bytes: usize) AlignmentSource {
         return AlignmentSource{ .BYTES = bytes };
@@ -104,9 +104,9 @@ pub const AlignmentSource = union(enum) {
         return AlignmentSource{ .STD_MEM_ALIGN = alignment };
     }
 
-    pub fn calc(comptime self: AlignmentSource) usize {
+    pub fn calc(comptime self: AlignmentSource) ?usize {
         return switch (comptime self) {
-            .NATIVE => |T| @alignOf(T),
+            .NATIVE => null,
             .BYTES => |B| B,
             .LOG_2 => |L| @as(usize, 1) << @intCast(L),
             .POWER_OF_2 => |P| P.value_as_type(usize),
