@@ -1256,6 +1256,22 @@ pub fn invalid_ptr_many_const_align(comptime T: type, alignment: usize) [*]const
     const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
     return @ptrFromInt(addr);
 }
+pub fn invalid_ptr_ct_align(comptime T: type, comptime alignment: usize) *align(alignment) T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
+    return @ptrFromInt(addr);
+}
+pub fn invalid_ptr_const_ct_align(comptime T: type, comptime alignment: usize) *align(alignment) const T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
+    return @ptrFromInt(addr);
+}
+pub fn invalid_ptr_many_ct_align(comptime T: type, comptime alignment: usize) [*]align(alignment) T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
+    return @ptrFromInt(addr);
+}
+pub fn invalid_ptr_many_const_ct_align(comptime T: type, comptime alignment: usize) [*]align(alignment) const T {
+    const addr = std.mem.alignBackward(usize, std.math.maxInt(usize), if (comptime Types.type_is_instantiable(T)) alignment else 1);
+    return @ptrFromInt(addr);
+}
 pub fn invalid_slice(comptime T: type) []T {
     return invalid_ptr_many(T)[0..0];
 }
