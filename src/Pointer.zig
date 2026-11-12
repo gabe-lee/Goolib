@@ -266,13 +266,13 @@ pub const PointerSource = union(PointerSourceKind) {
 
     pub fn LOCAL_OPAQUE_TYPE(comptime self: PointerSource) type {
         return switch (comptime self) {
-            .NATIVE => usize,
+            .NATIVE => ?[*]u8,
             .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
         };
     }
     pub fn LOCAL_OPAQUE_TYPE_NULL(comptime self: PointerSource) self.LOCAL_OPAQUE_TYPE() {
         return switch (comptime self) {
-            .NATIVE => 0,
+            .NATIVE => null,
             .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
         };
     }
@@ -339,13 +339,13 @@ pub const PointerSource = union(PointerSourceKind) {
     pub fn RESOLVER_TYPE(comptime self: PointerSource) type {
         return switch (comptime self) {
             .NATIVE => void,
-            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) usize,
+            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) ?[*]u8,
         };
     }
     pub fn RESOLVER_TYPE_INIT(comptime self: PointerSource) self.RESOLVER_TYPE() {
         return switch (comptime self) {
             .NATIVE => {},
-            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) usize, @ptrCast(@alignCast(RES.RESOLVE_FUNC))),
+            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) ?[*]u8, @ptrCast(@alignCast(RES.RESOLVE_FUNC))),
         };
     }
     pub fn ADDER_TYPE(comptime self: PointerSource) type {
@@ -1162,7 +1162,7 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         pub inline fn resolved_addr(self: Self) usize {
             self.assert_not_null(@src());
             return switch (comptime SOURCE) {
-                .NATIVE => self.addr,
+                .NATIVE => @intFromPtr(self.addr),
                 .GLOBAL_RESOLVER => RESOLVE(self.addr),
             };
         }
