@@ -32,6 +32,7 @@ const DEBUG = std.debug.print;
 const mem = std.mem;
 const Alignment = std.mem.Alignment;
 const SourceLocation = std.lang.SourceLocation;
+const PtrSize = std.lang.Type.Pointer.Size;
 
 /// Goolib imports
 const Root = @import("./_root.zig");
@@ -45,6 +46,7 @@ const Test = Root.Testing;
 const AllocatorModule = Root.Allocator;
 const ListSlice = Root.ListSlice;
 const PowerOf2 = Math.PowerOf2;
+const AddrSpace = std.lang.AddressSpace;
 
 const dummy_alloc = AllocatorModule.Dummy.allocator_panic_free_noop;
 const assert_with_reason = Assert.assert_with_reason;
@@ -63,7 +65,7 @@ comptime {
 
 pub const PointerSourceKind = enum {
     NATIVE,
-    GLOBAL_RESOLVER,
+    STATIC_RESOLVER,
 };
 
 const OffestDir = enum {
@@ -72,13 +74,23 @@ const OffestDir = enum {
 };
 
 pub const Mutability = enum {
-    MUT_PTR,
-    CONST_PTR,
+    MUTABLE,
+    CONST,
 };
 
 pub const Nullability = enum {
     NEVER_NULL,
     NULLABLE,
+};
+
+pub const AllowZero = enum {
+    NO_ALLOW_ZERO,
+    ALLOW_ZERO,
+};
+
+pub const Volatile = enum {
+    NOT_VOLATILE,
+    VOLATILE,
 };
 
 pub const AlignmentSource = union(enum) {
@@ -115,15 +127,23 @@ pub const AlignmentSource = union(enum) {
     }
 };
 
-pub const GlobalPointerResolver = struct {
-    /// The local type stored on the `Pointer/Pointer(T)` struct
+pub const StaticPointerResolver = struct {
+    /// The local type stored on the `Pointer/Pointer(ELEMENT)` struct
     LOCAL_TYPE: type,
+    /// The unsigned integer type to use for slice length,
+    /// if a slice type is requested. This puts a hard limit on
+    /// the largest slice size possible. A reasonable upper bound
+    /// is `@Int(.unsigned, @bitSizeOf(LOCAL_TYPE))`, since
+    /// that is the maximum number of unique addresses possible
+    /// for LOCAL_TYPE to resolve to, though the actual smallest
+    /// slice may be smaller.
+    LOCAL_SLICE_INT: type,
     /// MUST be a pointer to a value of type `LOCAL_TYPE_NULLABLE` that represents the 'null' value
     /// for the input type
     LOCAL_NULL_VALUE: *const anyopaque,
     /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE_NULLABLE) bool`
     IS_NULL_FUNC: *const anyopaque,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
+    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) ?[*]u8`
     RESOLVE_FUNC: *const anyopaque,
     /// MUST be a pointer to a function in the form `*const fn (original: LOCAL_TYPE, offset: usize) LOCAL_TYPE`,
     /// where the returned `LOCAL_TYPE` is the value that, when resolved, returns
@@ -151,10 +171,10 @@ pub const GlobalPointerResolver = struct {
     ASSERT_CONTIGUOUS_RANGE: bool = true,
 };
 
-pub const AutoIntegerGlobalPointerResolver = struct {
-    /// The local integer type stored on the `Pointer/Pointer(T)` struct
+pub const AutoIntegerStaticPointerResolver = struct {
+    /// The local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
     LOCAL_TYPE: type,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
+    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) ?[*]u8`
     RESOLVE_FUNC: *const anyopaque,
     /// When `true`, operations that offset the pointer, or that
     /// slice the pointer or point to an array or vector, will perform
@@ -167,9 +187,9 @@ pub const AutoIntegerGlobalPointerResolver = struct {
     /// a boundary between contiguous memory chunks
     ASSERT_CONTIGUOUS_RANGE: bool = true,
 
-    pub fn to_global_resolver(comptime self: AutoIntegerGlobalPointerResolver) GlobalPointerResolver {
+    pub fn to_global_resolver(comptime self: AutoIntegerStaticPointerResolver) StaticPointerResolver {
         const PROTO = IntegerResolverProto(self.LOCAL_TYPE);
-        return GlobalPointerResolver{
+        return StaticPointerResolver{
             .ADD_FUNC = @ptrCast(&PROTO.add),
             .SUBTRACT_FUNC = @ptrCast(&PROTO.sub),
             .IS_NULL_FUNC = @ptrCast(&PROTO.is_null),
@@ -180,10 +200,10 @@ pub const AutoIntegerGlobalPointerResolver = struct {
         };
     }
 };
-pub const AutoIntegerBitsGlobalPointerResolver = struct {
-    /// The number of bits for the local integer type stored on the `Pointer/Pointer(T)` struct
+pub const AutoIntegerBitsStaticPointerResolver = struct {
+    /// The number of bits for the local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
     LOCAL_TYPE_NUMBER_OF_BITS: u16,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
+    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) ?[*]u8`
     RESOLVE_FUNC: *const anyopaque,
     /// When `true`, operations that offset the pointer, or that
     /// slice the pointer or point to an array or vector, will perform
@@ -196,18 +216,18 @@ pub const AutoIntegerBitsGlobalPointerResolver = struct {
     /// a boundary between contiguous memory chunks
     ASSERT_CONTIGUOUS_RANGE: bool = true,
 
-    pub fn to_auto_int(comptime self: AutoIntegerBitsGlobalPointerResolver) AutoIntegerGlobalPointerResolver {
-        return AutoIntegerGlobalPointerResolver{
+    pub fn to_auto_int(comptime self: AutoIntegerBitsStaticPointerResolver) AutoIntegerStaticPointerResolver {
+        return AutoIntegerStaticPointerResolver{
             .LOCAL_TYPE = @Int(.unsigned, self.LOCAL_TYPE_NUMBER_OF_BITS),
             .RESOLVE_FUNC = self.RESOLVE_FUNC,
             .ASSERT_CONTIGUOUS_RANGE = self.ASSERT_CONTIGUOUS_RANGE,
         };
     }
 };
-pub const AutoIntegerMaxGlobalPointerResolver = struct {
-    /// The maximum value for the local integer type stored on the `Pointer/Pointer(T)` struct
+pub const AutoIntegerMaxStaticPointerResolver = struct {
+    /// The maximum value for the local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
     LOCAL_TYPE_VALUE_LIMIT: PowerOf2,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
+    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) ?[*]u8`
     RESOLVE_FUNC: *const anyopaque,
     /// When `true`, operations that offset the pointer, or that
     /// slice the pointer or point to an array or vector, will perform
@@ -220,8 +240,8 @@ pub const AutoIntegerMaxGlobalPointerResolver = struct {
     /// a boundary between contiguous memory chunks
     ASSERT_CONTIGUOUS_RANGE: bool = true,
 
-    pub fn to_auto_int(comptime self: AutoIntegerMaxGlobalPointerResolver) AutoIntegerGlobalPointerResolver {
-        return AutoIntegerGlobalPointerResolver{
+    pub fn to_auto_int(comptime self: AutoIntegerMaxStaticPointerResolver) AutoIntegerStaticPointerResolver {
+        return AutoIntegerStaticPointerResolver{
             .LOCAL_TYPE = self.LOCAL_TYPE_VALUE_LIMIT.unsigned_integer_type_that_holds_all_values_less_than(),
             .RESOLVE_FUNC = self.RESOLVE_FUNC,
             .ASSERT_CONTIGUOUS_RANGE = self.ASSERT_CONTIGUOUS_RANGE,
@@ -244,226 +264,375 @@ fn IntegerResolverProto(comptime INT: type) type {
     };
 }
 
-pub const PointerSource = union(PointerSourceKind) {
-    NATIVE: void,
-    GLOBAL_RESOLVER: GlobalPointerResolver,
+pub const MakePtrDef = struct {
+    ALLOW_ZERO: AllowZero = .NO_ALLOW_ZERO,
+    NULLABILITY: Nullability = .NEVER_NULL,
+    MUTABILITY: Mutability = .MUTABLE,
+    SIZE: PtrSize = .one,
+    ELEMENT: type,
+    SENTINEL: ?*const anyopaque = null,
+    ALIGNMENT: ?PowerOf2 = null,
+    ADDRSPACE: ?AddrSpace = null,
+    VOLATILE: Volatile = .NOT_VOLATILE,
 
-    pub fn native_pointer() PointerSource {
-        return PointerSource{ .NATIVE = {} };
-    }
-    pub fn global_pointer_resolver(comptime resolver: GlobalPointerResolver) PointerSource {
-        return PointerSource{ .GLOBAL_RESOLVER = resolver };
-    }
-    pub fn global_pointer_resolver_auto_from_int(comptime resolver: AutoIntegerGlobalPointerResolver) PointerSource {
-        return PointerSource{ .GLOBAL_RESOLVER = resolver.to_global_resolver() };
-    }
-    pub fn global_pointer_resolver_auto_from_int_bits(comptime resolver: AutoIntegerBitsGlobalPointerResolver) PointerSource {
-        return PointerSource{ .GLOBAL_RESOLVER = resolver.to_auto_int().to_global_resolver() };
-    }
-    pub fn global_pointer_resolver_auto_from_int_max(comptime resolver: AutoIntegerMaxGlobalPointerResolver) PointerSource {
-        return PointerSource{ .GLOBAL_RESOLVER = resolver.to_auto_int().to_global_resolver() };
-    }
-
-    pub fn LOCAL_OPAQUE_TYPE(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => ?[*]u8,
-            .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
+    pub fn with_allow_zero(comptime self: MakePtrDef, comptime ALLOW_ZERO: AllowZero) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_OPAQUE_TYPE_NULL(comptime self: PointerSource) self.LOCAL_OPAQUE_TYPE() {
-        return switch (comptime self) {
-            .NATIVE => null,
-            .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
+    pub fn with_nullability(comptime self: MakePtrDef, comptime NULLABILITY: Nullability) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_NULLABLE(comptime self: PointerSource, comptime T: type) type {
-        return switch (comptime self) {
-            .NATIVE => ?[*]T,
-            .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
+    pub fn with_mutability(comptime self: MakePtrDef, comptime MUTABILITY: Mutability) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_NULLABLE_INIT(comptime self: PointerSource, comptime T: type) self.LOCAL_TYPED_NULLABLE(T) {
-        return switch (comptime self) {
-            .NATIVE => null,
-            .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
+    pub fn with_size_kind(comptime self: MakePtrDef, comptime SIZE: PtrSize) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED(comptime self: PointerSource, comptime T: type) type {
-        return switch (comptime self) {
-            .NATIVE => [*]T,
-            .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
+    pub fn with_element(comptime self: MakePtrDef, comptime ELEMENT: type) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_INIT(comptime self: PointerSource, comptime T: type) self.LOCAL_TYPED(T) {
-        return switch (comptime self) {
-            .NATIVE => Utils.invalid_ptr_many(T),
-            .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
+    pub fn with_sentinel(comptime self: MakePtrDef, comptime SENTINEL: self.ELEMENT) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_NULLABLE_ALIGN(comptime self: PointerSource, comptime T: type, comptime A: usize) type {
-        return switch (comptime self) {
-            .NATIVE => ?[*]align(A) T,
-            .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
+    pub fn with_align(comptime self: MakePtrDef, comptime ALIGNMENT: ?PowerOf2) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_NULLABLE_ALIGN_INIT(comptime self: PointerSource, comptime T: type, comptime A: usize) self.LOCAL_TYPED_NULLABLE_ALIGN(T, A) {
-        return switch (comptime self) {
-            .NATIVE => null,
-            .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
+    pub fn with_addrspace(comptime self: MakePtrDef, comptime ADDRSPACE: ?AddrSpace) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = ADDRSPACE,
+            .VOLATILE = self.VOLATILE,
         };
     }
-    pub fn LOCAL_TYPED_ALIGN(comptime self: PointerSource, comptime T: type, comptime A: usize) type {
-        return switch (comptime self) {
-            .NATIVE => [*]align(A) T,
-            .GLOBAL_RESOLVER => |RES| RES.LOCAL_TYPE,
-        };
-    }
-    pub fn LOCAL_TYPED_ALIGN_INIT(comptime self: PointerSource, comptime T: type, comptime A: usize) self.LOCAL_TYPED_ALIGN(T, A) {
-        return switch (comptime self) {
-            .NATIVE => Utils.invalid_ptr_many_ct_align(T, A),
-            .GLOBAL_RESOLVER => |RES| @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).*,
-        };
-    }
-    pub fn NULL_CHECK_TYPE(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => void,
-            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) bool,
-        };
-    }
-    pub fn NULL_CHECK_TYPE_INIT(comptime self: PointerSource) self.NULL_CHECK_TYPE() {
-        return switch (comptime self) {
-            .NATIVE => {},
-            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) bool, @ptrCast(@alignCast(RES.IS_NULL_FUNC))),
-        };
-    }
-    pub fn RESOLVER_TYPE(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => void,
-            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) ?[*]u8,
-        };
-    }
-    pub fn RESOLVER_TYPE_INIT(comptime self: PointerSource) self.RESOLVER_TYPE() {
-        return switch (comptime self) {
-            .NATIVE => {},
-            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) ?[*]u8, @ptrCast(@alignCast(RES.RESOLVE_FUNC))),
-        };
-    }
-    pub fn ADDER_TYPE(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => void,
-            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
-        };
-    }
-    pub fn ADDER_TYPE_INIT(comptime self: PointerSource) self.ADDER_TYPE() {
-        return switch (comptime self) {
-            .NATIVE => {},
-            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.ADD_FUNC))),
-        };
-    }
-    pub fn SUBTRACTER_TYPE(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => void,
-            .GLOBAL_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
-        };
-    }
-    pub fn SUBTRACTER_TYPE_INIT(comptime self: PointerSource) self.SUBTRACTER_TYPE() {
-        return switch (comptime self) {
-            .NATIVE => {},
-            .GLOBAL_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.SUBTRACT_FUNC))),
+    pub fn with_volatile(comptime self: MakePtrDef, comptime VOLATILE: Volatile) MakePtrDef {
+        return MakePtrDef{
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .NULLABILITY = self.NULLABILITY,
+            .MUTABILITY = self.MUTABILITY,
+            .SIZE = self.SIZE,
+            .ELEMENT = self.ELEMENT,
+            .SENTINEL = self.SENTINEL,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .VOLATILE = VOLATILE,
         };
     }
 };
 
-/// An adapter that can take ANY `PointerSource` and
-/// provide a standard set of pointer casts and operations.
+pub const MakePtrDefNoSize = struct {
+    ALLOW_ZERO: AllowZero = .NO_ALLOW_ZERO,
+    NULLABILITY: Nullability = .NEVER_NULL,
+    MUTABILITY: Mutability = .MUTABLE,
+    ELEMENT: type,
+    SENTINEL: ?*const anyopaque = null,
+    ALIGNMENT: ?PowerOf2 = null,
+    ADDRSPACE: ?AddrSpace = null,
+    VOLATILE: Volatile = .NOT_VOLATILE,
+
+    pub fn to_make_ptr_def(comptime self: MakePtrDefNoSize, comptime size: PtrSize) MakePtrDef {
+        return MakePtrDef{
+            .ELEMENT = self.ELEMENT,
+            .ADDRSPACE = self.ADDRSPACE,
+            .ALIGNMENT = self.ALIGNMENT,
+            .ALLOW_ZERO = self.ALLOW_ZERO,
+            .MUTABILITY = self.MUTABILITY,
+            .NULLABILITY = self.NULLABILITY,
+            .SENTINEL = self.SENTINEL,
+            .SIZE = size,
+            .VOLATILE = self.VOLATILE,
+        };
+    }
+};
+
+pub fn MakePtrFromDef(comptime DEF: MakePtrDef) type {
+    return MakePtr(DEF.ALLOW_ZERO, DEF.NULLABILITY, DEF.MUTABILITY, DEF.SIZE, DEF.ELEMENT, if (DEF.SENTINEL) |SENT| @as(*const DEF.ELEMENT, @ptrCast(@alignCast(SENT))).* else null, DEF.ALIGNMENT, DEF.ADDRSPACE, DEF.VOLATILE);
+}
+
+pub fn MakePtr(comptime ALLOW_ZERO: AllowZero, comptime NULLABILITY: Nullability, comptime MUTABILITY: Mutability, comptime SIZE: std.lang.Type.Pointer.Size, comptime ELEMENT: type, comptime SENTINEL: ?ELEMENT, comptime ALIGNMENT: ?PowerOf2, comptime ADDRSPACE: ?AddrSpace, comptime VOLATILE: Volatile) type {
+    const P = @Pointer(SIZE, .{
+        .@"allowzero" = ALLOW_ZERO == .ALLOW_ZERO,
+        .@"addrspace" = ADDRSPACE,
+        .@"align" = if (ALIGNMENT) |A| A.value_as_type(usize),
+        .@"const" = MUTABILITY == .CONST,
+        .@"volatile" = VOLATILE == .VOLATILE,
+    }, ELEMENT, SENTINEL);
+    return switch (comptime NULLABILITY) {
+        .NEVER_NULL => P,
+        .NULLABLE => ?P,
+    };
+}
+
+pub fn PtrDefaultFromDef(comptime DEF: MakePtrDef) MakePtrFromDef(DEF) {
+    return switch (comptime DEF.NULLABILITY) {
+        .NEVER_NULL => undefined,
+        .NULLABLE => null,
+    };
+}
+pub fn PtrDefault(comptime ALLOW_ZERO: AllowZero, comptime NULLABILITY: Nullability, comptime MUTABILITY: Mutability, comptime SIZE: std.lang.Type.Pointer.Size, comptime ELEMENT: type, comptime SENTINEL: ?ELEMENT, comptime ALIGNMENT: ?PowerOf2, comptime ADDRSPACE: ?AddrSpace, comptime VOLATILE: Volatile) MakePtr(ALLOW_ZERO, NULLABILITY, MUTABILITY, SIZE, ELEMENT, SENTINEL, ALIGNMENT, ADDRSPACE, VOLATILE) {
+    return switch (comptime NULLABILITY) {
+        .NEVER_NULL => undefined,
+        .NULLABLE => null,
+    };
+}
+
+pub const PointerSource = union(PointerSourceKind) {
+    NATIVE: void,
+    STATIC_RESOLVER: StaticPointerResolver,
+
+    pub fn native_pointer() PointerSource {
+        return PointerSource{ .NATIVE = {} };
+    }
+    pub fn global_pointer_resolver(comptime resolver: StaticPointerResolver) PointerSource {
+        return PointerSource{ .STATIC_RESOLVER = resolver };
+    }
+    pub fn global_pointer_resolver_auto_from_int(comptime resolver: AutoIntegerStaticPointerResolver) PointerSource {
+        return PointerSource{ .STATIC_RESOLVER = resolver.to_global_resolver() };
+    }
+    pub fn global_pointer_resolver_auto_from_int_bits(comptime resolver: AutoIntegerBitsStaticPointerResolver) PointerSource {
+        return PointerSource{ .STATIC_RESOLVER = resolver.to_auto_int().to_global_resolver() };
+    }
+    pub fn global_pointer_resolver_auto_from_int_max(comptime resolver: AutoIntegerMaxStaticPointerResolver) PointerSource {
+        return PointerSource{ .STATIC_RESOLVER = resolver.to_auto_int().to_global_resolver() };
+    }
+    pub fn InternalPtr(comptime self: PointerSource, comptime PTR_DEF: MakePtrDef) type {
+        switch (comptime self) {
+            .NATIVE => MakePtrFromDef(PTR_DEF),
+            .STATIC_RESOLVER => |RES| RES.LOCAL_TYPE,
+        }
+    }
+    pub fn InternalPtrDefault(comptime self: PointerSource, comptime PTR_DEF: MakePtrDef) self.InternalPtr(PTR_DEF) {
+        switch (comptime self) {
+            .NATIVE => PtrDefaultFromDef(PTR_DEF),
+            .STATIC_RESOLVER => |RES| RES.LOCAL_NULL_VALUE,
+        }
+    }
+    pub fn NullCheckFn(comptime self: PointerSource) type {
+        return switch (comptime self) {
+            .NATIVE => void,
+            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) bool,
+        };
+    }
+    pub fn NullCheckFnInit(comptime self: PointerSource) self.NullCheckFn() {
+        return switch (comptime self) {
+            .NATIVE => {},
+            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) bool, @ptrCast(@alignCast(RES.IS_NULL_FUNC))),
+        };
+    }
+    pub fn ResolverFn(comptime self: PointerSource) type {
+        return switch (comptime self) {
+            .NATIVE => void,
+            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) ?[*]u8,
+        };
+    }
+    pub fn ResolverFnInit(comptime self: PointerSource) self.ResolverFn() {
+        return switch (comptime self) {
+            .NATIVE => {},
+            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) ?[*]u8, @ptrCast(@alignCast(RES.RESOLVE_FUNC))),
+        };
+    }
+    pub fn AdderFn(comptime self: PointerSource) type {
+        return switch (comptime self) {
+            .NATIVE => void,
+            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
+        };
+    }
+    pub fn AdderFnInit(comptime self: PointerSource) self.AdderFn() {
+        return switch (comptime self) {
+            .NATIVE => {},
+            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.ADD_FUNC))),
+        };
+    }
+    pub fn SubtracterFn(comptime self: PointerSource) type {
+        return switch (comptime self) {
+            .NATIVE => void,
+            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
+        };
+    }
+    pub fn SubtracterFnInit(comptime self: PointerSource) self.SubtracterFn() {
+        return switch (comptime self) {
+            .NATIVE => {},
+            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.SUBTRACT_FUNC))),
+        };
+    }
+};
+
+const InternalManyU8NullDef = MakePtrDef{
+    .ELEMENT = u8,
+    .NULLABILITY = .NULLABLE,
+    .SIZE = .many,
+};
+const InternalManyU8Null = PointerSource.native_pointer().InternalPtr(InternalManyU8NullDef);
+const AdapterManyU8NUll = PointerAdvanced(PointerSource.native_pointer(), InternalManyU8NullDef);
+
+/// A generic 'Pointer' type that can wrap either a native
+/// pointer, or pointer handle that can be resolved/manipulated via a
+/// small set of static functions on the PointerSource.STATIC_RESOLVER
 ///
-/// A `.NATIVE` pointer source should compile most of these
-/// to identical instructions as if you were working with
-/// a `?* anyopaque` pointer.
+/// A `.NATIVE` pointer source has the same size as a native
+/// pointer, and should compile most of these methods
+/// to identical instructions as if you were working directly
+/// with the native pointer type defined by the PTR_DEF settings.
 ///
-/// Using a `.GLOBAL_RESOLVER` allows using an arbitrary type
+/// Using a `.STATIC_RESOLVER` allows using an arbitrary type
 /// as a handle that can be resolved to a real native pointer
 /// via a comptime-known static function (For example, provided
 /// by a specially designed global allocator).
 ///
-/// The `.GLOBAL_RESOLVER` option allows you to have pointer-access
+/// The `.STATIC_RESOLVER` option allows you to have pointer-access
 /// semantics with a handle type that may be much smaller than a `usize`, or
 /// that has some other interesting semantics such as side-effects
 /// when a pointer is resolved, at the cost of additional processing overhead.
-pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
-    return extern struct {
+pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakePtrDef) type {
+    assert_with_reason(PTR_DEF_.SIZE != .slice, @src(), "slice pointer types are not directly supported. Use a many-item ptr instead", .{});
+    return struct {
         const Self = @This();
-        pub const Addr = SOURCE.LOCAL_OPAQUE_TYPE();
-        pub const AddrNull = SOURCE.LOCAL_OPAQUE_TYPE_NULL();
+        pub const InternalPtr = SOURCE.InternalPtr(PTR_DEF);
+        
+        pub const ExternalPtr = MakePtrFromDef(PTR_DEF);
+        pub const ExternalPtrNeverNull = MakePtrFromDef(PTR_DEF.with_nullability(.NEVER_NULL));
+        pub const INTERNAL_PTR_DEFAULT: InternalPtr = SOURCE.InternalPtrDefault(PTR_DEF);
+        pub const PTR_DEF = PTR_DEF_;
+        pub const SOURCE = SOURCE_;
 
-        const RESOLVE: SOURCE.RESOLVER_TYPE() = SOURCE.RESOLVER_TYPE_INIT();
-        const ADD: SOURCE.ADDER_TYPE() = SOURCE.ADDER_TYPE_INIT();
-        const SUB: SOURCE.SUBTRACTER_TYPE() = SOURCE.SUBTRACTER_TYPE_INIT();
-        const IS_NULL: SOURCE.NULL_CHECK_TYPE() = SOURCE.NULL_CHECK_TYPE_INIT();
-        pub const USE_GLOBAL_RESOLVER = SOURCE == .GLOBAL_RESOLVER;
+        const g_resolve_ptr: SOURCE.ResolverFn() = SOURCE.ResolverFnInit();
+        const g_ptr_add: SOURCE.AdderFn() = SOURCE.AdderFnInit();
+        const g_ptr_sub: SOURCE.SubtracterFn() = SOURCE.SubtracterFnInit();
+        const g_ptr_is_null: SOURCE.NullCheckFn() = SOURCE.NullCheckFnInit();
+        pub const USE_STATIC_RESOLVER = SOURCE == .STATIC_RESOLVER;
         pub const IS_NATIVE = SOURCE == .NATIVE;
-        const ASSERT_CONTIG = if (USE_GLOBAL_RESOLVER) SOURCE.GLOBAL_RESOLVER.ASSERT_CONTIGUOUS_RANGE else false;
-        addr: Addr = AddrNull,
+        pub const HAS_LEN = PTR_DEF.SIZE == .slice;
+        pub const SIZE_KIND = PTR_DEF.SIZE;
+        pub const ELEMENT = PTR_DEF.ELEMENT;
+        pub const ELEMENT_SIZE = @sizeOf(PTR_DEF.ELEMENT);
+        pub const IS_ALLOW_ZERO = PTR_DEF.ALLOW_ZERO == .ALLOW_ZERO;
+        pub const IS_VOLATILE = PTR_DEF.VOLATILE == .VOLATILE;
+        pub const USE_NATIVE_ALIGN = PTR_DEF.ALIGNMENT == null;
+        pub const HAS_SPECIFIC_ALIGN = PTR_DEF.ALIGNMENT != null;
+        pub const ALIGN: usize = if (PTR_DEF.ALIGNMENT) |A| A.value_as_type(usize) else @alignOf(ELEMENT);
+        pub const ADDRSPCACE = PTR_DEF.ADDRSPACE;
+        pub const IS_CONST = PTR_DEF.MUTABILITY == .CONST;
+        pub const IS_MUTABLE = PTR_DEF.MUTABILITY == .MUTABLE;
+        pub const CAN_BE_NULL = PTR_DEF.NULLABILITY == .NULLABLE;
+        const ASSERT_CONTIG = if (USE_STATIC_RESOLVER) SOURCE.STATIC_RESOLVER.ASSERT_CONTIGUOUS_RANGE else false;
 
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .addr = addr };
+        internal: InternalPtr = INTERNAL_PTR_DEFAULT,
+
+        pub inline fn new(internal_val: InternalPtr) Self {
+            return Self{ .internal = internal_val };
         }
-        pub inline fn new_from_native(any_ptr: anytype) Self {
+        pub inline fn new_from_any(any_ptr: anytype) Self {
+            if (comptime @TypeOf(any_ptr) == InternalPtr) return new(any_ptr);
             assert_native(@src());
-            if (comptime IS_NATIVE) {
-                return Self{ .addr = @intFromPtr(any_ptr) };
-            } else {
-                unreachable;
-            }
+            return Self{ .internal = @ptrCast(@alignCast(any_ptr)) };
         }
 
         pub inline fn assert_native(comptime src: ?SourceLocation) void {
             assert_with_reason(IS_NATIVE, src, "cannot be called when mode is not .NATIVE", .{});
         }
 
-        inline fn resolve(self: Self, comptime T: type) [*]T {
+        pub inline fn ptr(self: Self) ExternalPtr {
             return switch (comptime SOURCE) {
-                .NATIVE => @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(self.addr)))),
-                .GLOBAL_RESOLVER => @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(RESOLVE(self.addr))))),
+                .NATIVE => self.internal,
+                .STATIC_RESOLVER => (AdapterManyU8NUll{.internal = g_resolve_ptr(self.internal)}).complete_cast_to(PTR_DEF).ptr(),
             };
         }
-        inline fn resolve_aligned(self: Self, comptime T: type, comptime ALIGN: usize) [*]align(ALIGN) T {
+        pub inline fn ptr_never_null(self: Self) ExternalPtrNeverNull {
             return switch (comptime SOURCE) {
-                .NATIVE => @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(self.addr)))),
-                .GLOBAL_RESOLVER => @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(RESOLVE(self.addr))))),
+                .NATIVE => if (comptime CAN_BE_NULL) self.internal.? else self.internal,
+                .STATIC_RESOLVER => (AdapterManyU8NUll{.internal = g_resolve_ptr(self.internal)}).complete_cast_to(PTR_DEF.with_nullability(.NEVER_NULL)).ptr(),
             };
         }
-        inline fn resolve_null(self: Self, comptime T: type) ?[*]T {
-            switch (comptime SOURCE) {
-                .NATIVE => return @ptrCast(@alignCast(@as(?[*]u8, @ptrFromInt(self.addr)))),
-                .GLOBAL_RESOLVER => if (self.is_null()) {
-                    return null;
-                } else {
-                    return @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(RESOLVE(self.addr)))));
-                },
-            }
-        }
-        inline fn resolve_null_aligned(self: Self, comptime T: type, comptime ALIGN: usize) ?[*]align(ALIGN) T {
-            switch (comptime SOURCE) {
-                .NATIVE => return @ptrCast(@alignCast(@as(?[*]u8, @ptrFromInt(self.addr)))),
-                .GLOBAL_RESOLVER => if (self.is_null()) {
-                    return null;
-                } else {
-                    return @ptrCast(@alignCast(@as([*]u8, @ptrFromInt(RESOLVE(self.addr)))));
-                },
-            }
+        pub inline fn addr(self: Self) usize {
+            return @intFromPtr(self.ptr());
         }
 
         pub inline fn is_null(self: Self) bool {
+            if (comptime !CAN_BE_NULL) return false;
             return switch (comptime SOURCE) {
-                .NATIVE => self.addr == 0,
-                .GLOBAL_RESOLVER => IS_NULL(self.addr),
+                .NATIVE => self.internal == null,
+                .STATIC_RESOLVER => g_ptr_is_null(self.internal),
             };
         }
         pub inline fn not_null(self: Self) bool {
+            if (comptime !CAN_BE_NULL) return true;
             return switch (comptime SOURCE) {
-                .NATIVE => self.addr != 0,
-                .GLOBAL_RESOLVER => !IS_NULL(self.addr),
+                .NATIVE => self.internal != null,
+                .STATIC_RESOLVER => !g_ptr_is_null(self.internal),
             };
         }
         pub inline fn assert_not_null(self: Self, comptime src: ?SourceLocation) void {
@@ -473,59 +642,146 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             assert_with_reason(self.is_null(), src, "pointer was not null", .{});
         }
 
-        /// Casts this opaque pointer handle to the typed wrapper type described by the
-        /// requested properties.
-        pub inline fn cast_to(
-            self: Self,
-            comptime NULLABILITY: Nullability,
-            comptime MUTABILITY: Mutability,
-            comptime T: type,
-            comptime ALIGN: anytype,
-        ) PointerWithProperties(SOURCE, NULLABILITY, MUTABILITY, T, TypedPointerNormalizeAlign(ALIGN)) {
-            const A = comptime TypedPointerNormalizeAlign(ALIGN);
-            if (comptime NULLABILITY == .NEVER_NULL) {
-                self.assert_not_null(@src());
+        pub inline fn complete_cast_to(self: Self, comptime NEW_DEF: MakePtrDef) PointerAdvanced(SOURCE, NEW_DEF) {
+            switch (comptime SOURCE) {
+                .NATIVE => {
+                    const p1 = if (comptime NEW_DEF.VOLATILE == .NOT_VOLATILE and PTR_DEF.VOLATILE == .VOLATILE) self.remove_volatile() else self;
+                    const p2 = if (comptime NEW_DEF.MUTABILITY == .MUTABLE and PTR_DEF.MUTABILITY == .CONST) p1.to_mutable() else p1;
+                    const p3 = if (comptime !std.meta.eql(NEW_DEF.ADDRSPACE, PTR_DEF.ADDRSPACE)) if (comptime PTR_DEF.ADDRSPACE == null) p2.to_specific_addrspace(NEW_DEF.ADDRSPACE.?) else p2.to_normal_addrspace() else p2;
+                    const p4 = if (comptime NEW_DEF.ELEMENT != PTR_DEF.ELEMENT or !std.meta.eql(NEW_DEF.ALIGNMENT, PTR_DEF.ALIGNMENT)) if (comptime NEW_DEF.ALIGNMENT != null) p3.cast_to_element_aligned(NEW_DEF.ELEMENT, NEW_DEF.ALIGNMENT.?) else p3.cast_to_element(NEW_DEF.ELEMENT) else p3;
+                    return PointerAdvanced(SOURCE, NEW_DEF){ .internal = @ptrCast(@alignCast(p4.internal)) };
+                },
+                .STATIC_RESOLVER => return PointerAdvanced(SOURCE, NEW_DEF){ .internal = self.internal },
             }
-            if (comptime A) |a| {
-                // A null nullable pointer has no meaningful alignment to check.
-                if (comptime NULLABILITY == .NEVER_NULL) {
-                    self.assert_aligned(a, @src());
-                } else if (self.not_null()) {
-                    self.assert_aligned(a, @src());
-                }
-            }
-            return .{ .opq = self };
+        }
+        pub inline fn blind_cast_to(self: Self, comptime NEW_DEF: MakePtrDef) PointerAdvanced(SOURCE, NEW_DEF) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.CONST)){ .internal = @ptrFromInt(@intFromPtr(self.internal)) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.CONST)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_const(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.CONST)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.CONST)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.CONST)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_mutable(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.MUTABLE)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.MUTABLE)){ .internal = @constCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_mutability(.MUTABLE)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_nullable(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_non_null(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NEVER_NULL)) {
+            self.assert_not_null(@src());
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NEVER_NULL)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NEVER_NULL)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_allowzero(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.ALLOW_ZERO)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.ALLOW_ZERO)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.ALLOW_ZERO)){ .internal = self.internal },
+            };
+        }
+        pub inline fn remove_allowzero(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.NO_ALLOW_ZERO)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.NO_ALLOW_ZERO)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_allow_zero(.NO_ALLOW_ZERO)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_volaitle(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.VOLATILE)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.VOLATILE)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.VOLATILE)){ .internal = self.internal },
+            };
+        }
+        pub inline fn remove_volatile(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.NOT_VOLATILE)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.NOT_VOLATILE)){ .internal = @volatileCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_volatile(.NOT_VOLATILE)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_one(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.one)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.one)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.one)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_many(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.many)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.many)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.many)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_c(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.c)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.c)){ .internal = @ptrCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_size_kind(.c)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_specific_addrspace(self: Self, comptime addr_space: AddrSpace) PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(addr_space)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(addr_space)){ .internal = @addrSpaceCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(addr_space)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_normal_addrspace(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(null)) {
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(null)){ .internal = @addrSpaceCast(self.internal) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(null)){ .internal = self.internal },
+            };
+        }
+        pub inline fn cast_to_element(self: Self, comptime NEW_ELEM: type) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM)) {
+            self.assert_aligned(@alignOf(NEW_ELEM), @src());
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM)){ .internal = @ptrCast(@alignCast(self.internal)) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM)){ .internal = self.internal },
+            };
+        }
+        pub inline fn cast_to_element_aligned(self: Self, comptime NEW_ELEM: type, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN)) {
+            self.assert_aligned_pow_2(SPECIFIC_ALIGN, @src());
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN)){ .internal = @ptrCast(@alignCast(self.internal)) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_specific_align(self: Self, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_align(SPECIFIC_ALIGN)) {
+            self.assert_aligned_pow_2(SPECIFIC_ALIGN, @src());
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_align(SPECIFIC_ALIGN)){ .internal = @ptrCast(@alignCast(self.internal)) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_align(SPECIFIC_ALIGN)){ .internal = self.internal },
+            };
+        }
+        pub inline fn to_native_align(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_align(null)) {
+            self.assert_aligned(@alignOf(ELEMENT), @src());
+            return switch (comptime SOURCE) {
+                .NATIVE => PointerAdvanced(SOURCE, PTR_DEF.with_align(null)){ .internal = @ptrCast(@alignCast(self.internal)) },
+                .STATIC_RESOLVER => PointerAdvanced(SOURCE, PTR_DEF.with_align(null)){ .internal = self.internal },
+            };
         }
 
         pub inline fn is_aligned(self: Self, alignment: usize) bool {
-            return switch (comptime SOURCE) {
-                .NATIVE => std.mem.isAligned(self.addr, alignment),
-                .GLOBAL_RESOLVER => std.mem.isAligned(RESOLVE(self.addr), alignment),
-            };
+            return std.mem.isAligned(self.addr(), alignment);
         }
         pub inline fn is_aligned_any(self: Self, alignment: usize) bool {
-            return switch (comptime SOURCE) {
-                .NATIVE => std.mem.isAlignedAnyAlign(self.addr, alignment),
-                .GLOBAL_RESOLVER => std.mem.isAlignedAnyAlign(RESOLVE(self.addr), alignment),
-            };
+            return std.mem.isAlignedAnyAlign(self.addr(), alignment);
         }
         pub inline fn is_aligned_log_2(self: Self, alignment_log_2: u8) bool {
-            return switch (comptime SOURCE) {
-                .NATIVE => std.mem.isAlignedLog2(self.addr, alignment_log_2),
-                .GLOBAL_RESOLVER => std.mem.isAlignedLog2(RESOLVE(self.addr), alignment_log_2),
-            };
+            return std.mem.isAlignedLog2(self.addr(), alignment_log_2);
         }
         pub inline fn is_aligned_pow_2(self: Self, alignment_pow_2: PowerOf2) bool {
-            return switch (comptime SOURCE) {
-                .NATIVE => std.mem.isAlignedLog2(self.addr, alignment_pow_2.raw_int()),
-                .GLOBAL_RESOLVER => std.mem.isAlignedLog2(RESOLVE(self.addr), alignment_pow_2.raw_int()),
-            };
+            return std.mem.isAlignedLog2(self.addr(), alignment_pow_2.raw_int());
         }
         pub inline fn is_aligned_std_mem(self: Self, alignment: mem.Alignment) bool {
-            return switch (comptime SOURCE) {
-                .NATIVE => std.mem.isAlignedLog2(self.addr, @intCast(@backingInt(alignment))),
-                .GLOBAL_RESOLVER => std.mem.isAlignedLog2(RESOLVE(self.addr), @intCast(@backingInt(alignment))),
-            };
+            return std.mem.isAlignedLog2(self.addr(), @intCast(@backingInt(alignment)));
         }
 
         pub inline fn assert_aligned(self: Self, alignment: usize, comptime src: ?SourceLocation) void {
@@ -544,343 +800,140 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             assert_with_reason(self.is_aligned_std_mem(alignment), src, "pointer was not aligned to std.mem.Alignment `{s}`", .{@tagName(alignment)});
         }
 
-        inline fn assert_contiguous_known_new(original_addr: Addr, new_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+        inline fn assert_contiguous_known_new(original_addr: InternalPtr, new_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
             if (comptime ASSERT_CONTIG) {
                 always_assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
         }
-        inline fn always_assert_contiguous_known_new(original_addr: Addr, new_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
-            if (comptime USE_GLOBAL_RESOLVER) {
-                const real_original = RESOLVE(original_addr);
-                const real_new = RESOLVE(new_addr);
+        inline fn always_assert_contiguous_known_new(original_addr: InternalPtr, new_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+            if (comptime USE_STATIC_RESOLVER) {
+                const real_original = g_resolve_ptr(original_addr) orelse return;
+                const real_new = g_resolve_ptr(new_addr) orelse return;
                 const expect_real_new = switch (comptime DIR) {
-                    .ADD => real_original + offset,
-                    .SUB => real_original - offset,
+                    .ADD => real_original + offset * ELEMENT_SIZE,
+                    .SUB => real_original - offset * ELEMENT_SIZE,
                 };
                 assert_with_reason(real_new == expect_real_new, src, "adding {d} to the pointer caused the resolved address of the new address handle to not equal the expected address for a contiguous memory region: local address handle escaped its contiguous memory region", .{offset});
             }
         }
-        inline fn assert_contiguous(original_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+        inline fn assert_contiguous(original_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
             if (comptime ASSERT_CONTIG) {
                 const new_addr = switch (comptime DIR) {
-                    .ADD => ADD(original_addr, offset),
-                    .SUB => SUB(original_addr, offset),
+                    .ADD => g_ptr_add(original_addr, offset * ELEMENT_SIZE),
+                    .SUB => g_ptr_sub(original_addr, offset * ELEMENT_SIZE),
                 };
                 assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
         }
-        inline fn always_assert_contiguous(original_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
-            if (comptime USE_GLOBAL_RESOLVER) {
+        inline fn always_assert_contiguous(original_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+            if (comptime USE_STATIC_RESOLVER) {
                 const new_addr = switch (comptime DIR) {
-                    .ADD => ADD(original_addr, offset),
-                    .SUB => SUB(original_addr, offset),
+                    .ADD => g_ptr_add(original_addr, offset * ELEMENT_SIZE),
+                    .SUB => g_ptr_sub(original_addr, offset * ELEMENT_SIZE),
                 };
                 always_assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
         }
-        inline fn assert_contiguous_ignore_null(original_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+        inline fn assert_contiguous_ignore_null(original_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
             if (comptime ASSERT_CONTIG) {
-                if (IS_NULL(original_addr)) return;
+                if (g_ptr_is_null(original_addr)) return;
                 const new_addr = switch (comptime DIR) {
-                    .ADD => ADD(original_addr, offset),
-                    .SUB => SUB(original_addr, offset),
+                    .ADD => g_ptr_add(original_addr, offset * ELEMENT_SIZE),
+                    .SUB => g_ptr_sub(original_addr, offset * ELEMENT_SIZE),
                 };
                 assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
         }
-        inline fn always_assert_contiguous_ignore_null(original_addr: Addr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
-            if (comptime USE_GLOBAL_RESOLVER) {
-                if (IS_NULL(original_addr)) return;
+        inline fn always_assert_contiguous_ignore_null(original_addr: InternalPtr, comptime DIR: OffestDir, offset: usize, comptime src: ?SourceLocation) void {
+            if (comptime USE_STATIC_RESOLVER) {
+                if (g_ptr_is_null(original_addr)) return;
                 const new_addr = switch (comptime DIR) {
-                    .ADD => ADD(original_addr, offset),
-                    .SUB => SUB(original_addr, offset),
+                    .ADD => g_ptr_add(original_addr, offset * ELEMENT_SIZE),
+                    .SUB => g_ptr_sub(original_addr, offset * ELEMENT_SIZE),
                 };
                 always_assert_contiguous_known_new(original_addr, new_addr, DIR, offset, src);
             }
-        }
-
-        //**********************
-        // ____ _____ PTR _____
-        //**********************
-        pub inline fn ptr(self: Self, comptime T: type) *T {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve(T));
-        }
-        pub inline fn ptr_many(self: Self, comptime T: type) [*]T {
-            self.assert_not_null(@src());
-            return self.resolve(T);
-        }
-        pub inline fn slice(self: Self, comptime T: type, len: anytype) []T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            return self.resolve(T)[0..len];
-        }
-        pub inline fn array_ptr(self: Self, comptime T: type, comptime LEN: anytype) *[LEN]T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve(T));
-        }
-        pub inline fn vector_ptr(self: Self, comptime T: type, comptime LEN: anytype) *@Vector(LEN, T) {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve(T)));
-        }
-        //**********************
-        // ____ _____ PTR ALIGN
-        //**********************
-        pub inline fn ptr_aligned(self: Self, comptime T: type, comptime A: usize) *align(A) T {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve_aligned(T, A));
-        }
-        pub inline fn ptr_many_aligned(self: Self, comptime T: type, comptime A: usize) [*]align(A) T {
-            self.assert_not_null(@src());
-            return self.resolve_aligned(T, A);
-        }
-        pub inline fn slice_aligned(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            return self.resolve_aligned(T, A)[0..len];
-        }
-        pub inline fn array_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) [LEN]T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_aligned(T, A));
-        }
-        pub inline fn vector_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) @Vector(LEN, T) {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_aligned(T, A)));
-        }
-        //**********************
-        // ____ CONST PTR _____
-        //**********************
-        pub inline fn const_ptr(self: Self, comptime T: type) *const T {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve(T));
-        }
-        pub inline fn const_ptr_many(self: Self, comptime T: type) [*]const T {
-            self.assert_not_null(@src());
-            return self.resolve(T);
-        }
-        pub inline fn const_slice(self: Self, comptime T: type, len: anytype) []const T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            return self.resolve(T)[0..len];
-        }
-        pub inline fn const_array_ptr(self: Self, comptime T: type, comptime LEN: anytype) *const [LEN]T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve(T));
-        }
-        pub inline fn const_vector_ptr(self: Self, comptime T: type, comptime LEN: anytype) *const @Vector(LEN, T) {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve(T)));
-        }
-        //**********************
-        // ____ CONST PTR ALIGN
-        //**********************
-        pub inline fn const_ptr_aligned(self: Self, comptime T: type, comptime A: usize) *align(A) const T {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve_aligned(T, A));
-        }
-        pub inline fn const_ptr_many_aligned(self: Self, comptime T: type, comptime A: usize) [*]align(A) const T {
-            self.assert_not_null(@src());
-            return self.resolve_aligned(T, A);
-        }
-        pub inline fn const_slice_aligned(self: Self, comptime T: type, comptime A: usize, len: anytype) []align(A) const T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            return self.resolve_aligned(T, A)[0..len];
-        }
-        pub inline fn const_array_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const [LEN]T {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_aligned(T, A));
-        }
-        pub inline fn const_vector_ptr_aligned(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) *align(A) const @Vector(LEN, T) {
-            self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_aligned(T, A)));
-        }
-        //**********************
-        // NULL _____ PTR _____
-        //**********************
-        pub inline fn ptr_or_null(self: Self, comptime T: type) ?*T {
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn ptr_many_or_null(self: Self, comptime T: type) ?[*]T {
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn slice_or_null(self: Self, comptime T: type, len: anytype) ?[]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            if (self.resolve_null(T)) |ptr_| {
-                return ptr_[0..len];
-            }
-            return null;
-        }
-        pub inline fn array_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*[LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn vector_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*@Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_null(T)));
-        }
-        //**********************
-        // NULL _____ PTR ALIGN
-        //**********************
-        pub inline fn ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?*align(A) T {
-            return @ptrCast(self.resolve_null_aligned(T, A));
-        }
-        pub inline fn ptr_many_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?[*]align(A) T {
-            return @ptrCast(self.resolve_null_aligned(T, A));
-        }
-        pub inline fn slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) ?[]align(A) T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            if (self.resolve_null_aligned(T, A)) |ptr_| {
-                return ptr_[0..len];
-            }
-            return null;
-        }
-        pub inline fn array_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_null_aligned(T, A));
-        }
-        pub inline fn vector_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_null_aligned(T, A)));
-        }
-        //**********************
-        // NULL CONST PTR _____
-        //**********************
-        pub inline fn const_ptr_or_null(self: Self, comptime T: type) ?*const T {
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn const_ptr_many_or_null(self: Self, comptime T: type) ?[*]const T {
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn const_slice_or_null(self: Self, comptime T: type, len: anytype) ?[]const T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            if (self.resolve_null(T)) |ptr_| {
-                return ptr_[0..len];
-            }
-            return null;
-        }
-        pub inline fn const_array_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*const [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_null(T));
-        }
-        pub inline fn const_vector_ptr_or_null(self: Self, comptime T: type, comptime LEN: anytype) ?*const @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_null(T)));
-        }
-        //**********************
-        // NULL CONST PTR ALIGN
-        //**********************
-        pub inline fn const_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?*align(A) const T {
-            return @ptrCast(self.resolve_null_aligned(T, A));
-        }
-        pub inline fn const_ptr_many_aligned_or_null(self: Self, comptime T: type, comptime A: usize) ?[*]align(A) const T {
-            return self.resolve_null_aligned(T, A);
-        }
-        pub inline fn const_slice_aligned_or_null(self: Self, comptime T: type, comptime A: usize, len: anytype) ?[]align(A) const T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(len))) -| 1, @src());
-            if (self.resolve_null_aligned(T, A)) |ptr_| {
-                return ptr_[0..len];
-            }
-            return null;
-        }
-        pub inline fn const_array_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) const [LEN]T {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(self.resolve_null_aligned(T, A));
-        }
-        pub inline fn const_vector_ptr_aligned_or_null(self: Self, comptime T: type, comptime A: usize, comptime LEN: anytype) ?*align(A) const @Vector(LEN, T) {
-            assert_contiguous_ignore_null(self.addr, .ADD, (@sizeOf(T) * @as(usize, @intCast(LEN))) -| 1, @src());
-            return @ptrCast(@alignCast(self.resolve_null_aligned(T, A)));
         }
         //***********
         // GET / SET
         //***********
-        pub inline fn get(self: Self, comptime T: type) T {
-            return self.ptr(T).*;
+        pub inline fn get(self: Self) ELEMENT {
+            return self.ptr(ELEMENT).*;
         }
-        pub inline fn get_or_null(self: Self, comptime T: type) ?T {
-            if (self.ptr_or_null(T)) |p| {
-                return p.*;
-            }
-            return null;
+        pub inline fn get_or_null(self: Self) ?ELEMENT {
+            if (self.is_null()) return null;
+            return self.ptr().?
         }
-        pub inline fn get_orelse(self: Self, comptime T: type, default: T) T {
-            if (self.ptr_or_null(T)) |p| {
+        pub inline fn get_orelse(self: Self, default: ELEMENT) ELEMENT {
+            if (self.ptr_or_null(ELEMENT)) |p| {
                 return p.*;
             }
             return default;
         }
-        pub inline fn get_at_index(self: Self, comptime T: type, index: usize) T {
+        pub inline fn get_at_index(self: Self, index: usize) ELEMENT {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, @sizeOf(T) * index, @src());
-            return self.ptr_many(T)[index];
+            assert_contiguous(self.internal, .ADD, index, @src());
+            return self.ptr_many(ELEMENT)[index];
         }
-        pub inline fn get_at_index_or_null(self: Self, comptime T: type, index: usize) ?T {
-            assert_contiguous_ignore_null(self.addr, .ADD, @sizeOf(T) * index, @src());
-            if (self.ptr_many_or_null(T)) |p| {
+        pub inline fn get_at_index_or_null(self: Self, index: usize) ?ELEMENT {
+            assert_contiguous_ignore_null(self.internal, .ADD, index, @src());
+            if (self.ptr_many_or_null(ELEMENT)) |p| {
                 return p[index];
             }
             return null;
         }
-        pub inline fn get_at_index_orelse(self: Self, comptime T: type, index: usize, default: T) T {
-            assert_contiguous_ignore_null(self.addr, .ADD, @sizeOf(T) * index, @src());
-            if (self.ptr_many_or_null(T)) |p| {
+        pub inline fn get_at_index_orelse(self: Self, index: usize, default: ELEMENT) ELEMENT {
+            assert_contiguous_ignore_null(self.internal, .ADD, index, @src());
+            if (self.ptr_many_or_null(ELEMENT)) |p| {
                 return p[index];
             }
             return default;
         }
-        pub inline fn set(self: Self, comptime T: type, val: T) void {
-            self.ptr(T).* = val;
+        pub inline fn set(self: Self, val: ELEMENT) void {
+            self.ptr(ELEMENT).* = val;
         }
-        pub inline fn set_if_not_null(self: Self, comptime T: type, val: T) void {
-            if (self.ptr_or_null(T)) |p| {
+        pub inline fn set_if_not_null(self: Self, val: ELEMENT) void {
+            if (self.ptr_or_null(ELEMENT)) |p| {
                 p.* = val;
             }
         }
-        pub inline fn set_if_not_null_return_ptr_is_NOT_null(self: Self, comptime T: type, val: T) bool {
-            if (self.ptr_or_null(T)) |p| {
+        pub inline fn set_if_not_null_return_ptr_is_NOT_null(self: Self, val: ELEMENT) bool {
+            if (self.ptr_or_null(ELEMENT)) |p| {
                 p.* = val;
                 return true;
             }
             return false;
         }
-        pub inline fn set_if_not_null_return_ptr_IS_null(self: Self, comptime T: type, val: T) bool {
-            if (self.ptr_or_null(T)) |p| {
+        pub inline fn set_if_not_null_return_ptr_IS_null(self: Self, val: ELEMENT) bool {
+            if (self.ptr_or_null(ELEMENT)) |p| {
                 p.* = val;
                 return false;
             }
             return true;
         }
-        pub inline fn set_at_index(self: Self, comptime T: type, index: usize, val: T) void {
+        pub inline fn set_at_index(self: Self, index: usize, val: ELEMENT) void {
             self.assert_not_null(@src());
-            assert_contiguous(self.addr, .ADD, @sizeOf(T) * index, @src());
-            self.ptr_many(T)[index] = val;
+            assert_contiguous(self.internal, .ADD, index, @src());
+            self.to_many().ptr()[index] = val;
         }
-        pub inline fn set_at_index_if_not_null(self: Self, comptime T: type, index: usize, val: T) void {
-            assert_contiguous_ignore_null(self.addr, .ADD, @sizeOf(T) * index, @src());
-            if (self.ptr_many_or_null(T)) |p| {
-                p[index] = val;
+        pub inline fn set_at_index_if_not_null(self: Self, index: usize, val: ELEMENT) void {
+            assert_contiguous_ignore_null(self.internal, .ADD, index, @src());
+            if (self.not_null()) {
+                self.to_many().ptr()[index] = val;
             }
         }
-        pub inline fn set_at_index_if_not_null_return_ptr_is_NOT_null(self: Self, comptime T: type, index: usize, val: T) bool {
-            assert_contiguous_ignore_null(self.addr, .ADD, @sizeOf(T) * index, @src());
-            if (self.ptr_many_or_null(T)) |p| {
-                p[index] = val;
+        pub inline fn set_at_index_if_not_null_return_ptr_is_NOT_null(self: Self, index: usize, val: ELEMENT) bool {
+            assert_contiguous_ignore_null(self.internal, .ADD, index, @src());
+            if (self.not_null()) {
+                self.to_many().ptr()[index] = val;
                 return true;
             }
             return false;
         }
-        pub inline fn set_at_index_if_not_null_return_ptr_IS_null(self: Self, comptime T: type, index: usize, val: T) bool {
-            assert_contiguous_ignore_null(self.addr, .ADD, @sizeOf(T) * index, @src());
-            if (self.ptr_many_or_null(T)) |p| {
-                p[index] = val;
+        pub inline fn set_at_index_if_not_null_return_ptr_IS_null(self: Self, index: usize, val: ELEMENT) bool {
+            assert_contiguous_ignore_null(self.internal, .ADD, index, @src());
+            if (self.not_null()) {
+                self.to_many().ptr()[index] = val;
                 return false;
             }
             return true;
@@ -888,262 +941,224 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         //**************************
         // ADDRESS ADD / SUB / MOVE
         //**************************
-        pub inline fn add(self: Self, offset: usize) Self {
+        pub inline fn increment(self: Self, offset: usize) Self {
+            self.assert_not_null(@src());
             return switch (comptime SOURCE) {
-                .NATIVE => Self{ .addr = self.addr + offset },
-                .GLOBAL_RESOLVER => Self{ .addr = ADD(self.addr, offset) },
+                .NATIVE => Self{ .internal = @ptrFromInt(@intFromPtr(self.internal) + (offset * @sizeOf(ELEMENT))) },
+                .STATIC_RESOLVER => Self{ .internal = g_ptr_add(self.internal, offset * @sizeOf(ELEMENT)) },
             };
         }
-        pub inline fn add_in_place(self: *Self, offset: usize) void {
-            self.* = self.add(offset);
-        }
-        pub inline fn typed_add(self: Self, comptime T: type, offset: usize) Self {
-            return self.add(@sizeOf(T) * offset);
-        }
-        pub inline fn typed_add_in_place(self: *Self, comptime T: type, offset: usize) void {
-            self.add_in_place(@sizeOf(T) * offset);
+        pub inline fn increment_in_place(self: *Self, offset: usize) void {
+            self.* = self.increment(offset);
         }
 
-        pub inline fn add_assert_contiguous(self: Self, offset: usize) Self {
-            assert_contiguous(self.addr, .ADD, offset, @src());
-            return self.add(offset);
+        pub inline fn increment_assert_contiguous(self: Self, offset: usize) Self {
+            assert_contiguous(self.internal, .ADD, offset, @src());
+            return self.increment(offset);
         }
         pub inline fn add_in_place_assert_contiguous(self: *Self, offset: usize) void {
-            assert_contiguous(self.addr, .ADD, offset, @src());
-            self.add_in_place(offset);
-        }
-        pub inline fn typed_add_assert_contiguous(self: Self, comptime T: type, offset: usize) Self {
-            assert_contiguous(self.addr, .ADD, @sizeOf(T) * offset, @src());
-            return self.typed_add(T, offset);
-        }
-        pub inline fn typed_add_in_place_assert_contiguous(self: *Self, comptime T: type, offset: usize) void {
-            assert_contiguous(self.addr, .ADD, @sizeOf(T) * offset, @src());
-            self.typed_add_in_place(T, offset);
+            assert_contiguous(self.internal, .ADD, offset, @src());
+            self.increment_in_place(offset);
         }
 
-        pub inline fn subtract(self: Self, offset: usize) Self {
+        pub inline fn decrement(self: Self, offset: usize) Self {
+            self.assert_not_null(@src());
             return switch (comptime SOURCE) {
-                .NATIVE => Self{ .addr = self.addr - offset },
-                .GLOBAL_RESOLVER => Self{ .addr = SUB(self.addr, offset) },
+                .NATIVE => Self{ .internal = @ptrFromInt(@intFromPtr(self.internal) - (offset * @sizeOf(ELEMENT))) },
+                .STATIC_RESOLVER => Self{ .internal = g_ptr_sub(self.internal, offset * @sizeOf(ELEMENT)) },
             };
         }
-        pub inline fn subtract_in_place(self: *Self, offset: usize) void {
-            self.* = self.subtract(offset);
-        }
-        pub inline fn typed_subtract(self: Self, comptime T: type, offset: usize) Self {
-            return self.subtract(@sizeOf(T) * offset);
-        }
-        pub inline fn typed_subtract_in_place(self: *Self, comptime T: type, offset: usize) void {
-            self.subtract_in_place(@sizeOf(T) * offset);
+        pub inline fn ecrement_in_place(self: *Self, offset: usize) void {
+            self.* = self.decrement(offset);
         }
 
         pub inline fn subtract_assert_contiguous(self: Self, offset: usize) Self {
-            assert_contiguous(self.addr, .SUB, offset, @src());
-            return self.subtract(offset);
+            assert_contiguous(self.internal, .SUB, offset, @src());
+            return self.decrement(offset);
         }
         pub inline fn subtract_in_place_assert_contiguous(self: *Self, offset: usize) void {
-            assert_contiguous(self.addr, .SUB, offset, @src());
-            self.subtract_in_place(offset);
-        }
-        pub inline fn typed_subtract_assert_contiguous(self: Self, comptime T: type, offset: usize) Self {
-            assert_contiguous(self.addr, .SUB, @sizeOf(T) * offset, @src());
-            return self.typed_subtract(T, offset);
-        }
-        pub inline fn typed_subtract_in_place_assert_contiguous(self: *Self, comptime T: type, offset: usize) void {
-            assert_contiguous(self.addr, .SUB, @sizeOf(T) * offset, @src());
-            self.typed_subtract_in_place(T, offset);
+            assert_contiguous(self.internal, .SUB, offset, @src());
+            self.ecrement_in_place(offset);
         }
 
         pub inline fn move(self: Self, offset: isize) Self {
             if (offset < 0) {
-                return self.subtract(@as(usize, @intCast(@abs(offset))));
+                return self.decrement(@as(usize, @intCast(@abs(offset))));
             } else {
-                return self.add(@intCast(offset));
+                return self.increment(@intCast(offset));
             }
         }
         pub inline fn move_in_place(self: *Self, offset: isize) void {
             self.* = self.move(offset);
-        }
-        pub inline fn typed_move(self: Self, comptime T: type, offset: isize) Self {
-            return self.move(@sizeOf(T) * offset);
-        }
-        pub inline fn typed_move_in_place(self: *Self, comptime T: type, offset: isize) void {
-            self.move_in_place(@sizeOf(T) * offset);
         }
 
         pub inline fn move_assert_contiguous(self: Self, offset: isize) Self {
             if (offset < 0) {
                 return self.subtract_assert_contiguous(@as(usize, @intCast(@abs(offset))));
             } else {
-                return self.add_assert_contiguous(@intCast(offset));
+                return self.increment_assert_contiguous(@intCast(offset));
             }
         }
         pub inline fn move_in_place_assert_contiguous(self: *Self, offset: isize) void {
             self.* = self.move_assert_contiguous(offset);
         }
-        pub inline fn typed_move_assert_contiguous(self: Self, comptime T: type, offset: isize) Self {
-            return self.move_assert_contiguous(@sizeOf(T) * offset);
-        }
-        pub inline fn typed_move_in_place_assert_contiguous(self: *Self, comptime T: type, offset: isize) void {
-            self.move_in_place_assert_contiguous(@sizeOf(T) * offset);
-        }
         //**************************
         // ELEMENTS BETWEEN
         //**************************
-        pub inline fn elements_between_self_low_other_high_exclude(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_low_other_high_exclude(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_low_other_high_exclude_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_self_low_other_high_exclude_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_low_other_high_exclude_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_low_other_high_exclude_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             if (high_addr < low_addr) return 0;
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_exclude(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_high_other_low_exclude(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_exclude_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_self_high_other_low_exclude_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_exclude_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_high_other_low_exclude_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             if (high_addr < low_addr) return 0;
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_low_other_high_include(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_low_other_high_include(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_low_other_high_include_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_self_low_other_high_include_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_low_other_high_include_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_low_other_high_include_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const low_addr = @intFromPtr(self.resolve(u8));
-            const high_addr = @intFromPtr(other.resolve(u8));
+            const low_addr = @intFromPtr(self.ptr(u8));
+            const high_addr = @intFromPtr(other.ptr(u8));
             if (high_addr < low_addr) return 0;
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_include(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_high_other_low_include(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_include_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_self_high_other_low_include_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             assert_with_reason(low_addr <= high_addr, @src(), "self was not a lower address than other", .{});
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_self_high_other_low_include_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_self_high_other_low_include_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const low_addr = @intFromPtr(other.resolve(u8));
-            const high_addr = @intFromPtr(self.resolve(u8));
+            const low_addr = @intFromPtr(other.ptr(u8));
+            const high_addr = @intFromPtr(self.ptr(u8));
             if (high_addr < low_addr) return 0;
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_exclude_high(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_exclude_high(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_exclude_high_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_exclude_high_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_exclude_high_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_exclude_high_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact(high_addr - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_include_high(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_include_high(self: Self, other: Self) usize {
             self.assert_not_null(@src());
             other.assert_not_null(@src());
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_include_high_or_null(self: Self, other: Self, comptime T: type) ?usize {
+        pub inline fn elements_between_include_high_or_null(self: Self, other: Self) ?usize {
             if (self.is_null() or other.is_null()) return null;
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
-        pub inline fn elements_between_include_high_orelse_0(self: Self, other: Self, comptime T: type) usize {
+        pub inline fn elements_between_include_high_orelse_0(self: Self, other: Self) usize {
             if (self.is_null() or other.is_null()) return 0;
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const other_addr = @intFromPtr(other.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const other_addr = @intFromPtr(other.ptr(u8));
             const low_addr = @min(self_addr, other_addr);
             const high_addr = @max(self_addr, other_addr);
-            return @divExact((high_addr + @sizeOf(T)) - low_addr, @as(usize, @intCast(@sizeOf(T))));
+            return @divExact((high_addr + @sizeOf(ELEMENT)) - low_addr, @as(usize, @intCast(@sizeOf(ELEMENT))));
         }
         pub inline fn is_within_range_exclude_high(self: Self, low: Self, high: Self) bool {
             self.assert_not_null(@src());
             low.assert_not_null(@src());
             high.assert_not_null(@src());
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const low_addr = @intFromPtr(low.resolve(u8));
-            const high_addr = @intFromPtr(high.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const low_addr = @intFromPtr(low.ptr(u8));
+            const high_addr = @intFromPtr(high.ptr(u8));
             return low_addr <= self_addr and self_addr < high_addr;
         }
         pub inline fn is_within_range_include_high(self: Self, low: Self, high: Self) bool {
             self.assert_not_null(@src());
             low.assert_not_null(@src());
             high.assert_not_null(@src());
-            const self_addr = @intFromPtr(self.resolve(u8));
-            const low_addr = @intFromPtr(low.resolve(u8));
-            const high_addr = @intFromPtr(high.resolve(u8));
+            const self_addr = @intFromPtr(self.ptr(u8));
+            const low_addr = @intFromPtr(low.ptr(u8));
+            const high_addr = @intFromPtr(high.ptr(u8));
             return low_addr <= self_addr and self_addr <= high_addr;
         }
         pub inline fn assert_is_within_range_exclude_high(self: Self, low: Self, high: Self, comptime src: ?SourceLocation) void {
@@ -1154,67 +1169,26 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
 
         //**************************
-        // ADDRESS INTROSPECTION
-        //**************************
-        pub inline fn local_addr(self: Self) Addr {
-            return self.addr;
-        }
-        pub inline fn resolved_addr(self: Self) usize {
-            self.assert_not_null(@src());
-            return switch (comptime SOURCE) {
-                .NATIVE => @intFromPtr(self.addr),
-                .GLOBAL_RESOLVER => RESOLVE(self.addr),
-            };
-        }
-        pub inline fn resolved_addr_or_null(self: Self) ?usize {
-            return switch (comptime SOURCE) {
-                .NATIVE => if (self.addr == 0) null else self.addr,
-                .GLOBAL_RESOLVER => if (IS_NULL(self.addr)) null else RESOLVE(self.addr),
-            };
-        }
-
-        //**************************
         // COMPARISON / HASHING
         //**************************
         pub inline fn eql(self: Self, other: Self) bool {
-            if (comptime Types.type_is_equatable(Addr)) return self.addr == other.addr;
-            const self_addr = self.resolved_addr_or_null();
-            const other_addr = other.resolved_addr_or_null();
-            if (self_addr) |a| {
-                if (other_addr) |b| return a == b;
-                return false;
-            }
-            return other_addr == null;
-        }
-        pub inline fn eql_native(self: Self, native_ptr: anytype) bool {
-            switch (comptime @typeInfo(@TypeOf(native_ptr))) {
-                .optional => {
-                    if (native_ptr) |p| {
-                        return self.not_null() and self.resolved_addr() == @intFromPtr(p);
-                    }
-                    return self.is_null();
-                },
-                .pointer => {
-                    return self.not_null() and self.resolved_addr() == @intFromPtr(native_ptr);
-                },
-                else => @compileError("eql_native requires a pointer or optional pointer"),
-            }
-        }
-        pub inline fn eql_local(self: Self, other: Self) bool {
-            return std.meta.eql(self.addr, other.addr);
+            if (comptime Types.type_is_equatable(InternalPtr)) return self.internal == other.internal;
+            const self_addr = self.addr();
+            const other_addr = other.addr();
+            return self_addr == other_addr;
         }
         pub inline fn order(self: Self, other: Self) std.math.Order {
-            const self_addr = self.resolved_addr_or_null() orelse 0;
-            const other_addr = other.resolved_addr_or_null() orelse 0;
+            const self_addr: usize = self.addr();
+            const other_addr: usize = other.addr();
             return std.math.order(self_addr, other_addr);
         }
         pub inline fn hash(self: Self) u64 {
-            const addr = self.resolved_addr_or_null() orelse 0;
-            return std.hash.Wyhash.hash(0, std.mem.asBytes(&addr));
+            const addr_: usize = self.addr() orelse 0;
+            return std.hash.Wyhash.hash(0, std.mem.asBytes(&addr_));
         }
         pub inline fn simple_hash(self: Self) u64 {
-            const addr = self.resolved_addr_or_null() orelse 0;
-            const addr_u64: u64 = @intCast(addr);
+            const addr_: usize = self.addr() orelse 0;
+            const addr_u64: u64 = @intCast(addr_);
             if (comptime @sizeOf(usize) == 4) {
                 return addr_u64 | (addr_u64 << 32);
             }
@@ -1228,7 +1202,7 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
             _ = self;
             return switch (comptime SOURCE) {
                 .NATIVE => .NATIVE,
-                .GLOBAL_RESOLVER => .GLOBAL_RESOLVER,
+                .STATIC_RESOLVER => .STATIC_RESOLVER,
             };
         }
         pub inline fn is_native(self: Self) bool {
@@ -1237,7 +1211,7 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         }
         pub inline fn is_global_resolver(self: Self) bool {
             _ = self;
-            return USE_GLOBAL_RESOLVER;
+            return USE_STATIC_RESOLVER;
         }
 
         //**************************
@@ -1255,8 +1229,8 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
                 -@as(isize, @intCast(other_addr - self_addr));
         }
         /// Returns the signed element distance from `other` to `self` (`self - other`).
-        pub inline fn elements_from(self: Self, other: Self, comptime T: type) isize {
-            return @divExact(self.bytes_from(other), @as(isize, @intCast(@sizeOf(T))));
+        pub inline fn elements_from(self: Self, other: Self) isize {
+            return @divExact(self.bytes_from(other), @as(isize, @intCast(@sizeOf(ELEMENT))));
         }
         pub inline fn offset_from(self: Self, other: Self) isize {
             return self.bytes_from(other);
@@ -1268,12 +1242,12 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         pub inline fn bytes_from_orelse_0(self: Self, other: Self) isize {
             return self.bytes_from_or_null(other) orelse 0;
         }
-        pub inline fn elements_from_or_null(self: Self, other: Self, comptime T: type) ?isize {
+        pub inline fn elements_from_or_null(self: Self, other: Self) ?isize {
             if (self.is_null() or other.is_null()) return null;
-            return self.elements_from(other, T);
+            return self.elements_from(other, ELEMENT);
         }
-        pub inline fn elements_from_orelse_0(self: Self, other: Self, comptime T: type) isize {
-            return self.elements_from_or_null(other, T) orelse 0;
+        pub inline fn elements_from_orelse_0(self: Self, other: Self) isize {
+            return self.elements_from_or_null(other, ELEMENT) orelse 0;
         }
         pub inline fn offset_from_or_null(self: Self, other: Self) ?isize {
             return self.bytes_from_or_null(other);
@@ -1287,38 +1261,38 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         //**************************
         pub inline fn add_or_null(self: Self, offset: usize) Self {
             if (self.is_null()) return self;
-            return self.add(offset);
+            return self.increment(offset);
         }
         pub inline fn subtract_or_null(self: Self, offset: usize) Self {
             if (self.is_null()) return self;
-            return self.subtract(offset);
+            return self.decrement(offset);
         }
         pub inline fn move_or_null(self: Self, offset: isize) Self {
             if (self.is_null()) return self;
             return self.move(offset);
         }
-        pub inline fn typed_add_or_null(self: Self, comptime T: type, offset: usize) Self {
+        pub inline fn typed_add_or_null(self: Self, offset: usize) Self {
             if (self.is_null()) return self;
-            return self.typed_add(T, offset);
+            return self.typed_add(ELEMENT, offset);
         }
-        pub inline fn typed_subtract_or_null(self: Self, comptime T: type, offset: usize) Self {
+        pub inline fn typed_subtract_or_null(self: Self, offset: usize) Self {
             if (self.is_null()) return self;
-            return self.typed_subtract(T, offset);
+            return self.typed_subtract(ELEMENT, offset);
         }
-        pub inline fn typed_move_or_null(self: Self, comptime T: type, offset: isize) Self {
+        pub inline fn typed_move_or_null(self: Self, offset: isize) Self {
             if (self.is_null()) return self;
-            return self.typed_move(T, offset);
+            return self.typed_move(ELEMENT, offset);
         }
 
         //**************************
         // NULL CONSTRUCTION / MUTATION
         //**************************
-        pub const NULL = Self{ .addr = AddrNull };
-        pub inline fn new_null() Self {
-            return Self{ .addr = AddrNull };
+        pub const NULL = Self{};
+        pub inline fn new_null() PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)) {
+            return PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE));
         }
-        pub inline fn set_null(self: *Self) void {
-            self.addr = AddrNull;
+        pub inline fn set_null(_: *Self) PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)) {
+            return PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE));
         }
         pub inline fn is_null_or_equal(self: Self, other: Self) bool {
             return self.eql(other);
@@ -1327,22 +1301,22 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         //**************************
         // BULK OPERATIONS
         //**************************
-        pub inline fn memcopy_to(self: Self, comptime T: type, dst: []T) void {
-            @memcpy(dst, self.slice(T, dst.len));
+        pub inline fn memcopy_to(self: Self, dst: []ELEMENT) void {
+            @memcpy(dst, self.slice(ELEMENT, dst.len));
         }
-        pub inline fn memcopy_from(self: Self, comptime T: type, src: []const T) void {
-            @memcpy(self.slice(T, src.len), src);
+        pub inline fn memcopy_from(self: Self, src: []const ELEMENT) void {
+            @memcpy(self.slice(ELEMENT, src.len), src);
         }
-        pub inline fn memmove_to(self: Self, comptime T: type, dst: []T) void {
-            const src = self.slice(T, dst.len);
+        pub inline fn memmove_to(self: Self, dst: []ELEMENT) void {
+            const src = self.slice(ELEMENT, dst.len);
             @memmove(dst, src);
         }
-        pub inline fn memmove_from(self: Self, comptime T: type, src: []const T) void {
-            const dst = self.slice(T, src.len);
+        pub inline fn memmove_from(self: Self, src: []const ELEMENT) void {
+            const dst = self.slice(ELEMENT, src.len);
             @memmove(dst, src);
         }
-        pub inline fn memset(self: Self, comptime T: type, value: T, len: usize) void {
-            @memset(self.slice(T, len), value);
+        pub inline fn memset(self: Self, value: ELEMENT, len: usize) void {
+            @memset(self.slice(ELEMENT, len), value);
         }
 
         //**************************
@@ -1358,2033 +1332,67 @@ pub fn PointerOpaque(comptime SOURCE: PointerSource) type {
         //**************************
         // VOLATILE ACCESS
         //**************************
-        pub inline fn get_volatile(self: Self, comptime T: type) T {
+        pub inline fn get_volatile(self: Self) ELEMENT {
             self.assert_not_null(@src());
-            const volatile_ptr: *volatile T = @ptrCast(self.resolve(T));
+            const volatile_ptr: *volatile ELEMENT = @ptrCast(self.ptr(ELEMENT));
             return volatile_ptr.*;
         }
-        pub inline fn set_volatile(self: Self, comptime T: type, value: T) void {
+        pub inline fn set_volatile(self: Self, value: ELEMENT) void {
             self.assert_not_null(@src());
-            const volatile_ptr: *volatile T = @ptrCast(self.resolve(T));
+            const volatile_ptr: *volatile ELEMENT = @ptrCast(self.ptr(ELEMENT));
             volatile_ptr.* = value;
         }
 
         //**************************
         // ATOMIC ACCESS
         //**************************
-        pub inline fn atomic_load(self: Self, comptime T: type, comptime ordering: std.lang.AtomicOrder) T {
+        pub inline fn atomic_load(self: Self, comptime ordering: std.lang.AtomicOrder) ELEMENT {
             self.assert_not_null(@src());
-            return @atomicLoad(T, self.ptr(T), ordering);
+            return @atomicLoad(ELEMENT, self.ptr(ELEMENT), ordering);
         }
-        pub inline fn atomic_store(self: Self, comptime T: type, value: T, comptime ordering: std.lang.AtomicOrder) void {
+        pub inline fn atomic_store(self: Self, value: ELEMENT, comptime ordering: std.lang.AtomicOrder) void {
             self.assert_not_null(@src());
-            @atomicStore(T, self.ptr(T), value, ordering);
+            @atomicStore(ELEMENT, self.ptr(ELEMENT), value, ordering);
         }
-        pub inline fn atomic_read_modify_write(self: Self, comptime T: type, comptime op: std.lang.AtomicRmwOp, value: T, comptime ordering: std.lang.AtomicOrder) T {
+        pub inline fn atomic_read_modify_write(self: Self, comptime op: std.lang.AtomicRmwOp, value: ELEMENT, comptime ordering: std.lang.AtomicOrder) ELEMENT {
             self.assert_not_null(@src());
-            return @atomicRmw(T, self.ptr(T), op, value, ordering);
+            return @atomicRmw(ELEMENT, self.ptr(ELEMENT), op, value, ordering);
         }
         /// Returns `null` when the comparison succeeds, or the previous value when it fails.
-        pub inline fn atomic_compare_exchange_strong(self: Self, comptime T: type, expected: T, new_value: T, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?T {
+        pub inline fn atomic_compare_exchange_strong(self: Self, expected: ELEMENT, new_value: ELEMENT, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?ELEMENT {
             self.assert_not_null(@src());
-            return @cmpxchgStrong(T, self.ptr(T), expected, new_value, success_order, fail_order);
+            return @cmpxchgStrong(ELEMENT, self.ptr(ELEMENT), expected, new_value, success_order, fail_order);
         }
         /// Returns `null` when the comparison succeeds, or the previous value when it fails.
-        pub inline fn atomic_compare_exchange_weak(self: Self, comptime T: type, expected: T, new_value: T, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?T {
+        pub inline fn atomic_compare_exchange_weak(self: Self, expected: ELEMENT, new_value: ELEMENT, comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?ELEMENT {
             self.assert_not_null(@src());
-            return @cmpxchgWeak(T, self.ptr(T), expected, new_value, success_order, fail_order);
+            return @cmpxchgWeak(ELEMENT, self.ptr(ELEMENT), expected, new_value, success_order, fail_order);
         }
 
-        //**************************
-        // ANYOPAQUE CONVERSION
-        //**************************
-        pub inline fn to_anyopaque(self: Self) *anyopaque {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve(u8));
-        }
-        pub inline fn to_const_anyopaque(self: Self) *const anyopaque {
-            self.assert_not_null(@src());
-            return @ptrCast(self.resolve(u8));
-        }
-        pub inline fn to_anyopaque_or_null(self: Self) ?*anyopaque {
-            if (self.is_null()) return null;
-            return @ptrCast(self.resolve(u8));
-        }
-        pub inline fn to_const_anyopaque_or_null(self: Self) ?*const anyopaque {
-            if (self.is_null()) return null;
-            return @ptrCast(self.resolve(u8));
-        }
-        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
-            return Self.new_from_native(void_ptr);
-        }
-        pub inline fn from_const_anyopaque(void_ptr: *const anyopaque) Self {
-            return Self.new_from_native(void_ptr);
-        }
-    };
-}
-
-/// Selects the typed pointer wrapper that matches the requested properties.
-///
-/// `ALIGN == null` selects an unaligned wrapper; any non-null value selects the
-/// corresponding aligned wrapper. `ALIGN` may be a plain byte count, an optional
-/// byte count, a `PowerOf2`, a `std.mem.Alignment`, or an `AlignmentSource`.
-pub fn PointerWithProperties(
-    comptime SOURCE: PointerSource,
-    comptime NULLABILITY: Nullability,
-    comptime MUTABILITY: Mutability,
-    comptime T: type,
-    comptime ALIGN: anytype,
-) type {
-    const A = comptime TypedPointerNormalizeAlign(ALIGN);
-    return switch (NULLABILITY) {
-        .NEVER_NULL => switch (MUTABILITY) {
-            .MUT_PTR => if (A) |a| PointerAlign(T, a, SOURCE) else Pointer(T, SOURCE),
-            .CONST_PTR => if (A) |a| ConstPointerAlign(T, a, SOURCE) else ConstPointer(T, SOURCE),
-        },
-        .NULLABLE => switch (MUTABILITY) {
-            .MUT_PTR => if (A) |a| NullablePointerAlign(T, a, SOURCE) else NullablePointer(T, SOURCE),
-            .CONST_PTR => if (A) |a| NullableConstPointerAlign(T, a, SOURCE) else NullableConstPointer(T, SOURCE),
-        },
-    };
-}
-
-//******************************
-// TYPED WRAPPER HELPERS
-//******************************
-
-fn TypedPointerPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
-    if (ALIGN) |a| {
-        return if (CONST) *align(a) const Elem else *align(a) Elem;
-    } else {
-        return if (CONST) *const Elem else *Elem;
-    }
-}
-fn TypedPointerManyPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
-    if (ALIGN) |a| {
-        return if (CONST) [*]align(a) const Elem else [*]align(a) Elem;
-    } else {
-        return if (CONST) [*]const Elem else [*]Elem;
-    }
-}
-fn TypedPointerSliceType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool) type {
-    if (ALIGN) |a| {
-        return if (CONST) []align(a) const Elem else []align(a) Elem;
-    } else {
-        return if (CONST) []const Elem else []Elem;
-    }
-}
-fn TypedPointerArrayPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool, comptime LEN: anytype) type {
-    if (ALIGN) |a| {
-        return if (CONST) *align(a) const [LEN]Elem else *align(a) [LEN]Elem;
-    } else {
-        return if (CONST) *const [LEN]Elem else *[LEN]Elem;
-    }
-}
-fn TypedPointerVectorPtrType(comptime Elem: type, comptime ALIGN: ?usize, comptime CONST: bool, comptime LEN: anytype) type {
-    if (ALIGN) |a| {
-        return if (CONST) *align(a) const @Vector(LEN, Elem) else *align(a) @Vector(LEN, Elem);
-    } else {
-        return if (CONST) *const @Vector(LEN, Elem) else *@Vector(LEN, Elem);
-    }
-}
-
-fn TypedPointerNormalizeAlign(comptime ALIGN: anytype) ?usize {
-    const T = @TypeOf(ALIGN);
-    if (T == @TypeOf(null)) return null;
-    if (T == comptime_int) return ALIGN;
-    if (T == usize) return ALIGN;
-    if (T == ?usize) return ALIGN;
-    if (T == PowerOf2) return ALIGN.value_as_type(usize);
-    if (T == ?PowerOf2) return if (ALIGN) |p| p.value_as_type(usize) else null;
-    if (T == mem.Alignment) return ALIGN.toByteUnits();
-    if (T == ?mem.Alignment) return if (ALIGN) |a| a.toByteUnits() else null;
-    if (T == AlignmentSource) return ALIGN.calc();
-    if (T == ?AlignmentSource) return if (ALIGN) |a| a.calc() else null;
-    @compileError("unsupported alignment type: " ++ @typeName(T));
-}
-
-fn TypedPointerAddrOf(comptime Self: type) type {
-    return Self.Addr;
-}
-fn TypedPointerElemOf(comptime Self: type) type {
-    return Self.Element;
-}
-fn TypedPointerPtrOf(comptime Self: type, comptime CONST: bool) type {
-    return TypedPointerPtrType(Self.Element, Self.ALIGN, CONST);
-}
-fn TypedPointerManyPtrOf(comptime Self: type, comptime CONST: bool) type {
-    return TypedPointerManyPtrType(Self.Element, Self.ALIGN, CONST);
-}
-fn TypedPointerSliceOf(comptime Self: type, comptime CONST: bool) type {
-    return TypedPointerSliceType(Self.Element, Self.ALIGN, CONST);
-}
-fn TypedPointerArrayPtrOf(comptime Self: type, comptime CONST: bool, comptime LEN: anytype) type {
-    return TypedPointerArrayPtrType(Self.Element, Self.ALIGN, CONST, LEN);
-}
-fn TypedPointerVectorPtrOf(comptime Self: type, comptime CONST: bool, comptime LEN: anytype) type {
-    return TypedPointerVectorPtrType(Self.Element, Self.ALIGN, CONST, LEN);
-}
-fn TypedPointerVoidPtrOf(comptime Self: type) type {
-    return if (Self.MUTABILITY == .CONST_PTR) *const anyopaque else *anyopaque;
-}
-fn TypedPointerOptionalVoidPtrOf(comptime Self: type) type {
-    return if (Self.MUTABILITY == .CONST_PTR) ?*const anyopaque else ?*anyopaque;
-}
-
-/// The actual implementations used by the typed wrappers below.
-///
-/// These are generic over the wrapper type so that the wrappers can pick and choose
-/// which operations are exposed for their mode (mutable/const, nullable/non-null, aligned/unaligned).
-const TypedMethods = struct {
-    //***********
-    // CASTS
-    //***********
-    pub fn cast_to(
-        self_ptr: anytype,
-        comptime NULLABILITY: Nullability,
-        comptime MUTABILITY: Mutability,
-        comptime T: type,
-        comptime ALIGN: anytype,
-    ) PointerWithProperties(@TypeOf(self_ptr.*).Source, NULLABILITY, MUTABILITY, T, TypedPointerNormalizeAlign(ALIGN)) {
-        return self_ptr.opq.cast_to(NULLABILITY, MUTABILITY, T, ALIGN);
-    }
-    pub fn to_const(self_ptr: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        @TypeOf(self_ptr.*).NULLABILITY,
-        .CONST_PTR,
-        @TypeOf(self_ptr.*).Element,
-        @TypeOf(self_ptr.*).ALIGN,
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(Self.NULLABILITY, .CONST_PTR, Self.Element, Self.ALIGN);
-    }
-    pub fn to_align(self_ptr: anytype, comptime ALIGN: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        @TypeOf(self_ptr.*).NULLABILITY,
-        @TypeOf(self_ptr.*).MUTABILITY,
-        @TypeOf(self_ptr.*).Element,
-        TypedPointerNormalizeAlign(ALIGN),
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(Self.NULLABILITY, Self.MUTABILITY, Self.Element, ALIGN);
-    }
-    pub fn to_nullable(self_ptr: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        .NULLABLE,
-        @TypeOf(self_ptr.*).MUTABILITY,
-        @TypeOf(self_ptr.*).Element,
-        @TypeOf(self_ptr.*).ALIGN,
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(.NULLABLE, Self.MUTABILITY, Self.Element, Self.ALIGN);
-    }
-
-    //***********
-    // NULL CHECKS
-    //***********
-    pub fn is_null(self_ptr: anytype) bool {
-        return self_ptr.opq.is_null();
-    }
-    pub fn not_null(self_ptr: anytype) bool {
-        return self_ptr.opq.not_null();
-    }
-    pub fn assert_not_null(self_ptr: anytype, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_not_null(src);
-    }
-    pub fn assert_null(self_ptr: anytype, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_null(src);
-    }
-
-    //***********
-    // ALIGNMENT
-    //***********
-    pub fn is_aligned(self_ptr: anytype, alignment: usize) bool {
-        return self_ptr.opq.is_aligned(alignment);
-    }
-    pub fn is_aligned_any(self_ptr: anytype, alignment: usize) bool {
-        return self_ptr.opq.is_aligned_any(alignment);
-    }
-    pub fn is_aligned_log_2(self_ptr: anytype, alignment_log_2: u8) bool {
-        return self_ptr.opq.is_aligned_log_2(alignment_log_2);
-    }
-    pub fn is_aligned_pow_2(self_ptr: anytype, alignment_pow_2: PowerOf2) bool {
-        return self_ptr.opq.is_aligned_pow_2(alignment_pow_2);
-    }
-    pub fn is_aligned_std_mem(self_ptr: anytype, alignment: mem.Alignment) bool {
-        return self_ptr.opq.is_aligned_std_mem(alignment);
-    }
-    pub fn assert_aligned(self_ptr: anytype, alignment: usize, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_aligned(alignment, src);
-    }
-    pub fn assert_aligned_any(self_ptr: anytype, alignment: usize, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_aligned_any(alignment, src);
-    }
-    pub fn assert_aligned_log_2(self_ptr: anytype, alignment_log_2: u8, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_aligned_log_2(alignment_log_2, src);
-    }
-    pub fn assert_aligned_pow_2(self_ptr: anytype, alignment_pow_2: PowerOf2, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_aligned_pow_2(alignment_pow_2, src);
-    }
-    pub fn assert_aligned_std_mem(self_ptr: anytype, alignment: mem.Alignment, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_aligned_std_mem(alignment, src);
-    }
-
-    //**********************
-    // MUTABLE PTR
-    //**********************
-    pub fn ptr_mut(self_ptr: anytype) TypedPointerPtrOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_aligned(Self.Element, a) else self_ptr.opq.ptr(Self.Element);
-    }
-    pub fn ptr_many_mut(self_ptr: anytype) TypedPointerManyPtrOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_many_aligned(Self.Element, a) else self_ptr.opq.ptr_many(Self.Element);
-    }
-    pub fn slice_mut(self_ptr: anytype, len: anytype) TypedPointerSliceOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.slice_aligned(Self.Element, a, len) else self_ptr.opq.slice(Self.Element, len);
-    }
-    pub fn array_ptr_mut(self_ptr: anytype, comptime LEN: anytype) TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), false, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.array_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.array_ptr(Self.Element, LEN);
-    }
-    pub fn vector_ptr_mut(self_ptr: anytype, comptime LEN: anytype) TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), false, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.vector_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.vector_ptr(Self.Element, LEN);
-    }
-
-    //**********************
-    // CONST PTR
-    //**********************
-    pub fn ptr_const(self_ptr: anytype) TypedPointerPtrOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_aligned(Self.Element, a) else self_ptr.opq.const_ptr(Self.Element);
-    }
-    pub fn ptr_many_const(self_ptr: anytype) TypedPointerManyPtrOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_many_aligned(Self.Element, a) else self_ptr.opq.const_ptr_many(Self.Element);
-    }
-    pub fn slice_const(self_ptr: anytype, len: anytype) TypedPointerSliceOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_slice_aligned(Self.Element, a, len) else self_ptr.opq.const_slice(Self.Element, len);
-    }
-    pub fn array_ptr_const(self_ptr: anytype, comptime LEN: anytype) TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), true, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_array_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.const_array_ptr(Self.Element, LEN);
-    }
-    pub fn vector_ptr_const(self_ptr: anytype, comptime LEN: anytype) TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), true, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_vector_ptr_aligned(Self.Element, a, LEN) else self_ptr.opq.const_vector_ptr(Self.Element, LEN);
-    }
-
-    //**********************
-    // NULLABLE MUTABLE PTR
-    //**********************
-    pub fn ptr_mut_or_null(self_ptr: anytype) ?TypedPointerPtrOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_aligned_or_null(Self.Element, a) else self_ptr.opq.ptr_or_null(Self.Element);
-    }
-    pub fn ptr_many_mut_or_null(self_ptr: anytype) ?TypedPointerManyPtrOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.ptr_many_aligned_or_null(Self.Element, a) else self_ptr.opq.ptr_many_or_null(Self.Element);
-    }
-    pub fn slice_mut_or_null(self_ptr: anytype, len: anytype) ?TypedPointerSliceOf(@TypeOf(self_ptr.*), false) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.slice_aligned_or_null(Self.Element, a, len) else self_ptr.opq.slice_or_null(Self.Element, len);
-    }
-    pub fn array_ptr_mut_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), false, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.array_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.array_ptr_or_null(Self.Element, LEN);
-    }
-    pub fn vector_ptr_mut_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), false, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.vector_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.vector_ptr_or_null(Self.Element, LEN);
-    }
-
-    //**********************
-    // NULLABLE CONST PTR
-    //**********************
-    pub fn ptr_const_or_null(self_ptr: anytype) ?TypedPointerPtrOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_aligned_or_null(Self.Element, a) else self_ptr.opq.const_ptr_or_null(Self.Element);
-    }
-    pub fn ptr_many_const_or_null(self_ptr: anytype) ?TypedPointerManyPtrOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_ptr_many_aligned_or_null(Self.Element, a) else self_ptr.opq.const_ptr_many_or_null(Self.Element);
-    }
-    pub fn slice_const_or_null(self_ptr: anytype, len: anytype) ?TypedPointerSliceOf(@TypeOf(self_ptr.*), true) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_slice_aligned_or_null(Self.Element, a, len) else self_ptr.opq.const_slice_or_null(Self.Element, len);
-    }
-    pub fn array_ptr_const_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerArrayPtrOf(@TypeOf(self_ptr.*), true, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_array_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.const_array_ptr_or_null(Self.Element, LEN);
-    }
-    pub fn vector_ptr_const_or_null(self_ptr: anytype, comptime LEN: anytype) ?TypedPointerVectorPtrOf(@TypeOf(self_ptr.*), true, LEN) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.ALIGN) |a| self_ptr.opq.const_vector_ptr_aligned_or_null(Self.Element, a, LEN) else self_ptr.opq.const_vector_ptr_or_null(Self.Element, LEN);
-    }
-
-    //***********
-    // GET / SET
-    //***********
-    pub fn get(self_ptr: anytype) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get(Self.Element);
-    }
-    pub fn get_or_null(self_ptr: anytype) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_or_null(Self.Element);
-    }
-    pub fn get_orelse(self_ptr: anytype, default: TypedPointerElemOf(@TypeOf(self_ptr.*))) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_orelse(Self.Element, default);
-    }
-    pub fn get_at_index(self_ptr: anytype, index: usize) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_at_index(Self.Element, index);
-    }
-    pub fn get_at_index_or_null(self_ptr: anytype, index: usize) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_at_index_or_null(Self.Element, index);
-    }
-    pub fn get_at_index_orelse(self_ptr: anytype, index: usize, default: TypedPointerElemOf(@TypeOf(self_ptr.*))) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_at_index_orelse(Self.Element, index, default);
-    }
-    pub fn set(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.set(Self.Element, val);
-    }
-    pub fn set_if_not_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.set_if_not_null(Self.Element, val);
-    }
-    pub fn set_if_not_null_return_ptr_is_NOT_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.set_if_not_null_return_ptr_is_NOT_null(Self.Element, val);
-    }
-    pub fn set_if_not_null_return_ptr_IS_null(self_ptr: anytype, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.set_if_not_null_return_ptr_IS_null(Self.Element, val);
-    }
-    pub fn set_at_index(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.set_at_index(Self.Element, index, val);
-    }
-    pub fn set_at_index_if_not_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.set_at_index_if_not_null(Self.Element, index, val);
-    }
-    pub fn set_at_index_if_not_null_return_ptr_is_NOT_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.set_at_index_if_not_null_return_ptr_is_NOT_null(Self.Element, index, val);
-    }
-    pub fn set_at_index_if_not_null_return_ptr_IS_null(self_ptr: anytype, index: usize, val: TypedPointerElemOf(@TypeOf(self_ptr.*))) bool {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.set_at_index_if_not_null_return_ptr_IS_null(Self.Element, index, val);
-    }
-
-    //**************************
-    // ADDRESS ADD / SUB / MOVE
-    //**************************
-    pub fn add(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_add(Self.Element, offset) };
-    }
-    pub fn add_in_place(self_ptr: anytype, offset: usize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_add_in_place(Self.Element, offset);
-    }
-    pub fn add_assert_contiguous(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_add_assert_contiguous(Self.Element, offset) };
-    }
-    pub fn add_in_place_assert_contiguous(self_ptr: anytype, offset: usize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_add_in_place_assert_contiguous(Self.Element, offset);
-    }
-    pub fn subtract(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_subtract(Self.Element, offset) };
-    }
-    pub fn subtract_in_place(self_ptr: anytype, offset: usize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_subtract_in_place(Self.Element, offset);
-    }
-    pub fn subtract_assert_contiguous(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_subtract_assert_contiguous(Self.Element, offset) };
-    }
-    pub fn subtract_in_place_assert_contiguous(self_ptr: anytype, offset: usize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_subtract_in_place_assert_contiguous(Self.Element, offset);
-    }
-    pub fn move(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_move(Self.Element, offset) };
-    }
-    pub fn move_in_place(self_ptr: anytype, offset: isize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_move_in_place(Self.Element, offset);
-    }
-    pub fn move_assert_contiguous(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_move_assert_contiguous(Self.Element, offset) };
-    }
-    pub fn move_in_place_assert_contiguous(self_ptr: anytype, offset: isize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.typed_move_in_place_assert_contiguous(Self.Element, offset);
-    }
-
-    //**************************
-    // ELEMENTS BETWEEN (NON-NULL)
-    //**************************
-    pub fn elements_between_self_low_other_high_exclude(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_exclude(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_exclude(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_exclude(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_low_other_high_include(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_include(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_include(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_include(other.opq, Self.Element);
-    }
-    pub fn elements_between_exclude_high(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_exclude_high(other.opq, Self.Element);
-    }
-    pub fn elements_between_include_high(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_include_high(other.opq, Self.Element);
-    }
-
-    //**************************
-    // ELEMENTS BETWEEN (NULLABLE)
-    //**************************
-    pub fn elements_between_self_low_other_high_exclude_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_exclude_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_low_other_high_exclude_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_exclude_orelse_0(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_exclude_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_exclude_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_exclude_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_exclude_orelse_0(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_low_other_high_include_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_include_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_low_other_high_include_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_low_other_high_include_orelse_0(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_include_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_include_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_self_high_other_low_include_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_self_high_other_low_include_orelse_0(other.opq, Self.Element);
-    }
-    pub fn elements_between_exclude_high_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_exclude_high_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_exclude_high_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_exclude_high_orelse_0(other.opq, Self.Element);
-    }
-    pub fn elements_between_include_high_or_null(self_ptr: anytype, other: anytype) ?usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_include_high_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_between_include_high_orelse_0(self_ptr: anytype, other: anytype) usize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_between_include_high_orelse_0(other.opq, Self.Element);
-    }
-
-    //**************************
-    // RANGES
-    //**************************
-    pub fn is_within_range_exclude_high(self_ptr: anytype, low: anytype, high: anytype) bool {
-        return self_ptr.opq.is_within_range_exclude_high(low.opq, high.opq);
-    }
-    pub fn is_within_range_include_high(self_ptr: anytype, low: anytype, high: anytype) bool {
-        return self_ptr.opq.is_within_range_include_high(low.opq, high.opq);
-    }
-    pub fn assert_is_within_range_exclude_high(self_ptr: anytype, low: anytype, high: anytype, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_is_within_range_exclude_high(low.opq, high.opq, src);
-    }
-    pub fn assert_is_within_range_include_high(self_ptr: anytype, low: anytype, high: anytype, comptime src: ?SourceLocation) void {
-        self_ptr.opq.assert_is_within_range_include_high(low.opq, high.opq, src);
-    }
-
-    //**************************
-    // ADDRESS INTROSPECTION
-    //**************************
-    pub fn local_addr(self_ptr: anytype) TypedPointerAddrOf(@TypeOf(self_ptr.*)) {
-        return self_ptr.opq.local_addr();
-    }
-    pub fn resolved_addr(self_ptr: anytype) usize {
-        return self_ptr.opq.resolved_addr();
-    }
-    pub fn resolved_addr_or_null(self_ptr: anytype) ?usize {
-        return self_ptr.opq.resolved_addr_or_null();
-    }
-
-    //**************************
-    // COMPARISON / HASHING
-    //**************************
-    pub fn eql(self_ptr: anytype, other: anytype) bool {
-        return self_ptr.opq.eql(other.opq);
-    }
-    pub fn eql_native(self_ptr: anytype, native_ptr: anytype) bool {
-        return self_ptr.opq.eql_native(native_ptr);
-    }
-    pub fn eql_local(self_ptr: anytype, other: anytype) bool {
-        return self_ptr.opq.eql_local(other.opq);
-    }
-    pub fn order(self_ptr: anytype, other: anytype) std.math.Order {
-        return self_ptr.opq.order(other.opq);
-    }
-    pub fn hash(self_ptr: anytype) u64 {
-        return self_ptr.opq.hash();
-    }
-    pub fn simple_hash(self_ptr: anytype) u64 {
-        return self_ptr.opq.simple_hash();
-    }
-
-    //**************************
-    // SOURCE INTROSPECTION
-    //**************************
-    pub fn source_kind(self_ptr: anytype) PointerSourceKind {
-        return self_ptr.opq.source_kind();
-    }
-    pub fn is_native(self_ptr: anytype) bool {
-        return self_ptr.opq.is_native();
-    }
-    pub fn is_global_resolver(self_ptr: anytype) bool {
-        return self_ptr.opq.is_global_resolver();
-    }
-
-    //**************************
-    // SIGNED DISTANCE
-    //**************************
-    pub fn bytes_from(self_ptr: anytype, other: anytype) isize {
-        return self_ptr.opq.bytes_from(other.opq);
-    }
-    pub fn elements_from(self_ptr: anytype, other: anytype) isize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_from(other.opq, Self.Element);
-    }
-    pub fn offset_from(self_ptr: anytype, other: anytype) isize {
-        return self_ptr.opq.offset_from(other.opq);
-    }
-    pub fn bytes_from_or_null(self_ptr: anytype, other: anytype) ?isize {
-        return self_ptr.opq.bytes_from_or_null(other.opq);
-    }
-    pub fn bytes_from_orelse_0(self_ptr: anytype, other: anytype) isize {
-        return self_ptr.opq.bytes_from_orelse_0(other.opq);
-    }
-    pub fn elements_from_or_null(self_ptr: anytype, other: anytype) ?isize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_from_or_null(other.opq, Self.Element);
-    }
-    pub fn elements_from_orelse_0(self_ptr: anytype, other: anytype) isize {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.elements_from_orelse_0(other.opq, Self.Element);
-    }
-    pub fn offset_from_or_null(self_ptr: anytype, other: anytype) ?isize {
-        return self_ptr.opq.offset_from_or_null(other.opq);
-    }
-    pub fn offset_from_orelse_0(self_ptr: anytype, other: anytype) isize {
-        return self_ptr.opq.offset_from_orelse_0(other.opq);
-    }
-
-    //**************************
-    // NULL-PRESERVING ARITHMETIC
-    //**************************
-    pub fn add_or_null(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_add_or_null(Self.Element, offset) };
-    }
-    pub fn subtract_or_null(self_ptr: anytype, offset: usize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_subtract_or_null(Self.Element, offset) };
-    }
-    pub fn move_or_null(self_ptr: anytype, offset: isize) @TypeOf(self_ptr.*) {
-        const Self = @TypeOf(self_ptr.*);
-        return Self{ .opq = self_ptr.opq.typed_move_or_null(Self.Element, offset) };
-    }
-
-    //**************************
-    // ADDITIONAL CASTS
-    //**************************
-    pub fn to_non_null(self_ptr: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        .NEVER_NULL,
-        @TypeOf(self_ptr.*).MUTABILITY,
-        @TypeOf(self_ptr.*).Element,
-        @TypeOf(self_ptr.*).ALIGN,
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(.NEVER_NULL, Self.MUTABILITY, Self.Element, Self.ALIGN);
-    }
-    pub fn to_unaligned(self_ptr: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        @TypeOf(self_ptr.*).NULLABILITY,
-        @TypeOf(self_ptr.*).MUTABILITY,
-        @TypeOf(self_ptr.*).Element,
-        null,
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(Self.NULLABILITY, Self.MUTABILITY, Self.Element, null);
-    }
-    pub fn to_mutable(self_ptr: anytype) PointerWithProperties(
-        @TypeOf(self_ptr.*).Source,
-        @TypeOf(self_ptr.*).NULLABILITY,
-        .MUT_PTR,
-        @TypeOf(self_ptr.*).Element,
-        @TypeOf(self_ptr.*).ALIGN,
-    ) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.cast_to(Self.NULLABILITY, .MUT_PTR, Self.Element, Self.ALIGN);
-    }
-
-    //**************************
-    // NULL CONSTRUCTION / MUTATION
-    //**************************
-    pub fn set_null(self_ptr: anytype) void {
-        self_ptr.opq.set_null();
-    }
-    pub fn is_null_or_equal(self_ptr: anytype, other: anytype) bool {
-        return self_ptr.opq.is_null_or_equal(other.opq);
-    }
-
-    //**************************
-    // BULK OPERATIONS
-    //**************************
-    pub fn memcopy_to(self_ptr: anytype, dst: []TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.memcopy_to(Self.Element, dst);
-    }
-    pub fn memcopy_from(self_ptr: anytype, src: []const TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.memcopy_from(Self.Element, src);
-    }
-    pub fn memmove_to(self_ptr: anytype, dst: []TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.memmove_to(Self.Element, dst);
-    }
-    pub fn memmove_from(self_ptr: anytype, src: []const TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.memmove_from(Self.Element, src);
-    }
-    pub fn memset(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), len: usize) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.memset(Self.Element, value, len);
-    }
-
-    //**************************
-    // BYTE ACCESS
-    //**************************
-    pub fn bytes(self_ptr: anytype, len: anytype) []u8 {
-        return self_ptr.opq.bytes(len);
-    }
-    pub fn const_bytes(self_ptr: anytype, len: anytype) []const u8 {
-        return self_ptr.opq.const_bytes(len);
-    }
-
-    //**************************
-    // VOLATILE ACCESS
-    //**************************
-    pub fn get_volatile(self_ptr: anytype) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.get_volatile(Self.Element);
-    }
-    pub fn set_volatile(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*))) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.set_volatile(Self.Element, value);
-    }
-
-    //**************************
-    // ATOMIC ACCESS
-    //**************************
-    pub fn atomic_load(self_ptr: anytype, comptime ordering: std.lang.AtomicOrder) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.atomic_load(Self.Element, ordering);
-    }
-    pub fn atomic_store(self_ptr: anytype, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime ordering: std.lang.AtomicOrder) void {
-        const Self = @TypeOf(self_ptr.*);
-        self_ptr.opq.atomic_store(Self.Element, value, ordering);
-    }
-    pub fn atomic_read_modify_write(self_ptr: anytype, comptime op: std.lang.AtomicRmwOp, value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime ordering: std.lang.AtomicOrder) TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.atomic_read_modify_write(Self.Element, op, value, ordering);
-    }
-    pub fn atomic_compare_exchange_strong(self_ptr: anytype, expected: TypedPointerElemOf(@TypeOf(self_ptr.*)), new_value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.atomic_compare_exchange_strong(Self.Element, expected, new_value, success_order, fail_order);
-    }
-    pub fn atomic_compare_exchange_weak(self_ptr: anytype, expected: TypedPointerElemOf(@TypeOf(self_ptr.*)), new_value: TypedPointerElemOf(@TypeOf(self_ptr.*)), comptime success_order: std.lang.AtomicOrder, comptime fail_order: std.lang.AtomicOrder) ?TypedPointerElemOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return self_ptr.opq.atomic_compare_exchange_weak(Self.Element, expected, new_value, success_order, fail_order);
-    }
-
-    //**************************
-    // VOID POINTER CONVERSION
-    //**************************
-    pub fn to_anyopaque(self_ptr: anytype) TypedPointerVoidPtrOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.MUTABILITY == .CONST_PTR) self_ptr.opq.to_const_anyopaque() else self_ptr.opq.to_anyopaque();
-    }
-    pub fn to_anyopaque_or_null(self_ptr: anytype) TypedPointerOptionalVoidPtrOf(@TypeOf(self_ptr.*)) {
-        const Self = @TypeOf(self_ptr.*);
-        return if (comptime Self.MUTABILITY == .CONST_PTR) self_ptr.opq.to_const_anyopaque_or_null() else self_ptr.opq.to_anyopaque_or_null();
-    }
-};
-
-pub fn Pointer(comptime T: type, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = null;
-        pub const NULLABILITY: Nullability = .NEVER_NULL;
-        pub const MUTABILITY: Mutability = .MUT_PTR;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const ptr = TypedMethods.ptr_mut;
-        pub const ptr_many = TypedMethods.ptr_many_mut;
-        pub const slice = TypedMethods.slice_mut;
-        pub const array_ptr = TypedMethods.array_ptr_mut;
-        pub const vector_ptr = TypedMethods.vector_ptr_mut;
-
-        // GET / SET
-        pub const get = TypedMethods.get;
-        pub const get_at_index = TypedMethods.get_at_index;
-        pub const set = TypedMethods.set;
-        pub const set_at_index = TypedMethods.set_at_index;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
-        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
-        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
-        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
-        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
-        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
-            return Self{ .opq = .from_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // BULK WRITE
-        pub const memcopy_from = TypedMethods.memcopy_from;
-        pub const memmove_from = TypedMethods.memmove_from;
-        pub const memset = TypedMethods.memset;
-        pub const bytes = TypedMethods.bytes;
-
-        // VOLATILE / ATOMIC WRITE
-        pub const set_volatile = TypedMethods.set_volatile;
-        pub const atomic_store = TypedMethods.atomic_store;
-        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
-        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
-        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
-    };
-}
-
-pub fn NullablePointer(comptime T: type, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = null;
-        pub const NULLABILITY: Nullability = .NULLABLE;
-        pub const MUTABILITY: Mutability = .MUT_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // NULL CHECKS
-        pub const is_null = TypedMethods.is_null;
-        pub const not_null = TypedMethods.not_null;
-        pub const assert_not_null = TypedMethods.assert_not_null;
-        pub const assert_null = TypedMethods.assert_null;
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const ptr_or_null = TypedMethods.ptr_mut_or_null;
-        pub const ptr_many_or_null = TypedMethods.ptr_many_mut_or_null;
-        pub const slice_or_null = TypedMethods.slice_mut_or_null;
-        pub const array_ptr_or_null = TypedMethods.array_ptr_mut_or_null;
-        pub const vector_ptr_or_null = TypedMethods.vector_ptr_mut_or_null;
-
-        // GET / SET
-        pub const get_or_null = TypedMethods.get_or_null;
-        pub const get_orelse = TypedMethods.get_orelse;
-        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
-        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
-        pub const set_if_not_null = TypedMethods.set_if_not_null;
-        pub const set_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_if_not_null_return_ptr_is_NOT_null;
-        pub const set_if_not_null_return_ptr_IS_null = TypedMethods.set_if_not_null_return_ptr_IS_null;
-        pub const set_at_index_if_not_null = TypedMethods.set_at_index_if_not_null;
-        pub const set_at_index_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_at_index_if_not_null_return_ptr_is_NOT_null;
-        pub const set_at_index_if_not_null_return_ptr_IS_null = TypedMethods.set_at_index_if_not_null_return_ptr_IS_null;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
-        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
-        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
-        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
-        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
-        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
-        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
-        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
-        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
-        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
-        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
-        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn new_null() Self {
-            return Self{ .opq = .new_null() };
-        }
-
-        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
-            return Self{ .opq = .from_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // SIGNED DISTANCE (NULLABLE)
-        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
-        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
-        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
-        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
-        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
-        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
-
-        // NULL-PRESERVING ARITHMETIC
-        pub const add_or_null = TypedMethods.add_or_null;
-        pub const subtract_or_null = TypedMethods.subtract_or_null;
-        pub const move_or_null = TypedMethods.move_or_null;
-
-        // NULL CONSTRUCTION / MUTATION
-        pub const set_null = TypedMethods.set_null;
-        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
-
-        // ADDITIONAL CASTS
-        pub const to_non_null = TypedMethods.to_non_null;
-
-        // VOID POINTER
-        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
-
-        // BULK WRITE
-        pub const memcopy_from = TypedMethods.memcopy_from;
-        pub const memmove_from = TypedMethods.memmove_from;
-        pub const memset = TypedMethods.memset;
-        pub const bytes = TypedMethods.bytes;
-
-        // VOLATILE / ATOMIC WRITE
-        pub const set_volatile = TypedMethods.set_volatile;
-        pub const atomic_store = TypedMethods.atomic_store;
-        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
-        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
-        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
-    };
-}
-
-pub fn ConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = null;
-        pub const NULLABILITY: Nullability = .NEVER_NULL;
-        pub const MUTABILITY: Mutability = .CONST_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *const T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const const_ptr = TypedMethods.ptr_const;
-        pub const const_ptr_many = TypedMethods.ptr_many_const;
-        pub const const_slice = TypedMethods.slice_const;
-        pub const const_array_ptr = TypedMethods.array_ptr_const;
-        pub const const_vector_ptr = TypedMethods.vector_ptr_const;
-
-        // GET
-        pub const get = TypedMethods.get;
-        pub const get_at_index = TypedMethods.get_at_index;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
-        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
-        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
-        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
-        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
-        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
-            return Self{ .opq = .from_const_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // ADDITIONAL CASTS
-        pub const to_mutable = TypedMethods.to_mutable;
-    };
-}
-
-pub fn NullableConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = null;
-        pub const NULLABILITY: Nullability = .NULLABLE;
-        pub const MUTABILITY: Mutability = .CONST_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *const T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // NULL CHECKS
-        pub const is_null = TypedMethods.is_null;
-        pub const not_null = TypedMethods.not_null;
-        pub const assert_not_null = TypedMethods.assert_not_null;
-        pub const assert_null = TypedMethods.assert_null;
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const const_ptr_or_null = TypedMethods.ptr_const_or_null;
-        pub const const_ptr_many_or_null = TypedMethods.ptr_many_const_or_null;
-        pub const const_slice_or_null = TypedMethods.slice_const_or_null;
-        pub const const_array_ptr_or_null = TypedMethods.array_ptr_const_or_null;
-        pub const const_vector_ptr_or_null = TypedMethods.vector_ptr_const_or_null;
-
-        // GET
-        pub const get_or_null = TypedMethods.get_or_null;
-        pub const get_orelse = TypedMethods.get_orelse;
-        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
-        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
-        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
-        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
-        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
-        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
-        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
-        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
-        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
-        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
-        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
-        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
-        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn new_null() Self {
-            return Self{ .opq = .new_null() };
-        }
-
-        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
-            return Self{ .opq = .from_const_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // SIGNED DISTANCE (NULLABLE)
-        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
-        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
-        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
-        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
-        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
-        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
-
-        // NULL-PRESERVING ARITHMETIC
-        pub const add_or_null = TypedMethods.add_or_null;
-        pub const subtract_or_null = TypedMethods.subtract_or_null;
-        pub const move_or_null = TypedMethods.move_or_null;
-
-        // NULL CONSTRUCTION / MUTATION
-        pub const set_null = TypedMethods.set_null;
-        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
-
-        // ADDITIONAL CASTS
-        pub const to_non_null = TypedMethods.to_non_null;
-
-        // VOID POINTER
-        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
-
-        // ADDITIONAL CASTS
-        pub const to_mutable = TypedMethods.to_mutable;
-    };
-}
-
-pub fn PointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = A;
-        pub const NULLABILITY: Nullability = .NEVER_NULL;
-        pub const MUTABILITY: Mutability = .MUT_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *align(A) T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const ptr = TypedMethods.ptr_mut;
-        pub const ptr_many = TypedMethods.ptr_many_mut;
-        pub const slice = TypedMethods.slice_mut;
-        pub const array_ptr = TypedMethods.array_ptr_mut;
-        pub const vector_ptr = TypedMethods.vector_ptr_mut;
-
-        // GET / SET
-        pub const get = TypedMethods.get;
-        pub const get_at_index = TypedMethods.get_at_index;
-        pub const set = TypedMethods.set;
-        pub const set_at_index = TypedMethods.set_at_index;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
-        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
-        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
-        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
-        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
-        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
-            return Self{ .opq = .from_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // ADDITIONAL CASTS
-        pub const to_unaligned = TypedMethods.to_unaligned;
-
-        // BULK WRITE
-        pub const memcopy_from = TypedMethods.memcopy_from;
-        pub const memmove_from = TypedMethods.memmove_from;
-        pub const memset = TypedMethods.memset;
-        pub const bytes = TypedMethods.bytes;
-
-        // VOLATILE / ATOMIC WRITE
-        pub const set_volatile = TypedMethods.set_volatile;
-        pub const atomic_store = TypedMethods.atomic_store;
-        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
-        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
-        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
-    };
-}
-
-pub fn NullablePointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = A;
-        pub const NULLABILITY: Nullability = .NULLABLE;
-        pub const MUTABILITY: Mutability = .MUT_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *align(A) T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // NULL CHECKS
-        pub const is_null = TypedMethods.is_null;
-        pub const not_null = TypedMethods.not_null;
-        pub const assert_not_null = TypedMethods.assert_not_null;
-        pub const assert_null = TypedMethods.assert_null;
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const ptr_or_null = TypedMethods.ptr_mut_or_null;
-        pub const ptr_many_or_null = TypedMethods.ptr_many_mut_or_null;
-        pub const slice_or_null = TypedMethods.slice_mut_or_null;
-        pub const array_ptr_or_null = TypedMethods.array_ptr_mut_or_null;
-        pub const vector_ptr_or_null = TypedMethods.vector_ptr_mut_or_null;
-
-        // GET / SET
-        pub const get_or_null = TypedMethods.get_or_null;
-        pub const get_orelse = TypedMethods.get_orelse;
-        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
-        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
-        pub const set_if_not_null = TypedMethods.set_if_not_null;
-        pub const set_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_if_not_null_return_ptr_is_NOT_null;
-        pub const set_if_not_null_return_ptr_IS_null = TypedMethods.set_if_not_null_return_ptr_IS_null;
-        pub const set_at_index_if_not_null = TypedMethods.set_at_index_if_not_null;
-        pub const set_at_index_if_not_null_return_ptr_is_NOT_null = TypedMethods.set_at_index_if_not_null_return_ptr_is_NOT_null;
-        pub const set_at_index_if_not_null_return_ptr_IS_null = TypedMethods.set_at_index_if_not_null_return_ptr_IS_null;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
-        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
-        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
-        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
-        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
-        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
-        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
-        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
-        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
-        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
-        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
-        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn new_null() Self {
-            return Self{ .opq = .new_null() };
-        }
-
-        pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
-            return Self{ .opq = .from_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // SIGNED DISTANCE (NULLABLE)
-        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
-        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
-        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
-        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
-        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
-        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
-
-        // NULL-PRESERVING ARITHMETIC
-        pub const add_or_null = TypedMethods.add_or_null;
-        pub const subtract_or_null = TypedMethods.subtract_or_null;
-        pub const move_or_null = TypedMethods.move_or_null;
-
-        // NULL CONSTRUCTION / MUTATION
-        pub const set_null = TypedMethods.set_null;
-        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
-
-        // ADDITIONAL CASTS
-        pub const to_non_null = TypedMethods.to_non_null;
-
-        // VOID POINTER
-        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
-
-        // ADDITIONAL CASTS
-        pub const to_unaligned = TypedMethods.to_unaligned;
-
-        // BULK WRITE
-        pub const memcopy_from = TypedMethods.memcopy_from;
-        pub const memmove_from = TypedMethods.memmove_from;
-        pub const memset = TypedMethods.memset;
-        pub const bytes = TypedMethods.bytes;
-
-        // VOLATILE / ATOMIC WRITE
-        pub const set_volatile = TypedMethods.set_volatile;
-        pub const atomic_store = TypedMethods.atomic_store;
-        pub const atomic_read_modify_write = TypedMethods.atomic_read_modify_write;
-        pub const atomic_compare_exchange_strong = TypedMethods.atomic_compare_exchange_strong;
-        pub const atomic_compare_exchange_weak = TypedMethods.atomic_compare_exchange_weak;
-    };
-}
-
-pub fn ConstPointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = A;
-        pub const NULLABILITY: Nullability = .NEVER_NULL;
-        pub const MUTABILITY: Mutability = .CONST_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *align(A) const T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const const_ptr = TypedMethods.ptr_const;
-        pub const const_ptr_many = TypedMethods.ptr_many_const;
-        pub const const_slice = TypedMethods.slice_const;
-        pub const const_array_ptr = TypedMethods.array_ptr_const;
-        pub const const_vector_ptr = TypedMethods.vector_ptr_const;
-
-        // GET
-        pub const get = TypedMethods.get;
-        pub const get_at_index = TypedMethods.get_at_index;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude = TypedMethods.elements_between_self_low_other_high_exclude;
-        pub const elements_between_self_high_other_low_exclude = TypedMethods.elements_between_self_high_other_low_exclude;
-        pub const elements_between_self_low_other_high_include = TypedMethods.elements_between_self_low_other_high_include;
-        pub const elements_between_self_high_other_low_include = TypedMethods.elements_between_self_high_other_low_include;
-        pub const elements_between_exclude_high = TypedMethods.elements_between_exclude_high;
-        pub const elements_between_include_high = TypedMethods.elements_between_include_high;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
-            return Self{ .opq = .from_const_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // ADDITIONAL CASTS
-        pub const to_unaligned = TypedMethods.to_unaligned;
-
-        // ADDITIONAL CASTS
-        pub const to_mutable = TypedMethods.to_mutable;
-    };
-}
-
-pub fn NullableConstPointerAlign(comptime T: type, comptime A: usize, comptime SOURCE: PointerSource) type {
-    return struct {
-        const Self = @This();
-
-        pub const Source = SOURCE;
-        pub const Opaque = PointerOpaque(SOURCE);
-        pub const Addr = Opaque.Addr;
-        pub const Element = T;
-        pub const ALIGN: ?usize = A;
-        pub const NULLABILITY: Nullability = .NULLABLE;
-        pub const MUTABILITY: Mutability = .CONST_PTR;
-
-        pub const cast_to = TypedMethods.cast_to;
-        pub const to_const = TypedMethods.to_const;
-        pub const to_align = TypedMethods.to_align;
-        pub const to_nullable = TypedMethods.to_nullable;
-
-        opq: Opaque,
-
-        pub inline fn new(addr: Addr) Self {
-            return Self{ .opq = .new(addr) };
-        }
-        pub inline fn new_from_native(native_ptr: *align(A) const T) Self {
-            return Self{ .opq = .new_from_native(native_ptr) };
-        }
-        pub inline fn assert_native(comptime src: ?SourceLocation) void {
-            Opaque.assert_native(src);
-        }
-
-        // NULL CHECKS
-        pub const is_null = TypedMethods.is_null;
-        pub const not_null = TypedMethods.not_null;
-        pub const assert_not_null = TypedMethods.assert_not_null;
-        pub const assert_null = TypedMethods.assert_null;
-
-        // ALIGNMENT
-        pub const is_aligned = TypedMethods.is_aligned;
-        pub const is_aligned_any = TypedMethods.is_aligned_any;
-        pub const is_aligned_log_2 = TypedMethods.is_aligned_log_2;
-        pub const is_aligned_pow_2 = TypedMethods.is_aligned_pow_2;
-        pub const is_aligned_std_mem = TypedMethods.is_aligned_std_mem;
-        pub const assert_aligned = TypedMethods.assert_aligned;
-        pub const assert_aligned_any = TypedMethods.assert_aligned_any;
-        pub const assert_aligned_log_2 = TypedMethods.assert_aligned_log_2;
-        pub const assert_aligned_pow_2 = TypedMethods.assert_aligned_pow_2;
-        pub const assert_aligned_std_mem = TypedMethods.assert_aligned_std_mem;
-
-        // POINTER ACCESS
-        pub const const_ptr_or_null = TypedMethods.ptr_const_or_null;
-        pub const const_ptr_many_or_null = TypedMethods.ptr_many_const_or_null;
-        pub const const_slice_or_null = TypedMethods.slice_const_or_null;
-        pub const const_array_ptr_or_null = TypedMethods.array_ptr_const_or_null;
-        pub const const_vector_ptr_or_null = TypedMethods.vector_ptr_const_or_null;
-
-        // GET
-        pub const get_or_null = TypedMethods.get_or_null;
-        pub const get_orelse = TypedMethods.get_orelse;
-        pub const get_at_index_or_null = TypedMethods.get_at_index_or_null;
-        pub const get_at_index_orelse = TypedMethods.get_at_index_orelse;
-
-        // ADDRESS ADD / SUB / MOVE
-        pub const add = TypedMethods.add;
-        pub const add_in_place = TypedMethods.add_in_place;
-        pub const add_assert_contiguous = TypedMethods.add_assert_contiguous;
-        pub const add_in_place_assert_contiguous = TypedMethods.add_in_place_assert_contiguous;
-        pub const subtract = TypedMethods.subtract;
-        pub const subtract_in_place = TypedMethods.subtract_in_place;
-        pub const subtract_assert_contiguous = TypedMethods.subtract_assert_contiguous;
-        pub const subtract_in_place_assert_contiguous = TypedMethods.subtract_in_place_assert_contiguous;
-        pub const move = TypedMethods.move;
-        pub const move_in_place = TypedMethods.move_in_place;
-        pub const move_assert_contiguous = TypedMethods.move_assert_contiguous;
-        pub const move_in_place_assert_contiguous = TypedMethods.move_in_place_assert_contiguous;
-
-        // ELEMENTS BETWEEN
-        pub const elements_between_self_low_other_high_exclude_or_null = TypedMethods.elements_between_self_low_other_high_exclude_or_null;
-        pub const elements_between_self_low_other_high_exclude_orelse_0 = TypedMethods.elements_between_self_low_other_high_exclude_orelse_0;
-        pub const elements_between_self_high_other_low_exclude_or_null = TypedMethods.elements_between_self_high_other_low_exclude_or_null;
-        pub const elements_between_self_high_other_low_exclude_orelse_0 = TypedMethods.elements_between_self_high_other_low_exclude_orelse_0;
-        pub const elements_between_self_low_other_high_include_or_null = TypedMethods.elements_between_self_low_other_high_include_or_null;
-        pub const elements_between_self_low_other_high_include_orelse_0 = TypedMethods.elements_between_self_low_other_high_include_orelse_0;
-        pub const elements_between_self_high_other_low_include_or_null = TypedMethods.elements_between_self_high_other_low_include_or_null;
-        pub const elements_between_self_high_other_low_include_orelse_0 = TypedMethods.elements_between_self_high_other_low_include_orelse_0;
-        pub const elements_between_exclude_high_or_null = TypedMethods.elements_between_exclude_high_or_null;
-        pub const elements_between_exclude_high_orelse_0 = TypedMethods.elements_between_exclude_high_orelse_0;
-        pub const elements_between_include_high_or_null = TypedMethods.elements_between_include_high_or_null;
-        pub const elements_between_include_high_orelse_0 = TypedMethods.elements_between_include_high_orelse_0;
-
-        // RANGES
-        pub const is_within_range_exclude_high = TypedMethods.is_within_range_exclude_high;
-        pub const is_within_range_include_high = TypedMethods.is_within_range_include_high;
-        pub const assert_is_within_range_exclude_high = TypedMethods.assert_is_within_range_exclude_high;
-        pub const assert_is_within_range_include_high = TypedMethods.assert_is_within_range_include_high;
-
-        pub inline fn new_null() Self {
-            return Self{ .opq = .new_null() };
-        }
-
-        pub inline fn from_anyopaque(void_ptr: *const anyopaque) Self {
-            return Self{ .opq = .from_const_anyopaque(void_ptr) };
-        }
-
-        // ADDRESS INTROSPECTION
-        pub const local_addr = TypedMethods.local_addr;
-        pub const resolved_addr = TypedMethods.resolved_addr;
-        pub const resolved_addr_or_null = TypedMethods.resolved_addr_or_null;
-
-        // COMPARISON / HASHING
-        pub const eql = TypedMethods.eql;
-        pub const eql_native = TypedMethods.eql_native;
-        pub const eql_local = TypedMethods.eql_local;
-        pub const order = TypedMethods.order;
-        pub const hash = TypedMethods.hash;
-        pub const simple_hash = TypedMethods.simple_hash;
-
-        // SOURCE INTROSPECTION
-        pub const source_kind = TypedMethods.source_kind;
-        pub const is_native = TypedMethods.is_native;
-        pub const is_global_resolver = TypedMethods.is_global_resolver;
-
-        // SIGNED DISTANCE
-        pub const bytes_from = TypedMethods.bytes_from;
-        pub const elements_from = TypedMethods.elements_from;
-        pub const offset_from = TypedMethods.offset_from;
-
-        // BULK READ
-        pub const memcopy_to = TypedMethods.memcopy_to;
-        pub const memmove_to = TypedMethods.memmove_to;
-        pub const const_bytes = TypedMethods.const_bytes;
-
-        // VOLATILE / ATOMIC READ
-        pub const get_volatile = TypedMethods.get_volatile;
-        pub const atomic_load = TypedMethods.atomic_load;
-        pub const load = TypedMethods.load;
-
-        // VOID POINTER
-        pub const to_anyopaque = TypedMethods.to_anyopaque;
-
-        // SIGNED DISTANCE (NULLABLE)
-        pub const bytes_from_or_null = TypedMethods.bytes_from_or_null;
-        pub const bytes_from_orelse_0 = TypedMethods.bytes_from_orelse_0;
-        pub const elements_from_or_null = TypedMethods.elements_from_or_null;
-        pub const elements_from_orelse_0 = TypedMethods.elements_from_orelse_0;
-        pub const offset_from_or_null = TypedMethods.offset_from_or_null;
-        pub const offset_from_orelse_0 = TypedMethods.offset_from_orelse_0;
-
-        // NULL-PRESERVING ARITHMETIC
-        pub const add_or_null = TypedMethods.add_or_null;
-        pub const subtract_or_null = TypedMethods.subtract_or_null;
-        pub const move_or_null = TypedMethods.move_or_null;
-
-        // NULL CONSTRUCTION / MUTATION
-        pub const set_null = TypedMethods.set_null;
-        pub const is_null_or_equal = TypedMethods.is_null_or_equal;
-
-        // ADDITIONAL CASTS
-        pub const to_non_null = TypedMethods.to_non_null;
-
-        // VOID POINTER
-        pub const to_anyopaque_or_null = TypedMethods.to_anyopaque_or_null;
-
-        // ADDITIONAL CASTS
-        pub const to_unaligned = TypedMethods.to_unaligned;
-
-        // ADDITIONAL CASTS
-        pub const to_mutable = TypedMethods.to_mutable;
+        // //**************************
+        // // ANYOPAQUE CONVERSION
+        // //**************************
+        // pub inline fn to_anyopaque(self: Self) *anyopaque {
+        //     self.assert_not_null(@src());
+        //     return @ptrCast(self.ptr(u8));
+        // }
+        // pub inline fn to_const_anyopaque(self: Self) *const anyopaque {
+        //     self.assert_not_null(@src());
+        //     return @ptrCast(self.ptr(u8));
+        // }
+        // pub inline fn to_anyopaque_or_null(self: Self) ?*anyopaque {
+        //     if (self.is_null()) return null;
+        //     return @ptrCast(self.ptr(u8));
+        // }
+        // pub inline fn to_const_anyopaque_or_null(self: Self) ?*const anyopaque {
+        //     if (self.is_null()) return null;
+        //     return @ptrCast(self.ptr(u8));
+        // }
+        // pub inline fn from_anyopaque(void_ptr: *anyopaque) Self {
+        //     return Self.new_from_native(void_ptr);
+        // }
+        // pub inline fn from_const_anyopaque(void_ptr: *const anyopaque) Self {
+        //     return Self.new_from_native(void_ptr);
+        // }
     };
 }

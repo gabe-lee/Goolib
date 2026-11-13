@@ -29,7 +29,7 @@ const PointerModule = Root.Pointer;
 
 const PointerSource = PointerModule.PointerSource;
 const PointerSourceKind = PointerModule.PointerSourceKind;
-const PointerOpaque = PointerModule.PointerOpaque;
+const PointerAdvanced = PointerModule.PointerAdvanced;
 const AlignmentSource = PointerModule.AlignmentSource;
 const Pointer = PointerModule.Pointer;
 const NullablePointer = PointerModule.NullablePointer;
@@ -44,8 +44,8 @@ const NATIVE = PointerSource.native_pointer();
 
 var global_test_buffer: [8]u8 = undefined;
 
-fn resolve_buffer_offset(offset: u32) usize {
-    return @intFromPtr(&global_test_buffer[0]) + offset;
+fn resolve_buffer_offset(offset: u32) ?[*]u8 {
+    return @as([*]u8, @ptrFromInt(@intFromPtr(&global_test_buffer[0]) + offset));
 }
 
 const SMALL_HANDLE_SOURCE = PointerSource.global_pointer_resolver_auto_from_int(.{
@@ -55,7 +55,7 @@ const SMALL_HANDLE_SOURCE = PointerSource.global_pointer_resolver_auto_from_int(
 
 test "PointerOpaque -> native pointer operations" {
     var value: u32 = 0x12345678;
-    var opq = PointerOpaque(NATIVE).new_from_native(&value);
+    var opq = PointerAdvanced(NATIVE).new_from_native(&value);
 
     try testing.expect(opq.not_null());
     try testing.expect(!opq.is_null());
@@ -104,7 +104,7 @@ test "Pointer -> native typed mutable pointer" {
     try testing.expectEqual(@as(u32, 20), vector[1]);
 
     try testing.expect(ptr.is_aligned(@alignOf(u32)));
-    try testing.expect(!ptr.opq.add(1).is_aligned(@alignOf(u32)));
+    try testing.expect(!ptr.opq.increment(1).is_aligned(@alignOf(u32)));
     try testing.expectEqual(@as(usize, 3), ptr.elements_between_self_low_other_high_exclude(ptr.add(3)));
     try testing.expectEqual(@as(usize, 4), ptr.elements_between_self_low_other_high_include(ptr.add(3)));
     try testing.expectEqual(@as(usize, 3), ptr.elements_between_exclude_high(ptr.add(3)));
@@ -128,31 +128,31 @@ test "cast_to and utility casts -> select wrapper properties" {
 
     var ptr = P.new_from_native(&values[0]);
 
-    const opaque_cast = ptr.opq.cast_to(.NEVER_NULL, .CONST_PTR, u32, null);
+    const opaque_cast = ptr.opq.cast_to(.NEVER_NULL, .CONST, u32, null);
     try testing.expect(@TypeOf(opaque_cast) == CP);
     try testing.expectEqual(@as(u32, 1), opaque_cast.get());
 
-    const const_cast = ptr.cast_to(.NEVER_NULL, .CONST_PTR, u32, null);
+    const const_cast = ptr.cast_to(.NEVER_NULL, .CONST, u32, null);
     try testing.expect(@TypeOf(const_cast) == CP);
     try testing.expectEqual(@as(u32, 1), const_cast.get());
 
-    const aligned_const_cast = ptr.cast_to(.NEVER_NULL, .CONST_PTR, u32, 16);
+    const aligned_const_cast = ptr.cast_to(.NEVER_NULL, .CONST, u32, 16);
     try testing.expect(@TypeOf(aligned_const_cast) == ACP);
     try testing.expectEqual(@as(u32, 1), aligned_const_cast.get());
 
-    const aligned_source_cast = ptr.cast_to(.NEVER_NULL, .MUT_PTR, u32, AlignmentSource.bytes_align(16));
+    const aligned_source_cast = ptr.cast_to(.NEVER_NULL, .MUTABLE, u32, AlignmentSource.bytes_align(16));
     try testing.expect(@TypeOf(aligned_source_cast) == AP);
     try testing.expectEqual(@as(u32, 1), aligned_source_cast.get());
 
-    const native_aligned_ptr = ptr.to_align(AlignmentSource.native_align(u32));
-    try testing.expect(@TypeOf(native_aligned_ptr) == PointerAlign(u32, @alignOf(u32), NATIVE));
+    const native_aligned_ptr = ptr.to_align(AlignmentSource.native_align());
+    try testing.expect(@TypeOf(native_aligned_ptr) == P);
     try testing.expectEqual(@as(u32, 1), native_aligned_ptr.get());
 
-    const nullable_cast = ptr.cast_to(.NULLABLE, .MUT_PTR, u32, null);
+    const nullable_cast = ptr.cast_to(.NULLABLE, .MUTABLE, u32, null);
     try testing.expect(@TypeOf(nullable_cast) == NP);
     try testing.expectEqual(@as(?u32, 1), nullable_cast.get_or_null());
 
-    const nullable_aligned_cast = ptr.cast_to(.NULLABLE, .MUT_PTR, u32, 16);
+    const nullable_aligned_cast = ptr.cast_to(.NULLABLE, .MUTABLE, u32, 16);
     try testing.expect(@TypeOf(nullable_aligned_cast) == ANP);
     try testing.expectEqual(@as(?u32, 1), nullable_aligned_cast.get_or_null());
 
@@ -172,11 +172,11 @@ test "cast_to and utility casts -> select wrapper properties" {
     try testing.expect(@TypeOf(nullable_const_aligned_ptr) == ACNP);
     try testing.expectEqual(@as(?u32, 1), nullable_const_aligned_ptr.get_or_null());
 
-    const non_null_cast = nullable_ptr.cast_to(.NEVER_NULL, .MUT_PTR, u32, null);
+    const non_null_cast = nullable_ptr.cast_to(.NEVER_NULL, .MUTABLE, u32, null);
     try testing.expect(@TypeOf(non_null_cast) == P);
     try testing.expectEqual(@as(u32, 1), non_null_cast.get());
 
-    const null_nullable = NullablePointer(u32, NATIVE).new(0);
+    const null_nullable = NullablePointer(u32, NATIVE).new(null);
     const null_aligned = null_nullable.to_align(16);
     try testing.expect(@TypeOf(null_aligned) == ANP);
     try testing.expect(null_aligned.is_null());
@@ -200,7 +200,7 @@ test "NullablePointer -> native typed nullable pointer" {
     try testing.expect(!ptr.set_if_not_null_return_ptr_IS_null(10));
     try testing.expectEqual(@as(u32, 10), value);
 
-    const null_ptr = P.new(0);
+    const null_ptr = P.new(null);
     try testing.expect(null_ptr.is_null());
     try testing.expect(!null_ptr.not_null());
     try testing.expectEqual(@as(?*u32, null), null_ptr.ptr_or_null());
@@ -243,7 +243,7 @@ test "NullableConstPointer -> native typed nullable const pointer" {
     var value: u32 = 77;
     const P = NullableConstPointer(u32, NATIVE);
     const ptr = P.new_from_native(&value);
-    const null_ptr = P.new(0);
+    const null_ptr = P.new(null);
 
     try testing.expectEqual(@as(?u32, 77), ptr.get_or_null());
     try testing.expectEqual(@as(u32, 77), ptr.get_orelse(0));
@@ -282,7 +282,7 @@ test "NullablePointerAlign -> aligned typed nullable pointer" {
     var values: [4]u32 align(16) = .{ 5, 6, 7, 8 };
     const P = NullablePointerAlign(u32, 16, NATIVE);
     var ptr = P.new_from_native(&values[0]);
-    const null_ptr = P.new(0);
+    const null_ptr = P.new(null);
 
     try testing.expect(@TypeOf(ptr.ptr_or_null()) == ?*align(16) u32);
     try testing.expect(@TypeOf(ptr.slice_or_null(1)) == ?[]align(16) u32);
@@ -317,7 +317,7 @@ test "NullableConstPointerAlign -> aligned typed nullable const pointer" {
     var values: [4]u32 align(16) = .{ 31, 32, 33, 34 };
     const P = NullableConstPointerAlign(u32, 16, NATIVE);
     const ptr = P.new_from_native(&values[0]);
-    const null_ptr = P.new(0);
+    const null_ptr = P.new(null);
 
     try testing.expect(@TypeOf(ptr.const_ptr_or_null()) == ?*align(16) const u32);
     try testing.expect(@TypeOf(ptr.const_ptr_many_or_null()) == ?[*]align(16) const u32);
@@ -341,7 +341,7 @@ test "pointer introspection, comparison, and hashing" {
     const ptr = P.new_from_native(&values[0]);
     const same = P.new_from_native(&values[0]);
 
-    try testing.expectEqual(@intFromPtr(&values[0]), ptr.local_addr());
+    try testing.expectEqual(@intFromPtr(&values[0]), @intFromPtr(ptr.local_addr().?));
     try testing.expectEqual(@intFromPtr(&values[0]), ptr.resolved_addr());
     try testing.expectEqual(@as(?usize, @intFromPtr(&values[0])), ptr.resolved_addr_or_null());
     try testing.expect(ptr.eql(same));
@@ -361,7 +361,7 @@ test "pointer introspection, comparison, and hashing" {
     const null_ptr = NullablePointer(u32, NATIVE).new_null();
     try testing.expectEqual(@as(?usize, null), null_ptr.resolved_addr_or_null());
     try testing.expectEqual(std.math.Order.lt, null_ptr.order(ptr.to_nullable()));
-    try testing.expect(null_ptr.eql(NullablePointer(u32, NATIVE).new(0)));
+    try testing.expect(null_ptr.eql(NullablePointer(u32, NATIVE).new(null)));
 }
 
 test "signed distances and null-preserving arithmetic" {
@@ -378,7 +378,7 @@ test "signed distances and null-preserving arithmetic" {
     try testing.expectEqual(@as(isize, 12), third.offset_from(ptr));
     try testing.expectEqual(@as(isize, -12), ptr.offset_from(third));
 
-    const null_ptr = NP.new(0);
+    const null_ptr = NP.new(null);
     try testing.expectEqual(@as(?isize, null), null_ptr.bytes_from_or_null(ptr.to_nullable()));
     try testing.expectEqual(@as(isize, 0), null_ptr.bytes_from_orelse_0(ptr.to_nullable()));
     try testing.expectEqual(@as(?isize, 3), third.to_nullable().elements_from_or_null(ptr.to_nullable()));
@@ -546,7 +546,7 @@ test "GLOBAL_RESOLVER -> small local handles resolve to native pointers" {
     try testing.expect(ptr.eql_native(&global_test_buffer[2]));
 
     const NullableP = NullablePointer(u8, SMALL_HANDLE_SOURCE);
-    const null_ptr = NullableP.new(NullableP.Opaque.AddrNull);
+    const null_ptr = NullableP.new(NullableP.Opaque.OpqPtrNull);
     const null_aligned = null_ptr.to_align(16);
     try testing.expect(null_aligned.is_null());
 }
