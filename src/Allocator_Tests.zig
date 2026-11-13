@@ -1518,11 +1518,11 @@ test "AllocatorAdapter -> cached allocator interface forwards every helper famil
     fillSlice(raw_src, 0x21);
     const raw_clone = adapter.clone_raw(raw_src, 24, null, {}) orelse return error.OutOfMemory;
     try expectFilled(raw_clone[0..24], 0x21);
-    adapter.free_raw(raw_clone[0..24], null, {});
+    adapter.free_raw(raw_clone, 24, null, {});
 
     const raw_slim = adapter.clone_slim_raw(raw_src, 8, null, {}) orelse return error.OutOfMemory;
     try expectFilled(raw_slim[0..8], 0x21);
-    adapter.free_raw(raw_slim[0..8], null, {});
+    adapter.free_raw(raw_slim, 8, null, {});
     adapter.free_bytes(raw_src, {});
 
     // create/destroy and single-value clones.
