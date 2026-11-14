@@ -1729,7 +1729,8 @@ pub const PowerOf2 = enum(u8) {
     }
 
     pub fn align_of_type(comptime T: type) PowerOf2 {
-        return @fromBackingInt(@intCast(@as(u8, @alignOf(T))));
+        const byte_align: usize = @alignOf(T);
+        return comptime alignment_power(byte_align);
     }
 
     pub fn num_bits(power: PowerOf2) u8 {

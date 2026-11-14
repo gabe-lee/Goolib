@@ -172,7 +172,7 @@ test "cast_to and utility casts -> select wrapper properties" {
     try testing.expect(@TypeOf(non_null_cast) == P);
     try testing.expectEqual(@as(u32, 1), non_null_cast.get());
 
-    const null_nullable = NullablePointer(u32, NATIVE).new(null);
+    const null_nullable = NullablePointer(u32, NATIVE).new_from(null);
     const null_aligned = null_nullable.to_specific_align(16);
     try testing.expect(@TypeOf(null_aligned) == ANP);
     try testing.expect(null_aligned.is_null());
@@ -196,7 +196,7 @@ test "NullablePointer -> native typed nullable pointer" {
     try testing.expect(!ptr.set_if_not_null_return_ptr_IS_null(10));
     try testing.expectEqual(@as(u32, 10), value);
 
-    const null_ptr = P.new(null);
+    const null_ptr = P.new_from(null);
     try testing.expect(null_ptr.is_null());
     try testing.expect(!null_ptr.not_null());
     try testing.expectEqual(@as(?*u32, null), null_ptr.ptr_or_null());
@@ -235,7 +235,7 @@ test "NullableConstPointer -> native typed nullable const pointer" {
     var value: u32 = 77;
     const P = NullableConstPointer(u32, NATIVE);
     const ptr = P.new_from_native(&value);
-    const null_ptr = P.new(null);
+    const null_ptr = P.new_from(null);
 
     try testing.expectEqual(@as(?u32, 77), ptr.get_or_null());
     try testing.expectEqual(@as(u32, 77), ptr.get_orelse(0));
@@ -270,7 +270,7 @@ test "NullablePointerAlign -> aligned typed nullable pointer" {
     var values: [4]u32 align(16) = .{ 5, 6, 7, 8 };
     const P = NullablePointerAlign(u32, 16, NATIVE);
     var ptr = P.new_from_native(&values[0]);
-    const null_ptr = P.new(null);
+    const null_ptr = P.new_from(null);
 
     try testing.expect(@TypeOf(ptr.ptr_or_null()) == ?*align(16) u32);
     try testing.expect(@TypeOf(ptr.slice_or_null(1)) == ?[]align(16) u32);
@@ -302,7 +302,7 @@ test "NullableConstPointerAlign -> aligned typed nullable const pointer" {
     var values: [4]u32 align(16) = .{ 31, 32, 33, 34 };
     const P = NullableConstPointerAlign(u32, 16, NATIVE);
     const ptr = P.new_from_native(&values[0]);
-    const null_ptr = P.new(null);
+    const null_ptr = P.new_from(null);
 
     try testing.expect(@TypeOf(ptr.const_ptr_or_null()) == ?*align(16) const u32);
     try testing.expect(@TypeOf(ptr.const_ptr_many_or_null()) == ?[*]align(16) const u32);
@@ -341,9 +341,9 @@ test "pointer introspection, comparison, and hashing" {
     try testing.expect(!ptr.is_global_resolver());
 
     const null_ptr = NullablePointer(u32, NATIVE).new_null();
-    try testing.expectEqual(@as(?usize, null), null_ptr.resolved_addr_or_null());
+    try testing.expectEqual(@as(?usize, null), null_ptr.addr_or_null());
     try testing.expectEqual(std.math.Order.lt, null_ptr.order(ptr.to_nullable()));
-    try testing.expect(null_ptr.eql(NullablePointer(u32, NATIVE).new(null)));
+    try testing.expect(null_ptr.eql(NullablePointer(u32, NATIVE).new_from(null)));
 }
 
 test "signed distances and null-preserving arithmetic" {
@@ -360,7 +360,7 @@ test "signed distances and null-preserving arithmetic" {
     try testing.expectEqual(@as(isize, 12), third.offset_from(ptr));
     try testing.expectEqual(@as(isize, -12), ptr.offset_from(third));
 
-    const null_ptr = NP.new(null);
+    const null_ptr = NP.new_from(null);
     try testing.expectEqual(@as(?isize, null), null_ptr.bytes_from_or_null(ptr.to_nullable()));
     try testing.expectEqual(@as(isize, 0), null_ptr.bytes_from_orelse_0(ptr.to_nullable()));
     try testing.expectEqual(@as(?isize, 3), third.to_nullable().elements_from_or_null(ptr.to_nullable()));
@@ -485,7 +485,7 @@ test "GLOBAL_RESOLVER -> small local handles resolve to native pointers" {
     @memset(&global_test_buffer, 0);
 
     const P = Pointer(u8, SMALL_HANDLE_SOURCE);
-    var ptr = P.new(2);
+    var ptr = P.new_from(2);
 
     try testing.expectEqual(@intFromPtr(&global_test_buffer[2]), @intFromPtr(ptr.resolve_ptr()));
     ptr.set(0xAB);
@@ -508,7 +508,7 @@ test "GLOBAL_RESOLVER -> small local handles resolve to native pointers" {
 
     try testing.expectEqual(@as(u32, 2), ptr.local_addr());
     try testing.expectEqual(@intFromPtr(&global_test_buffer[2]), ptr.resolved_addr());
-    try testing.expectEqual(@as(?usize, @intFromPtr(&global_test_buffer[2])), ptr.resolved_addr_or_null());
+    try testing.expectEqual(@as(?usize, @intFromPtr(&global_test_buffer[2])), ptr.addr_or_null());
     try testing.expectEqual(PointerSourceKind.STATIC_RESOLVER, ptr.source_kind());
     try testing.expect(!ptr.is_native());
     try testing.expect(ptr.is_global_resolver());
@@ -521,3 +521,4 @@ test "GLOBAL_RESOLVER -> small local handles resolve to native pointers" {
     const null_aligned = null_ptr.to_specific_align(16);
     try testing.expect(null_aligned.is_null());
 }
+addr
