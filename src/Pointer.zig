@@ -594,11 +594,11 @@ pub const PointerSource = union(PointerSourceKind) {
         return switch (comptime self) {
             .NATIVE => PtrDefaultFromDef(PTR_DEF.to_make_ptr_def(.many)),
             .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
-                .U8 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
-                .U16 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
-                .U32 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
-                .U64 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
-                .USIZE => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U8 => |F| if (PTR_DEF.NULLABILITY == .NULLABLE and F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U16 => |F| if (PTR_DEF.NULLABILITY == .NULLABLE and F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U32 => |F| if (PTR_DEF.NULLABILITY == .NULLABLE and F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U64 => |F| if (PTR_DEF.NULLABILITY == .NULLABLE and F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .USIZE => |F| if (PTR_DEF.NULLABILITY == .NULLABLE and F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
             },
         };
     }
@@ -831,6 +831,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             return HAS_SENTINEL;
         }
         pub inline fn sentinel_value(self: Self) ELEMENT {
+            comptime assert_with_reason(HAS_SENTINEL, @src(), "pointer type has no sentinel value", .{});
             _ = self;
             return SENTINEL;
         }
@@ -877,14 +878,14 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         inline fn addrspace_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => NewPtr{ .internal = @addrSpaceCast(self.internal) },
+                .NATIVE => return NewPtr{ .internal = @addrSpaceCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn raw_address_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => NewPtr{ .internal = @ptrFromInt(@intFromPtr(self.internal)) },
+                .NATIVE => return NewPtr{ .internal = @ptrFromInt(@intFromPtr(self.internal)) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
@@ -940,7 +941,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn addr_no_align_check(self: Self) usize {
             self.assert_not_null(@src());
             switch (comptime SOURCE) {
-                .NATIVE => @intFromPtr(self.internal),
+                .NATIVE => return @intFromPtr(self.internal),
                 .STATIC_RESOLVER => {
                     const a = static_resolve_addr(self.internal);
                     if (comptime !IS_ALLOW_ZERO) {
@@ -1146,7 +1147,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             while (i <= max_len and p[i] != SENTINEL) {
                 i += 1;
             }
-            assert_with_reason(p[i] == SENTINEL, @src(), "reached the length limit to search for sentinel value without finding sentinel ({d})", .{max_len});
+            assert_with_reason(i <= max_len and p[i] == SENTINEL, @src(), "reached the length limit to search for sentinel value without finding sentinel ({d})", .{max_len});
             return i;
         }
 
@@ -1284,11 +1285,11 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             return self.remove_volatile_cast(PTR_DEF.with_volatile(.NOT_VOLATILE));
         }
         pub inline fn to_specific_addrspace(self: Self, comptime addr_space: AddrSpace) PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(addr_space)) {
-            if (comptime ADDRSPACE != null and ADDRSPACE.? == addr_space) return self;
+            if (comptime (ADDRSPACE == null and addr_space == .generic) or (ADDRSPACE != null and ADDRSPACE.? == addr_space)) return self;
             return self.addrspace_cast(PTR_DEF.with_addrspace(addr_space));
         }
         pub inline fn to_normal_addrspace(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_addrspace(null)) {
-            if (comptime ADDRSPACE == null) return self;
+            if (comptime ADDRSPACE == null or ADDRSPACE.? == .generic) return self;
             return self.addrspace_cast(PTR_DEF.with_addrspace(null));
         }
         pub inline fn cast_to_element(self: Self, comptime NEW_ELEM: type) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(null)) {
