@@ -103,81 +103,57 @@ pub fn SentinelRef(comptime T: type, comptime VAL: T) *const T {
     return @ptrCast(&Holder.SENTINEL);
 }
 
-pub const AlignmentSource = union(enum) {
-    NATIVE: void,
-    BYTES: usize,
-    LOG_2: u8,
-    POWER_OF_2: PowerOf2,
-    STD_MEM_ALIGN: mem.Alignment,
-
-    pub fn native_align() AlignmentSource {
-        return AlignmentSource{ .NATIVE = {} };
-    }
-    pub fn bytes_align(comptime bytes: usize) AlignmentSource {
-        return AlignmentSource{ .BYTES = bytes };
-    }
-    pub fn log2_align(comptime log2: u8) AlignmentSource {
-        return AlignmentSource{ .LOG_2 = log2 };
-    }
-    pub fn pow2_align(comptime power: PowerOf2) AlignmentSource {
-        return AlignmentSource{ .POWER_OF_2 = power };
-    }
-    pub fn std_mem_align(comptime alignment: mem.Alignment) AlignmentSource {
-        return AlignmentSource{ .STD_MEM_ALIGN = alignment };
-    }
-
-    pub fn calc(comptime self: AlignmentSource) ?usize {
-        return switch (comptime self) {
-            .NATIVE => null,
-            .BYTES => |B| B,
-            .LOG_2 => |L| @as(usize, 1) << @intCast(L),
-            .POWER_OF_2 => |P| P.value_as_type(usize),
-            .STD_MEM_ALIGN => |A| A.toByteUnits(),
-        };
-    }
+pub const AllowedLocalType = enum {
+    U8,
+    U16,
+    U32,
+    U64,
+    USIZE,
 };
 
-fn normalize_align(comptime ALIGN_ARG: anytype) ?PowerOf2 {
-    const T = @TypeOf(ALIGN_ARG);
-    if (T == @TypeOf(null)) return null;
-    if (T == comptime_int) return PowerOf2.alignment_power(@as(usize, ALIGN_ARG));
-    if (T == usize) return PowerOf2.alignment_power(ALIGN_ARG);
-    if (T == ?usize) return if (ALIGN_ARG) |a| PowerOf2.alignment_power(a) else null;
-    if (T == PowerOf2) return ALIGN_ARG;
-    if (T == ?PowerOf2) return ALIGN_ARG;
-    if (T == mem.Alignment) return PowerOf2.from_alloc_align(ALIGN_ARG);
-    if (T == ?mem.Alignment) return if (ALIGN_ARG) |a| PowerOf2.from_alloc_align(a) else null;
-    if (T == AlignmentSource) return if (ALIGN_ARG.calc()) |a| PowerOf2.alignment_power(a) else null;
-    if (T == ?AlignmentSource) return if (ALIGN_ARG) |a| if (a.calc()) |b| PowerOf2.alignment_power(b) else null else null;
-    assert_unreachable(@src(), "type `{s}` is invalid as an alignment input", .{@typeName(T)});
-}
+pub const ResolverFuncs = union(AllowedLocalType) {
+    U8: struct {
+        HAS_NULL_VALUE: bool = true,
+        NULL_VALUE: u8 = math.maxInt(u8),
+        RESOLVE: *const fn (local: u8) usize,
+        INCREMENT: *const fn (local: u8, byte_offset: usize) u8,
+        DECREMENT: *const fn (local: u8, byte_offset: usize) u8,
+    },
+    U16: struct {
+        HAS_NULL_VALUE: bool = true,
+        NULL_VALUE: u16 = math.maxInt(u16),
+        RESOLVE: *const fn (local: u16) usize,
+        INCREMENT: *const fn (local: u16, byte_offset: usize) u16,
+        DECREMENT: *const fn (local: u16, byte_offset: usize) u16,
+    },
+    U32: struct {
+        HAS_NULL_VALUE: bool = true,
+        NULL_VALUE: u32 = math.maxInt(u32),
+        RESOLVE: *const fn (local: u32) usize,
+        INCREMENT: *const fn (local: u32, byte_offset: usize) u32,
+        DECREMENT: *const fn (local: u32, byte_offset: usize) u32,
+    },
+    U64: struct {
+        HAS_NULL_VALUE: bool = true,
+        NULL_VALUE: u64 = math.maxInt(u64),
+        RESOLVE: *const fn (local: u64) usize,
+        INCREMENT: *const fn (local: u64, byte_offset: usize) u64,
+        DECREMENT: *const fn (local: u64, byte_offset: usize) u64,
+    },
+    USIZE: struct {
+        HAS_NULL_VALUE: bool = true,
+        NULL_VALUE: usize = math.maxInt(usize),
+        RESOLVE: *const fn (local: usize) usize,
+        INCREMENT: *const fn (local: usize, byte_offset: usize) usize,
+        DECREMENT: *const fn (local: usize, byte_offset: usize) usize,
+    },
+};
 
-pub const StaticPointerResolver = struct {
-    /// The local type stored on the `Pointer/Pointer(ELEMENT)` struct
-    LOCAL_TYPE: type,
-    /// MUST be a pointer to a value of type `LOCAL_TYPE` that represents the 'null' value
-    /// for the input type
-    LOCAL_NULL_VALUE: *const anyopaque,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) bool`
-    IS_NULL_FUNC: *const anyopaque,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
-    /// that resolves the local handle to a memory address. If the local value is 'null'
-    /// according to `IS_NULL_FUNC`, the return value of this function is undefined behavior.
-    RESOLVE_FUNC: *const anyopaque,
-    /// MUST be a pointer to a function in the form `*const fn (original: LOCAL_TYPE, byte_offset: usize) LOCAL_TYPE`,
-    /// where the returned `LOCAL_TYPE` is the value that, when resolved, returns
-    /// the exact same address as if the user had resolved the original address and added
-    /// the usize offset to it:
-    ///
-    /// `RESOLVE(ORIGINAL) + BYTE_OFFSET == RESOLVE(INCR_FUNC(ORIGINAL, BYTE_OFFSET))`
-    INCR_FUNC: *const anyopaque,
-    /// MUST be a pointer to a function in the form `*const fn (original: LOCAL_TYPE, offset: usize) LOCAL_TYPE`,
-    /// where the returned `LOCAL_TYPE` is the value that, when resolved, returns
-    /// the exact same address as if the user had resolved the original address and subtracted
-    /// the usize offset to it:
-    ///
-    /// `RESOLVE(ORIGINAL) - BYTE_OFFSET == RESOLVE(DECR_FUNC(ORIGINAL, BYTE_OFFSET))`
-    DECR_FUNC: *const anyopaque,
+pub const StaticAddressResolver = struct {
+    /// A local integer type paired with a set of resolver funcs that can
+    /// turn a local address into a real native address, or can increment a local
+    /// adress by an arbitrary byte offset and return the resultng local address
+    FUNCS: ResolverFuncs,
     /// When `true`, operations that offset the pointer, or that
     /// slice the pointer or point to an array or vector, will perform
     /// a sanity assertion in `.debug` and `.safe` build modes
@@ -188,7 +164,7 @@ pub const StaticPointerResolver = struct {
     /// A failed assertion indicates that the local handle crossed
     /// a boundary between contiguous memory chunks
     ASSERT_CONTIGUOUS_RANGE: bool = true,
-    /// The minimum number of bytes an address can be incremented by with the `INCR_FUNC` and `DECR_FUNC`
+    /// The minimum number of bytes an address can be incremented by with the `INCREMENT` and `DECREMENT` functions
     ///
     /// This is not to be confused with minimum alignment of any address the resolver can return, though
     /// those 2 properties may be the same. For example, if the resolver scheme uses a u32 handle with
@@ -201,148 +177,37 @@ pub const StaticPointerResolver = struct {
     /// This does not affect the native pointers AFTER they are resolved, you are free to manipulate those
     /// at will.
     ADDRESS_GRANULARITY: PowerOf2 = ._1,
-};
 
-pub const AutoIntegerStaticPointerResolver = struct {
-    /// The local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
-    LOCAL_TYPE: type,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
-    /// that resolves the local handle to a memory address. If the local value is 'null'
-    /// according to `IS_NULL_FUNC`, the return value of this function is undefined behavior.
-    RESOLVE_FUNC: *const anyopaque,
-    /// When `true`, operations that offset the pointer, or that
-    /// slice the pointer or point to an array or vector, will perform
-    /// a sanity assertion in `.debug` and `.safe` build modes
-    /// to check that the resolved addresses before and after the offset
-    /// (or at the start and end of a range) exactly match the results of
-    /// offsetting the original native pointer by the same amount.
-    ///
-    /// A failed assertion indicates that the local handle crossed
-    /// a boundary between contiguous memory chunks
-    ASSERT_CONTIGUOUS_RANGE: bool = true,
-    /// The minimum number of bytes an address can be incremented by with the `INCR_FUNC` and `DECR_FUNC`
-    ///
-    /// This is not to be confused with minimum alignment of any address the resolver can return, though
-    /// those 2 properties may be the same. For example, if the resolver scheme uses a u32 handle with
-    /// address granularity `1`, that resolver can address into a total of 4 GiB of memory space.
-    ///
-    /// HOWEVER, if the resolver scheme uses a u32 with a granularity of `16`, the resolver can
-    /// address into a total of 64 GiB of memory space (bottom 4 bits of th address are implicit zeroes),
-    /// with the limitation that you can only increment or decrement a pointer in 16 byte multiples.
-    ///
-    /// This does not affect the native pointers AFTER they are resolved, you are free to manipulate those
-    /// at will.
-    ADDRESS_GRANULARITY: PowerOf2 = ._1,
+    pub inline fn LOCAL_TYPE(comptime self: StaticAddressResolver) type {
+        return switch (comptime self.FUNCS) {
+            .U8 => u8,
+            .U16 => u16,
+            .U32 => u32,
+            .U64 => u64,
+            .USIZE => usize,
+        };
+    }
 
-    pub fn to_global_resolver(comptime self: AutoIntegerStaticPointerResolver) StaticPointerResolver {
-        const PROTO = IntegerResolverProto(self.LOCAL_TYPE, self.ADDRESS_GRANULARITY);
-        return StaticPointerResolver{
-            .INCR_FUNC = @ptrCast(&PROTO.add),
-            .DECR_FUNC = @ptrCast(&PROTO.sub),
-            .IS_NULL_FUNC = @ptrCast(&PROTO.is_null),
-            .LOCAL_NULL_VALUE = @ptrCast(&PROTO.NULL_VAL),
-            .LOCAL_TYPE = self.LOCAL_TYPE,
-            .RESOLVE_FUNC = self.RESOLVE_FUNC,
-            .ASSERT_CONTIGUOUS_RANGE = self.ASSERT_CONTIGUOUS_RANGE,
-            .ADDRESS_GRANULARITY = self.ADDRESS_GRANULARITY,
+    pub inline fn NULL_VAL(comptime self: StaticAddressResolver) self.LOCAL_TYPE() {
+        return switch (comptime self.FUNCS) {
+            .U8 => |F| F.NULL_VALUE,
+            .U16 => |F| F.NULL_VALUE,
+            .U32 => |F| F.NULL_VALUE,
+            .U64 => |F| F.NULL_VALUE,
+            .USIZE => |F| F.NULL_VALUE,
+        };
+    }
+
+    pub inline fn CAN_BE_NULL(comptime self: StaticAddressResolver) bool {
+        return switch (comptime self.FUNCS) {
+            .U8 => |F| F.HAS_NULL_VALUE,
+            .U16 => |F| F.HAS_NULL_VALUE,
+            .U32 => |F| F.HAS_NULL_VALUE,
+            .U64 => |F| F.HAS_NULL_VALUE,
+            .USIZE => |F| F.HAS_NULL_VALUE,
         };
     }
 };
-pub const AutoIntegerBitsStaticPointerResolver = struct {
-    /// The number of bits for the local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
-    LOCAL_TYPE_NUMBER_OF_BITS: u16,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
-    /// that resolves the local handle to a memory address. If the local value is 'null'
-    /// according to `IS_NULL_FUNC`, the return value of this function is undefined behavior.
-    RESOLVE_FUNC: *const anyopaque,
-    /// When `true`, operations that offset the pointer, or that
-    /// slice the pointer or point to an array or vector, will perform
-    /// a sanity assertion in `.debug` and `.safe` build modes
-    /// to check that the resolved addresses before and after the offset
-    /// (or at the start and end of a range) exactly match the results of
-    /// offsetting the original native pointer by the same amount.
-    ///
-    /// A failed assertion indicates that the local handle crossed
-    /// a boundary between contiguous memory chunks
-    ASSERT_CONTIGUOUS_RANGE: bool = true,
-    /// The minimum number of bytes an address can be incremented by with the `INCR_FUNC` and `DECR_FUNC`
-    ///
-    /// This is not to be confused with minimum alignment of any address the resolver can return, though
-    /// those 2 properties may be the same. For example, if the resolver scheme uses a u32 handle with
-    /// address granularity `1`, that resolver can address into a total of 4 GiB of memory space.
-    ///
-    /// HOWEVER, if the resolver scheme uses a u32 with a granularity of `16`, the resolver can
-    /// address into a total of 64 GiB of memory space (bottom 4 bits of th address are implicit zeroes),
-    /// with the limitation that you can only increment or decrement a pointer in 16 byte multiples.
-    ///
-    /// This does not affect the native pointers AFTER they are resolved, you are free to manipulate those
-    /// at will.
-    ADDRESS_GRANULARITY: PowerOf2 = ._1,
-
-    pub fn to_auto_int(comptime self: AutoIntegerBitsStaticPointerResolver) AutoIntegerStaticPointerResolver {
-        return AutoIntegerStaticPointerResolver{
-            .LOCAL_TYPE = @Int(.unsigned, self.LOCAL_TYPE_NUMBER_OF_BITS),
-            .RESOLVE_FUNC = self.RESOLVE_FUNC,
-            .ASSERT_CONTIGUOUS_RANGE = self.ASSERT_CONTIGUOUS_RANGE,
-            .ADDRESS_GRANULARITY = self.ADDRESS_GRANULARITY,
-        };
-    }
-};
-pub const AutoIntegerMaxStaticPointerResolver = struct {
-    /// The maximum value for the local integer type stored on the `Pointer/Pointer(ELEMENT)` struct
-    LOCAL_TYPE_VALUE_LIMIT: PowerOf2,
-    /// MUST be a pointer to a function in the form `*const fn (LOCAL_TYPE) usize`
-    /// that resolves the local handle to a memory address. If the local value is 'null'
-    /// according to `IS_NULL_FUNC`, the return value of this function is undefined behavior.
-    RESOLVE_FUNC: *const anyopaque,
-    /// When `true`, operations that offset the pointer, or that
-    /// slice the pointer or point to an array or vector, will perform
-    /// a sanity assertion in `.debug` and `.safe` build modes
-    /// to check that the resolved addresses before and after the offset
-    /// (or at the start and end of a range) exactly match the results of
-    /// offsetting the original native pointer by the same amount.
-    ///
-    /// A failed assertion indicates that the local handle crossed
-    /// a boundary between contiguous memory chunks
-    ASSERT_CONTIGUOUS_RANGE: bool = true,
-    /// The minimum number of bytes an address can be incremented by with the `INCR_FUNC` and `DECR_FUNC`
-    ///
-    /// This is not to be confused with minimum alignment of any address the resolver can return, though
-    /// those 2 properties may be the same. For example, if the resolver scheme uses a u32 handle with
-    /// address granularity `1`, that resolver can address into a total of 4 GiB of memory space.
-    ///
-    /// HOWEVER, if the resolver scheme uses a u32 with a granularity of `16`, the resolver can
-    /// address into a total of 64 GiB of memory space (bottom 4 bits of th address are implicit zeroes),
-    /// with the limitation that you can only increment or decrement a pointer in 16 byte multiples.
-    ///
-    /// This does not affect the native pointers AFTER they are resolved, you are free to manipulate those
-    /// at will.
-    ADDRESS_GRANULARITY: PowerOf2 = ._1,
-
-    pub fn to_auto_int(comptime self: AutoIntegerMaxStaticPointerResolver) AutoIntegerStaticPointerResolver {
-        return AutoIntegerStaticPointerResolver{
-            .LOCAL_TYPE = self.LOCAL_TYPE_VALUE_LIMIT.unsigned_integer_type_that_holds_all_values_less_than(),
-            .RESOLVE_FUNC = self.RESOLVE_FUNC,
-            .ASSERT_CONTIGUOUS_RANGE = self.ASSERT_CONTIGUOUS_RANGE,
-            .ADDRESS_GRANULARITY = self.ADDRESS_GRANULARITY,
-        };
-    }
-};
-
-fn IntegerResolverProto(comptime INT: type, comptime GRANULARITY: PowerOf2) type {
-    return struct {
-        pub const NULL_VAL: INT = if (@typeInfo(INT).int.signedness == .signed) math.minInt(INT) else math.maxInt(INT);
-        pub fn is_null(val: INT) bool {
-            return val == NULL_VAL;
-        }
-        pub fn add(val: INT, offset: usize) INT {
-            return val + @as(INT, @intCast(offset >> @intCast(comptime GRANULARITY.bit_shift())));
-        }
-        pub fn sub(val: INT, offset: usize) INT {
-            return val - @as(INT, @intCast(offset >> @intCast(comptime GRANULARITY.bit_shift())));
-        }
-    };
-}
 
 pub const MakePtrDef = struct {
     ALLOW_ZERO: AllowZero = .NO_ALLOW_ZERO,
@@ -705,107 +570,134 @@ pub fn PtrDefault(comptime ALLOW_ZERO: AllowZero, comptime NULLABILITY: Nullabil
 
 pub const PointerSource = union(PointerSourceKind) {
     NATIVE: void,
-    STATIC_RESOLVER: StaticPointerResolver,
+    STATIC_RESOLVER: StaticAddressResolver,
 
     pub fn native_pointer() PointerSource {
         return PointerSource{ .NATIVE = {} };
     }
-    pub fn global_pointer_resolver(comptime resolver: StaticPointerResolver) PointerSource {
+    pub fn static_address_resolver(comptime resolver: StaticAddressResolver) PointerSource {
         return PointerSource{ .STATIC_RESOLVER = resolver };
-    }
-    pub fn global_pointer_resolver_auto_from_int(comptime resolver: AutoIntegerStaticPointerResolver) PointerSource {
-        return PointerSource{ .STATIC_RESOLVER = resolver.to_global_resolver() };
-    }
-    pub fn global_pointer_resolver_auto_from_int_bits(comptime resolver: AutoIntegerBitsStaticPointerResolver) PointerSource {
-        return PointerSource{ .STATIC_RESOLVER = resolver.to_auto_int().to_global_resolver() };
-    }
-    pub fn global_pointer_resolver_auto_from_int_max(comptime resolver: AutoIntegerMaxStaticPointerResolver) PointerSource {
-        return PointerSource{ .STATIC_RESOLVER = resolver.to_auto_int().to_global_resolver() };
     }
     pub fn InternalPtr(comptime self: PointerSource, comptime PTR_DEF: MakePtrDefNoSize) type {
         return switch (comptime self) {
             .NATIVE => MakePtrFromDef(PTR_DEF.to_make_ptr_def(.many)),
-            .STATIC_RESOLVER => |RES| RES.LOCAL_TYPE,
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => u8,
+                .U16 => u16,
+                .U32 => u32,
+                .U64 => u64,
+                .USIZE => usize,
+            },
         };
     }
     pub fn InternalPtrDefault(comptime self: PointerSource, comptime PTR_DEF: MakePtrDefNoSize) self.InternalPtr(PTR_DEF) {
         return switch (comptime self) {
             .NATIVE => PtrDefaultFromDef(PTR_DEF.to_make_ptr_def(.many)),
-            .STATIC_RESOLVER => |RES| if (PTR_DEF.NULLABILITY == .NULLABLE) @as(*const RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.LOCAL_NULL_VALUE))).* else undefined,
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U16 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U32 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .U64 => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+                .USIZE => |F| if (F.HAS_NULL_VALUE) F.NULL_VALUE else undefined,
+            },
         };
     }
     pub fn ResolverFn(comptime self: PointerSource) type {
         return switch (comptime self) {
             .NATIVE => void,
-            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) usize,
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => *const fn (u8) usize,
+                .U16 => *const fn (u16) usize,
+                .U32 => *const fn (u32) usize,
+                .U64 => *const fn (u64) usize,
+                .USIZE => *const fn (usize) usize,
+            },
         };
     }
     pub fn ResolverFnInit(comptime self: PointerSource) self.ResolverFn() {
         return switch (comptime self) {
             .NATIVE => {},
-            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) usize, @ptrCast(@alignCast(RES.RESOLVE_FUNC))),
-        };
-    }
-    pub fn NullCheckFn(comptime self: PointerSource) type {
-        return switch (comptime self) {
-            .NATIVE => void,
-            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE) bool,
-        };
-    }
-    pub fn NullCheckFnInit(comptime self: PointerSource) self.NullCheckFn() {
-        return switch (comptime self) {
-            .NATIVE => {},
-            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE) bool, @ptrCast(@alignCast(RES.IS_NULL_FUNC))),
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => |F| F.RESOLVE,
+                .U16 => |F| F.RESOLVE,
+                .U32 => |F| F.RESOLVE,
+                .U64 => |F| F.RESOLVE,
+                .USIZE => |F| F.RESOLVE,
+            },
         };
     }
     pub fn IncrementFn(comptime self: PointerSource) type {
         return switch (comptime self) {
             .NATIVE => void,
-            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => *const fn (u8, usize) u8,
+                .U16 => *const fn (u16, usize) u16,
+                .U32 => *const fn (u32, usize) u32,
+                .U64 => *const fn (u64, usize) u64,
+                .USIZE => *const fn (usize, usize) usize,
+            },
         };
     }
     pub fn IncrementFnInit(comptime self: PointerSource) self.IncrementFn() {
         return switch (comptime self) {
             .NATIVE => {},
-            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.INCR_FUNC))),
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => |F| F.INCREMENT,
+                .U16 => |F| F.INCREMENT,
+                .U32 => |F| F.INCREMENT,
+                .U64 => |F| F.INCREMENT,
+                .USIZE => |F| F.INCREMENT,
+            },
         };
     }
     pub fn DecrementFn(comptime self: PointerSource) type {
         return switch (comptime self) {
             .NATIVE => void,
-            .STATIC_RESOLVER => |RES| *const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE,
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => *const fn (u8, usize) u8,
+                .U16 => *const fn (u16, usize) u16,
+                .U32 => *const fn (u32, usize) u32,
+                .U64 => *const fn (u64, usize) u64,
+                .USIZE => *const fn (usize, usize) usize,
+            },
         };
     }
     pub fn DecrementFnInit(comptime self: PointerSource) self.DecrementFn() {
         return switch (comptime self) {
             .NATIVE => {},
-            .STATIC_RESOLVER => |RES| @as(*const fn (RES.LOCAL_TYPE, usize) RES.LOCAL_TYPE, @ptrCast(@alignCast(RES.DECR_FUNC))),
+            .STATIC_RESOLVER => |RES| switch (comptime RES.FUNCS) {
+                .U8 => |F| F.DECREMENT,
+                .U16 => |F| F.DECREMENT,
+                .U32 => |F| F.DECREMENT,
+                .U64 => |F| F.DECREMENT,
+                .USIZE => |F| F.DECREMENT,
+            },
         };
     }
 
     pub fn Pointer(comptime SOURCE: PointerSource, comptime T: type) type {
         return PointerAdvanced(SOURCE, .{ .ELEMENT = T });
     }
-    pub fn PointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: usize) type {
-        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .ALIGNMENT = normalize_align(A) });
+    pub fn PointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: PowerOf2) type {
+        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .ALIGNMENT = A });
     }
     pub fn NullablePointer(comptime SOURCE: PointerSource, comptime T: type) type {
         return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE });
     }
-    pub fn NullablePointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: usize) type {
-        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE, .ALIGNMENT = normalize_align(A) });
+    pub fn NullablePointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: PowerOf2) type {
+        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE, .ALIGNMENT = A });
     }
     pub fn ConstPointer(comptime SOURCE: PointerSource, comptime T: type) type {
         return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST });
     }
-    pub fn ConstPointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: usize) type {
-        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .ALIGNMENT = normalize_align(A) });
+    pub fn ConstPointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: PowerOf2) type {
+        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .ALIGNMENT = A });
     }
     pub fn NullableConstPointer(comptime SOURCE: PointerSource, comptime T: type) type {
         return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE });
     }
-    pub fn NullableConstPointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: usize) type {
-        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE, .ALIGNMENT = normalize_align(A) });
+    pub fn NullableConstPointerAlign(comptime SOURCE: PointerSource, comptime T: type, comptime A: PowerOf2) type {
+        return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE, .ALIGNMENT = A });
     }
 };
 
@@ -828,10 +720,11 @@ pub const PointerSource = union(PointerSourceKind) {
 /// that has some other interesting semantics such as side-effects
 /// when a pointer is resolved, at the cost of additional processing overhead.
 pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakePtrDefNoSize) type {
+    comptime assert_with_reason(PTR_DEF_.ALLOW_ZERO == .NO_ALLOW_ZERO or PTR_DEF_.NULLABILITY == .NEVER_NULL, @src(), "For a number of reasons related to implementation and data ambiguity, the `Pointer___` wrapper type does not allow nullable + allowzero pointers (for example `?[*]allowzero u8`) ", .{});
+    comptime assert_with_reason(SOURCE_ == .NATIVE or (SOURCE_ == .STATIC_RESOLVER and SOURCE_.STATIC_RESOLVER.CAN_BE_NULL()) or PTR_DEF_.NULLABILITY == .NEVER_NULL, @src(), "static resolver did not have a null value and therefore cannot represent a nullable pointer", .{});
     return struct {
         const Self = @This();
         pub const InternalPtr = SOURCE.InternalPtr(PTR_DEF);
-        const InternalInternalPtr = if (IS_NATIVE and NULL_AND_ALLOWZERO) @typeInfo(InternalPtr).optional.child else InternalPtr;
         pub const PtrMany = MakePtrFromDef(PTR_DEF_FULL);
         pub const PtrOne = MakePtrFromDef(PTR_DEF_FULL.with_sentinel(null).with_size_kind(.one));
         pub const PtrC = MakePtrFromDef(PTR_DEF_FULL.with_c_pointer_constraints());
@@ -850,7 +743,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         const static_resolve_addr: SOURCE.ResolverFn() = SOURCE.ResolverFnInit();
         const static_ptr_incr: SOURCE.IncrementFn() = SOURCE.IncrementFnInit();
         const static_ptr_decr: SOURCE.DecrementFn() = SOURCE.DecrementFnInit();
-        const static_ptr_is_null: SOURCE.NullCheckFn() = SOURCE.NullCheckFnInit();
         pub const USE_STATIC_RESOLVER = SOURCE == .STATIC_RESOLVER;
         pub const IS_NATIVE = SOURCE == .NATIVE;
         pub const ELEMENT = PTR_DEF.ELEMENT;
@@ -872,13 +764,13 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub const HAS_SENTINEL = PTR_DEF.SENTINEL != null;
         pub const SENTINEL: ELEMENT = if (PTR_DEF.SENTINEL) |S| @as(*const ELEMENT, @ptrCast(@alignCast(S))).* else undefined;
         pub const ZERO_SIZE_ELEM = @sizeOf(ELEMENT) == 0;
-        const NULL_AND_ALLOWZERO = CAN_BE_NULL and IS_ALLOW_ZERO;
         const GRANULARITY_NOT_1 = SOURCE == .STATIC_RESOLVER and SOURCE.STATIC_RESOLVER.ADDRESS_GRANULARITY.greater_than(._1);
         const GRANULARITY_FAIL_MASK: if (GRANULARITY_NOT_1) usize else void = if (GRANULARITY_NOT_1) SOURCE.STATIC_RESOLVER.ADDRESS_GRANULARITY.bit_mask_less_than(usize) else {};
         const GRANULARITY_PASS_MASK: if (GRANULARITY_NOT_1) usize else void = if (GRANULARITY_NOT_1) SOURCE.STATIC_RESOLVER.ADDRESS_GRANULARITY.bit_mask_greater_than_or_equal(usize) else {};
         const GRANULARITY: if (GRANULARITY_NOT_1) usize else void = if (GRANULARITY_NOT_1) SOURCE.STATIC_RESOLVER.ADDRESS_GRANULARITY.value_as_type(usize) else {};
         const GRANULARITY_MINUS_1: if (GRANULARITY_NOT_1) usize else void = if (GRANULARITY_NOT_1) GRANULARITY - 1 else {};
         const ASSERT_CONTIG = if (USE_STATIC_RESOLVER and Assert.SHOULD_ASSERT) SOURCE.STATIC_RESOLVER.ASSERT_CONTIGUOUS_RANGE else false;
+        const NULL_VAL: InternalPtr = if (!CAN_BE_NULL) undefined else if (USE_STATIC_RESOLVER) SOURCE.STATIC_RESOLVER.NULL_VAL() else INTERNAL_PTR_DEFAULT;
 
         internal: InternalPtr = INTERNAL_PTR_DEFAULT,
 
@@ -892,6 +784,14 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             if (comptime @TypeOf(any_ptr) == InternalPtr) return new_from(any_ptr);
             assert_native(@src());
             return Self{ .internal = @ptrCast(@alignCast(any_ptr)) };
+        }
+
+        pub inline fn new_null() PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)) {
+            return .{};
+        }
+        pub inline fn set_null(self: *Self) void {
+            comptime assert_with_reason(CAN_BE_NULL, @src(), "set_null requires a nullable pointer type", .{});
+            self.internal = INTERNAL_PTR_DEFAULT;
         }
 
         pub inline fn is_native(self: Self) bool {
@@ -942,120 +842,49 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         inline fn pointer_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    // if (comptime CAN_BE_NULL) {
-                    //     if (self.is_null()) {
-                    //         if (comptime NewPtr.CAN_BE_NULL) break :blk NewPtr.new_null();
-                    //         self.assert_not_null(@src());
-                    //     }
-                    // }
-                    // const raw = if (comptime CAN_BE_NULL) self.internal.? else self.internal;
-                    // break :blk NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @ptrCast(raw)) };
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @ptrCast(self.internal.?)) };
-                } else {
-                    return NewPtr{ .internal = @ptrCast(self.internal) };
-                },
+                .NATIVE => return NewPtr{ .internal = @ptrCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn pointer_align_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @ptrCast(@alignCast(self.internal.?))) };
-                } else {
-                    return NewPtr{ .internal = @ptrCast(@alignCast(self.internal)) };
-                },
+                .NATIVE => return NewPtr{ .internal = @ptrCast(@alignCast(self.internal)) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn align_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @alignCast(self.internal.?)) };
-                } else {
-                    return NewPtr{ .internal = @alignCast(self.internal) };
-                },
+                .NATIVE => return NewPtr{ .internal = @alignCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn remove_volatile_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @volatileCast(self.internal.?)) };
-                } else {
-                    return NewPtr{ .internal = @volatileCast(self.internal) };
-                },
+                .NATIVE => return NewPtr{ .internal = @volatileCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn remove_const_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @constCast(self.internal.?)) };
-                } else {
-                    return NewPtr{ .internal = @constCast(self.internal) };
-                },
+                .NATIVE => return NewPtr{ .internal = @constCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn addrspace_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @addrSpaceCast(self.internal.?)) };
-                } else {
-                    return NewPtr{ .internal = @addrSpaceCast(self.internal) };
-                },
+                .NATIVE => NewPtr{ .internal = @addrSpaceCast(self.internal) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
         inline fn raw_address_cast(self: Self, comptime TARGET: MakePtrDefNoSize) PointerAdvanced(SOURCE, TARGET) {
             const NewPtr = PointerAdvanced(SOURCE, TARGET);
             switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) {
-                    if (comptime CAN_BE_NULL and NewPtr.CAN_BE_NULL) {
-                        if (self.is_null()) return NewPtr.new_null();
-                    } else if (comptime CAN_BE_NULL and !NewPtr.CAN_BE_NULL) {
-                        self.assert_not_null(@src());
-                    }
-                    return NewPtr{ .internal = @as(NewPtr.InternalInternalPtr, @ptrFromInt(@intFromPtr(self.internal.?))) };
-                } else {
-                    return NewPtr{ .internal = @ptrFromInt(@intFromPtr(self.internal)) };
-                },
+                .NATIVE => NewPtr{ .internal = @ptrFromInt(@intFromPtr(self.internal)) },
                 .STATIC_RESOLVER => return NewPtr{ .internal = self.internal },
             }
         }
@@ -1063,7 +892,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn addr(self: Self) usize {
             self.assert_not_null(@src());
             return switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) @intFromPtr(self.internal.?) else @intFromPtr(self.internal),
+                .NATIVE => @intFromPtr(self.internal),
                 .STATIC_RESOLVER => blk: {
                     const a = static_resolve_addr(self.internal);
                     if (comptime !IS_ALLOW_ZERO) {
@@ -1079,7 +908,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn addr_orelse_0(self: Self) usize {
             if (self.is_null()) return 0;
             return switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) @intFromPtr(self.internal.?) else @intFromPtr(self.internal),
+                .NATIVE => @intFromPtr(self.internal),
                 .STATIC_RESOLVER => blk: {
                     const a = static_resolve_addr(self.internal);
                     if (comptime !IS_ALLOW_ZERO) {
@@ -1095,7 +924,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn addr_or_null(self: Self) ?usize {
             if (self.is_null()) return null;
             return switch (comptime SOURCE) {
-                .NATIVE => if (comptime NULL_AND_ALLOWZERO) @intFromPtr(self.internal.?) else @intFromPtr(self.internal),
+                .NATIVE => @intFromPtr(self.internal),
                 .STATIC_RESOLVER => blk: {
                     const a = static_resolve_addr(self.internal);
                     if (comptime !IS_ALLOW_ZERO) {
@@ -1111,7 +940,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn addr_no_align_check(self: Self) usize {
             self.assert_not_null(@src());
             switch (comptime SOURCE) {
-                .NATIVE => return if (comptime NULL_AND_ALLOWZERO) @intFromPtr(self.internal.?) else @intFromPtr(self.internal),
+                .NATIVE => @intFromPtr(self.internal),
                 .STATIC_RESOLVER => {
                     const a = static_resolve_addr(self.internal);
                     if (comptime !IS_ALLOW_ZERO) {
@@ -1160,23 +989,17 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         }
         pub inline fn ptr_c(self: Self) PtrC {
             if (self.is_null()) return null;
-            if (comptime IS_ALLOW_ZERO) {
-                assert_with_reason(self.addr() != 0, @src(), "a C-pointer uses the 'allowzero' attribute, but it uses it as the 'null' value, not a valid address. The current pointer type uses 'allowzero' as a VALID address, and the current address is 0: There is no way to map this valid address into a C-pointer, because it would be considered 'null'", .{});
-            }
+            self.assert_not_allowzero_addr_0_for_c_ptr(@src());
             return @ptrCast(self.complete_cast_to(PTR_DEF.with_c_pointer_constraints()).ptr_many());
         }
         pub inline fn ptr_c_or_null(self: Self) ?PtrC {
             if (self.is_null()) return null;
-            if (comptime IS_ALLOW_ZERO) {
-                assert_with_reason(self.addr() != 0, @src(), "a C-pointer uses the 'allowzero' attribute, but it uses it as the 'null' value, not a valid address. The current pointer type uses 'allowzero' as a VALID address, and the current address is 0: There is no way to map this valid address into a C-pointer, because it would be considered 'null'", .{});
-            }
+            self.assert_not_allowzero_addr_0_for_c_ptr(@src());
             return @as(PtrC, @ptrCast(self.complete_cast_to(PTR_DEF.with_c_pointer_constraints()).ptr_many()));
         }
         pub inline fn ptr_c_never_null(self: Self) PtrC {
             self.assert_not_null(@src());
-            if (comptime IS_ALLOW_ZERO) {
-                assert_with_reason(self.addr() != 0, @src(), "a C-pointer uses the 'allowzero' attribute, but it uses it as the 'null' value, not a valid address. The current pointer type uses 'allowzero' as a VALID address, and the current address is 0: There is no way to map this valid address into a C-pointer, because it would be considered 'null'", .{});
-            }
+            self.assert_not_allowzero_addr_0_for_c_ptr(@src());
             return @ptrCast(self.complete_cast_to(PTR_DEF.with_c_pointer_constraints()).ptr_many());
         }
         pub inline fn slice(self: Self, len: anytype) Slice {
@@ -1283,7 +1106,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         }
         pub inline fn slice_never_null_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: anytype) SliceNeverNull {
             self.assert_not_null(@src());
-            const len = self.find_len_from_sentinel_upper_limit_panic(limit);
+            const len = self.find_len_from_sentinel_max_length_assert(limit);
             return self.slice_never_null(len);
         }
         pub inline fn byte_slice(self: Self, elem_len: anytype) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).Slice {
@@ -1307,99 +1130,38 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             comptime assert_with_reason(HAS_SENTINEL, @src(), "pointer type does not have a sentinel value", .{});
             const p = self.ptr_many_never_null();
             var i: usize = 0;
-            const POSSIBLE_VEC_SIZE = comptime std.simd.suggestVectorLength(ELEMENT);
-            if (comptime ALIGN >= ELEMENT_SIZE and POSSIBLE_VEC_SIZE != null and !ASSERT_CONTIG and !IS_VOLATILE) {
-                const VEC_SIZE = POSSIBLE_VEC_SIZE.?;
-                const BOOL_VEC = @Vector(VEC_SIZE, bool);
-                const BOOL_VEC_INT = @Int(.unsigned, VEC_SIZE);
-                const VEC = @Vector(VEC_SIZE, ELEMENT);
-                const VEC_ALIGN = @alignOf(VEC);
-                const CURR_ADDR = self.addr();
-                const NEXT_VEC_ALIGNED_ADDR = std.mem.alignForward(usize, CURR_ADDR, VEC_ALIGN);
-                const ADDR_DELTA_UNTIL_NEXT_VEC_ALIGN = NEXT_VEC_ALIGNED_ADDR - CURR_ADDR;
-                const NUM_SINGLES_BEFORE_VEC_ALIGN = @divExact(ADDR_DELTA_UNTIL_NEXT_VEC_ALIGN, ELEMENT_SIZE);
-                const SENTINEL_VEC: VEC = @splat(SENTINEL);
-                while (i < NUM_SINGLES_BEFORE_VEC_ALIGN) {
-                    if (p[i] == SENTINEL) return i;
-                    i += 1;
-                }
-                const vp = self.increment(NUM_SINGLES_BEFORE_VEC_ALIGN).cast_to_element(VEC).ptr_many_never_null();
-                var vi: usize = 0;
-                while (true) {
-                    const found_sentinel_in_vec: BOOL_VEC = vp[vi] == SENTINEL_VEC;
-                    const found_sentinel_in_vec_int: BOOL_VEC_INT = @bitCast(found_sentinel_in_vec);
-                    if (found_sentinel_in_vec_int != 0) {
-                        const found_index: usize = @intCast(@ctz(found_sentinel_in_vec_int));
-                        return i + found_index;
-                    }
-                    i += VEC_SIZE;
-                    vi += 1;
-                }
-            } else {
-                while (true) {
-                    if (p[i] == SENTINEL) return i;
-                    i += 1;
-                }
+            // We will let the compiler auto-vectorize this, if possible;
+            while (p[i] != SENTINEL) {
+                i += 1;
             }
+            return i;
         }
-        pub inline fn find_len_from_sentinel_upper_limit_panic(self: Self, limit: anytype) usize {
+        pub inline fn find_len_from_sentinel_max_length_assert(self: Self, max_length: anytype) usize {
             comptime assert_with_reason(HAS_SENTINEL, @src(), "pointer type does not have a sentinel value", .{});
-            assert_with_reason(limit >= 0, @src(), "limit must be >= 0, got {d}", .{limit});
+            assert_with_reason(max_length >= 0, @src(), "limit must be >= 0, got {d}", .{max_length});
             const p = self.ptr_many_never_null();
+            const max_len = num_cast(max_length, usize);
             var i: usize = 0;
-            const lim = num_cast(limit, usize);
-            const POSSIBLE_VEC_SIZE = comptime std.simd.suggestVectorLength(ELEMENT);
-            if (comptime ALIGN >= ELEMENT_SIZE and POSSIBLE_VEC_SIZE != null and !ASSERT_CONTIG and !IS_VOLATILE) {
-                const VEC_SIZE = POSSIBLE_VEC_SIZE.?;
-                const BOOL_VEC = @Vector(VEC_SIZE, bool);
-                const BOOL_VEC_INT = @Int(.unsigned, VEC_SIZE);
-                const VEC = @Vector(VEC_SIZE, ELEMENT);
-                const VEC_ALIGN = @alignOf(VEC);
-                const CURR_ADDR = self.addr();
-                const NEXT_VEC_ALIGNED_ADDR = std.mem.alignForward(usize, CURR_ADDR, VEC_ALIGN);
-                const ADDR_DELTA_UNTIL_NEXT_VEC_ALIGN = NEXT_VEC_ALIGNED_ADDR - CURR_ADDR;
-                const NUM_SINGLES_BEFORE_VEC_ALIGN = @divExact(ADDR_DELTA_UNTIL_NEXT_VEC_ALIGN, ELEMENT_SIZE);
-                const SENTINEL_VEC: VEC = @splat(SENTINEL);
-                while (i < NUM_SINGLES_BEFORE_VEC_ALIGN) {
-                    if (p[i] == SENTINEL) return i;
-                    assert_with_reason(i < lim, @src(), "reached the length limit to search for sentinel value within without finding sentinel ({d})", .{lim});
-                    i += 1;
-                }
-                const vp = self.increment(NUM_SINGLES_BEFORE_VEC_ALIGN).cast_to_element(VEC).ptr_many_never_null();
-                var vi: usize = 0;
-                while (true) {
-                    const found_sentinel_in_vec: BOOL_VEC = vp[vi] == SENTINEL_VEC;
-                    const found_sentinel_in_vec_int: BOOL_VEC_INT = @bitCast(found_sentinel_in_vec);
-                    if (found_sentinel_in_vec_int != 0) {
-                        const found_index: usize = @intCast(@ctz(found_sentinel_in_vec_int));
-                        assert_with_reason(i <= lim, @src(), "reached the length limit to search for sentinel value within without finding sentinel ({d})", .{lim});
-                        return i + found_index;
-                    }
-                    assert_with_reason(i < lim, @src(), "reached the length limit to search for sentinel value within without finding sentinel ({d})", .{lim});
-                    i += VEC_SIZE;
-                    vi += 1;
-                }
-            } else {
-                while (true) {
-                    if (p[i] == SENTINEL) return i;
-                    assert_with_reason(i < lim, @src(), "reached the length limit to search for sentinel value within without finding sentinel ({d})", .{lim});
-                    i += 1;
-                }
+            // We will let the compiler auto-vectorize this, if possible;
+            while (i <= max_len and p[i] != SENTINEL) {
+                i += 1;
             }
+            assert_with_reason(p[i] == SENTINEL, @src(), "reached the length limit to search for sentinel value without finding sentinel ({d})", .{max_len});
+            return i;
         }
 
         pub inline fn is_null(self: Self) bool {
             if (comptime !CAN_BE_NULL) return false;
             return switch (comptime SOURCE) {
                 .NATIVE => self.internal == null,
-                .STATIC_RESOLVER => static_ptr_is_null(self.internal),
+                .STATIC_RESOLVER => self.internal == NULL_VAL,
             };
         }
         pub inline fn not_null(self: Self) bool {
             if (comptime !CAN_BE_NULL) return true;
             return switch (comptime SOURCE) {
                 .NATIVE => self.internal != null,
-                .STATIC_RESOLVER => !static_ptr_is_null(self.internal),
+                .STATIC_RESOLVER => self.internal != NULL_VAL,
             };
         }
         pub inline fn assert_not_null(self: Self, comptime src: ?SourceLocation) void {
@@ -1429,6 +1191,11 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         }
         pub inline fn assert_not_zero_size_type(comptime src: ?SourceLocation) void {
             comptime assert_with_reason(!ZERO_SIZE_ELEM, src, "cannot call this when the element type is zero-sized, got type `{s}`", .{@typeName(ELEMENT)});
+        }
+        inline fn assert_not_allowzero_addr_0_for_c_ptr(self: Self, comptime src: ?SourceLocation) void {
+            if (comptime IS_ALLOW_ZERO) {
+                assert_with_reason(self.addr() != 0, src, "a C-pointer uses the 'allowzero' attribute, but it uses it as the 'null' value, not a valid address. The current pointer type uses 'allowzero' as a VALID address, and the current address is 0: There is no way to map this valid address into a C-pointer, because it would be considered 'null'", .{});
+            }
         }
 
         pub inline fn complete_cast_to(self: Self, comptime NEW_DEF: MakePtrDefNoSize) PointerAdvanced(SOURCE, NEW_DEF) {
@@ -1573,11 +1340,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             if (self.not_null()) self.assert_aligned_pow_2(SPECIFIC_ALIGN, @src());
             return self.align_cast(PTR_DEF.with_align(SPECIFIC_ALIGN));
         }
-        pub inline fn to_specific_align_any(self: Self, comptime any_alignment: anytype) PointerAdvanced(SOURCE, PTR_DEF.with_align(normalize_align(any_alignment))) {
-            const NEW_ALIGN = comptime normalize_align(any_alignment);
-            if (comptime NEW_ALIGN == null) return self.to_native_align();
-            return self.to_specific_align(NEW_ALIGN.?);
-        }
         pub inline fn to_native_align(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_align(null)) {
             if (comptime !HAS_SPECIFIC_ALIGN) return self;
             if (self.not_null()) self.assert_aligned(@alignOf(ELEMENT), @src());
@@ -1586,9 +1348,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
 
         pub inline fn is_aligned(self: Self, alignment: usize) bool {
             return std.mem.isAligned(self.addr(), alignment);
-        }
-        pub inline fn is_aligned_any(self: Self, alignment: usize) bool {
-            return std.mem.isAlignedAnyAlign(self.addr(), alignment);
         }
         pub inline fn is_aligned_log_2(self: Self, alignment_log_2: u8) bool {
             return std.mem.isAlignedLog2(self.addr(), alignment_log_2);
@@ -1602,9 +1361,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
 
         pub inline fn assert_aligned(self: Self, alignment: usize, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_aligned(alignment), src, "pointer was not aligned to {d}", .{alignment});
-        }
-        pub inline fn assert_aligned_any(self: Self, alignment: usize, comptime src: ?SourceLocation) void {
-            assert_with_reason(self.is_aligned_any(alignment), src, "pointer was not aligned to {d}", .{alignment});
         }
         pub inline fn assert_aligned_log_2(self: Self, alignment_log_2: u8, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_aligned_log_2(alignment_log_2), src, "pointer was not aligned to log2 {d} ({d})", .{ alignment_log_2, @as(usize, 1) << @intCast(alignment_log_2) });
@@ -1642,7 +1398,9 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
                     .ADD => static_ptr_incr(original_addr, granular_byte_offset),
                     .SUB => static_ptr_decr(original_addr, granular_byte_offset),
                 };
-                assert_with_reason(!static_ptr_is_null(test_new_internal), src, "local handle after " ++ prefix ++ " the pointer by {d} bytes became null, the resolver indicated the new address would escape its memory segment", .{granular_byte_offset});
+                if (comptime CAN_BE_NULL) {
+                    assert_with_reason(test_new_internal != NULL_VAL, src, "local handle after " ++ prefix ++ " the pointer by {d} bytes became null, the resolver indicated the new address would escape its memory segment", .{granular_byte_offset});
+                }
                 const real_original = static_resolve_addr(original_addr);
                 const real_test = static_resolve_addr(test_new_internal);
                 const expect_real_new = switch (comptime DIR) {
@@ -2159,17 +1917,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         }
 
         //**************************
-        // NULL CONSTRUCTION / MUTATION
-        //**************************
-        pub inline fn new_null() PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NULLABLE)) {
-            return .{};
-        }
-        pub inline fn set_null(self: *Self) void {
-            assert_with_reason(CAN_BE_NULL, @src(), "set_null requires a nullable pointer type", .{});
-            self.internal = INTERNAL_PTR_DEFAULT;
-        }
-
-        //**************************
         // MEM COPY/SET OPERATIONS
         //**************************
         pub inline fn memcopy_to(self: Self, dst: []ELEMENT) void {
@@ -2225,58 +1972,30 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             self.assert_not_null(@src());
             return @cmpxchgWeak(ELEMENT, self.ptr_never_null(), expected, new_value_on_success, success_order, fail_order);
         }
-
-        //**************************
-        // ANYOPAQUE CONVERSION
-        //**************************
-        pub inline fn to_anyopaque(self: Self) if (IS_CONST) *const anyopaque else *anyopaque {
-            self.assert_not_null(@src());
-            assert_not_volatile(@src());
-            assert_normal_addrspace(@src());
-            return @ptrCast(self.ptr_never_null());
-        }
-        pub inline fn to_const_anyopaque(self: Self) *const anyopaque {
-            self.assert_not_null(@src());
-            assert_not_volatile(@src());
-            assert_normal_addrspace(@src());
-            return @ptrCast(self.ptr_never_null());
-        }
-        pub inline fn to_anyopaque_or_null(self: Self) if (IS_CONST) ?*const anyopaque else ?*anyopaque {
-            if (self.is_null()) return null;
-            assert_not_volatile(@src());
-            assert_normal_addrspace(@src());
-            return @ptrCast(self.ptr_never_null());
-        }
-        pub inline fn to_const_anyopaque_or_null(self: Self) ?*const anyopaque {
-            if (self.is_null()) return null;
-            assert_not_volatile(@src());
-            assert_normal_addrspace(@src());
-            return @ptrCast(self.ptr_never_null());
-        }
     };
 }
 
 pub fn Pointer(comptime T: type, comptime SOURCE: PointerSource) type {
     return PointerAdvanced(SOURCE, .{ .ELEMENT = T });
 }
-pub fn PointerAlign(comptime T: type, comptime A: anytype, comptime SOURCE: PointerSource) type {
-    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .ALIGNMENT = normalize_align(A) });
+pub fn PointerAlign(comptime T: type, comptime A: PowerOf2, comptime SOURCE: PointerSource) type {
+    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .ALIGNMENT = A });
 }
 pub fn NullablePointer(comptime T: type, comptime SOURCE: PointerSource) type {
     return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE });
 }
-pub fn NullablePointerAlign(comptime T: type, comptime A: anytype, comptime SOURCE: PointerSource) type {
-    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE, .ALIGNMENT = normalize_align(A) });
+pub fn NullablePointerAlign(comptime T: type, comptime A: PowerOf2, comptime SOURCE: PointerSource) type {
+    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .NULLABILITY = .NULLABLE, .ALIGNMENT = A });
 }
 pub fn ConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
     return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST });
 }
-pub fn ConstPointerAlign(comptime T: type, comptime A: anytype, comptime SOURCE: PointerSource) type {
-    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .ALIGNMENT = normalize_align(A) });
+pub fn ConstPointerAlign(comptime T: type, comptime A: PowerOf2, comptime SOURCE: PointerSource) type {
+    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .ALIGNMENT = A });
 }
 pub fn NullableConstPointer(comptime T: type, comptime SOURCE: PointerSource) type {
     return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE });
 }
-pub fn NullableConstPointerAlign(comptime T: type, comptime A: anytype, comptime SOURCE: PointerSource) type {
-    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE, .ALIGNMENT = normalize_align(A) });
+pub fn NullableConstPointerAlign(comptime T: type, comptime A: PowerOf2, comptime SOURCE: PointerSource) type {
+    return PointerAdvanced(SOURCE, .{ .ELEMENT = T, .MUTABILITY = .CONST, .NULLABILITY = .NULLABLE, .ALIGNMENT = A });
 }

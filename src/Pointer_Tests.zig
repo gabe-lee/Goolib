@@ -91,7 +91,7 @@ fn manual_decrement(handle: u16, byte_offset: usize) u16 {
     return handle - @as(u16, @intCast(byte_offset / 2));
 }
 
-const MANUAL_HANDLE_SOURCE = PointerSource.global_pointer_resolver(.{
+const MANUAL_HANDLE_SOURCE = PointerSource.static_address_resolver(.{
     .LOCAL_TYPE = u16,
     .LOCAL_NULL_VALUE = @ptrCast(&MANUAL_NULL_HANDLE),
     .IS_NULL_FUNC = @ptrCast(&manual_is_null),
