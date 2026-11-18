@@ -1740,6 +1740,12 @@ pub const PowerOf2 = enum(u8) {
     pub fn bit_shift(power: PowerOf2) u8 {
         return @backingInt(power);
     }
+    pub fn bit_mask_less_than(power: PowerOf2, comptime INT: type) INT {
+        return power.value_as_type(INT) - 1;
+    }
+    pub fn bit_mask_greater_than_or_equal(power: PowerOf2, comptime INT: type) INT {
+        return ~(power.value_as_type(INT) - 1);
+    }
     pub fn raw_int(power: PowerOf2) u8 {
         return @backingInt(power);
     }

@@ -562,7 +562,7 @@ test "manual static resolver with byte-unit handles" {
     try testing.expectEqual(@as(usize, 2), word_slice.len);
     try testing.expectEqual(@as(u16, 0xBEEF), word_slice[0]);
 
-    const bytes = ptr.to_bytes(1);
+    const bytes = ptr.to_byte_slice(1);
     try testing.expectEqual(@as(usize, 2), bytes.len);
 
     const NP = NullablePointer(u16, MANUAL_HANDLE_SOURCE);
@@ -602,7 +602,7 @@ test "pointer size kinds and bytes accessors" {
     try testing.expectEqual(@as(*u32, @ptrCast(&values[0])), ptr.ptr_never_null());
     try testing.expectEqual(@as([*c]u32, @ptrCast(&values[0])), ptr.ptr_c_never_null());
 
-    const bytes = ptr.to_bytes(4);
+    const bytes = ptr.to_byte_slice(4);
     const const_bytes = ptr.to_const_bytes(4);
     try testing.expectEqual(@as(usize, 16), bytes.len);
     try testing.expectEqual(@as(usize, 16), const_bytes.len);
