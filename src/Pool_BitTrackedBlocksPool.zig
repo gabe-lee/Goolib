@@ -267,11 +267,11 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
                 assert_with_reason(self.blocks_cap <= INVALID_IDX / DATA_BLOCK_SLOT_LENGTH and needed_blocks <= (INVALID_IDX / DATA_BLOCK_SLOT_LENGTH) - self.blocks_cap, @src(), "adding {d} data blocks would make the pool capacity exceed `math.maxInt(IDX)` ({d})", .{ needed_blocks, INVALID_IDX });
                 const new_blocks_cap = self.blocks_cap + needed_blocks;
                 const old_blocks_cap = self.blocks_cap;
-                const new_block_list = self.alloc.realloc_types(*DataBlock, self.blocks[0..self.blocks_cap], new_blocks_cap, fn_alloc) orelse assert_allocation_failure(@src(), *DataBlock, needed_blocks, error.OutOfMemory);
-                self.blocks = new_block_list.ptr;
+                const new_block_list = self.alloc.realloc_types(*DataBlock, Alloc.Pointer(*DataBlock).new_from(self.blocks), self.blocks_cap, new_blocks_cap, fn_alloc);
+                self.blocks = new_block_list.ptr_many() orelse assert_allocation_failure(@src(), *DataBlock, needed_blocks, error.OutOfMemory);
                 self.blocks_cap = new_blocks_cap;
                 for (self.blocks[old_blocks_cap..new_blocks_cap], old_blocks_cap..) |*block, block_idx| {
-                    const new_block = self.alloc.create(DataBlock, fn_alloc) orelse assert_allocation_failure(@src(), DataBlock, 1, error.OutOfMemory);
+                    const new_block = self.alloc.create(DataBlock, fn_alloc).ptr() orelse assert_allocation_failure(@src(), DataBlock, 1, error.OutOfMemory);
                     new_block.* = DataBlock{};
                     if (comptime BACK_STRAT != .SORTED_BLOCKS_BINARY_SEARCH) {
                         new_block.self_idx = @intCast(block_idx);
@@ -341,9 +341,9 @@ pub fn BitTrackedPool(comptime DEF: PoolDef) type {
             self.lock_for_write();
             if (self.blocks_cap > 0) {
                 for (self.blocks[0..self.blocks_cap]) |block| {
-                    self.alloc.destroy(DataBlock, block, fn_alloc);
+                    self.alloc.destroy(DataBlock, Alloc.Pointer(DataBlock).new_from_any(block), fn_alloc);
                 }
-                self.alloc.free_types(*DataBlock, self.blocks[0..self.blocks_cap], fn_alloc);
+                self.alloc.free_types(*DataBlock, Alloc.Pointer(*DataBlock).new_from(self.blocks), self.blocks_cap, fn_alloc);
             }
             self.unlock_for_write();
             self.* = .{};

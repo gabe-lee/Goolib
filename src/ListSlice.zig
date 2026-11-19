@@ -422,6 +422,7 @@ pub fn ListFullDefinition(
 
         pub const Field = _FIELD_ENUM;
         pub const MemPtr = IMPL.MemPtr;
+        pub const RootPtr = IMPL.RootPtr;
         pub const ElemPtr = IMPL.ElemPtr;
         pub const ElemPtrMany = IMPL.ElemPtrMany;
         pub const ElemPtrConst = IMPL.ElemPtrConst;
@@ -457,8 +458,9 @@ pub fn ListFullDefinition(
         pub const InitAlloc = Alloc.InitAlloc;
         pub const Alloc = AllocAdapter(ALLOC_SOURCE);
 
-        /// The root memory pointer of the memory region
-        root_ptr: MemPtr = undefined,
+        /// The root memory pointer of the memory region, stored as a `Pointer`
+        /// wrapper that matches the list's `ALLOC_SOURCE`.
+        root_ptr: RootPtr = undefined,
         /// The root capacity of the memory region
         root_cap: IDX = 0,
         /// The offset from the root pointer that represents

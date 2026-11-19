@@ -33,6 +33,7 @@ const Root = @import("./_root.zig");
 const Cast = Root.Cast;
 const Type = Root.Types;
 const Math = Root.Math;
+const PowerOf2 = Math.PowerOf2;
 const KindInfo = Type.KindInfo;
 const Assert = Root.Assert;
 const Utils = Root.Utils;
@@ -218,6 +219,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub const InitAlloc = List.InitAlloc;
         pub const Alloc = List.Alloc;
 
+        pub const RootPtr = if (SPLIT)
+            (if (IS_CONST) Alloc.ConstPointerAlign(u8, PowerOf2.align_of_type(ELEM)) else Alloc.PointerAlign(u8, PowerOf2.align_of_type(ELEM)))
+        else
+            (if (IS_CONST) Alloc.ConstPointer(ELEM) else Alloc.Pointer(ELEM));
+
+        inline fn hydrate(ptr: anytype) @TypeOf(ptr).PtrManyNeverNull {
+            return ptr.ptr_many_never_null();
+        }
+
         //****************
         // INITIALIZE
         //****************
@@ -226,20 +236,20 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub inline fn from_slice_keep_data(data_slice: []ELEM) List {
             return List{
-                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_ptr = RootPtr.new_from_any(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
             };
         }
         pub fn from_slice_set_empty(data_slice: []ELEM) List {
             return List{
-                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_ptr = RootPtr.new_from_any(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
             };
         }
         pub fn from_slice_const_keep_data(data_slice: []const ELEM) SliceConst {
             return SliceConst{
-                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_ptr = RootPtr.new_from_any(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
             };
@@ -262,7 +272,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub fn from_allocated_slice_keep_data(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
             return ListAlloc{
-                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_ptr = RootPtr.new_from_any(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .data_len = @intCast(data_slice.len),
                 .alloc = Alloc.new(alloc),
@@ -270,7 +280,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         }
         pub fn from_allocated_slice_set_empty(data_slice: []ELEM, alloc: CachedAlloc) ListAlloc {
             return ListAlloc{
-                .root_ptr = @ptrCast(data_slice.ptr),
+                .root_ptr = RootPtr.new_from_any(data_slice.ptr),
                 .root_cap = @intCast(data_slice.len),
                 .alloc = Alloc.new(alloc),
             };
@@ -447,10 +457,14 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             }
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return (@intFromPtr(aa.root_ptr) < @intFromPtr(bb.root_ptr + bb.root_cap)) and (@intFromPtr(bb.root_ptr) < @intFromPtr(aa.root_ptr + aa.root_cap));
+                    const a_root = hydrate(aa.root_ptr);
+                    const b_root = hydrate(bb.root_ptr);
+                    return (@intFromPtr(a_root) < @intFromPtr(b_root + bb.root_cap)) and (@intFromPtr(b_root) < @intFromPtr(a_root + aa.root_cap));
                 },
                 .SPLIT_FIELDS => {
-                    return (@intFromPtr(aa.root_ptr) < @intFromPtr(bb.root_ptr + (bb.end_stride() * bb.root_cap))) and (@intFromPtr(bb.root_ptr) < @intFromPtr(aa.root_ptr + (aa.end_stride() * aa.root_cap)));
+                    const a_root = hydrate(aa.root_ptr);
+                    const b_root = hydrate(bb.root_ptr);
+                    return (@intFromPtr(a_root) < @intFromPtr(b_root + (bb.end_stride() * bb.root_cap))) and (@intFromPtr(b_root) < @intFromPtr(a_root + (aa.end_stride() * aa.root_cap)));
                 },
             }
         }
@@ -501,9 +515,12 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 },
             }
         }
-        inline fn field_slice_from_field_idx(self: List, comptime FIDX: usize) if (IS_CONST) [*]const FieldTypeFidx(FIDX) else [*]FieldTypeFidx(FIDX) {
+        inline fn field_slice_from_root(self: List, root: MemPtr, comptime FIDX: usize) if (IS_CONST) [*]const FieldTypeFidx(FIDX) else [*]FieldTypeFidx(FIDX) {
             const stride = ORDERED_FIELD_OFFSETS[FIDX] * self.root_cap;
-            return @ptrCast(@alignCast(self.root_ptr + stride));
+            return @ptrCast(@alignCast(root + stride));
+        }
+        inline fn field_slice_from_field_idx(self: List, comptime FIDX: usize) if (IS_CONST) [*]const FieldTypeFidx(FIDX) else [*]FieldTypeFidx(FIDX) {
+            return field_slice_from_root(self, hydrate(self.root_ptr), FIDX);
         }
         inline fn root_field_ptr(self: List, comptime FIELD: Field) if (IS_CONST) [*]const FieldType(FIELD) else [*]FieldType(FIELD) {
             return field_slice_from_field_idx(self, @backingInt(FIELD));
@@ -731,11 +748,12 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn set_true_idx(self: List, tidx: TrueIdx, val: ELEM) void {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    self.root_ptr[tidx.idx] = val;
+                    hydrate(self.root_ptr)[tidx.idx] = val;
                 },
                 .SPLIT_FIELDS => {
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..], 0..) |name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         field_slice[tidx.idx] = @field(val, name);
                     }
                 },
@@ -753,9 +771,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (comptime IS_STRUCT) {
-                        @field(&self.root_ptr[tidx.idx], @tagName(field)) = val;
+                        @field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field)) = val;
                     } else {
-                        self.root_ptr[tidx.idx] = val;
+                        hydrate(self.root_ptr)[tidx.idx] = val;
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -788,8 +806,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .SERIAL_INDEXES => {
                             const tstart = true_idx(self, start);
                             const tend = true_idx(self, end_exclusive);
+                            const root = hydrate(self.root_ptr);
                             inline for (ORDERED_FIELD_NAMES[0..], 0..) |name, fidx| {
-                                const field_slice = field_slice_from_field_idx(self, fidx)[tstart.idx..tend.idx];
+                                const field_slice = field_slice_from_root(self, root, fidx)[tstart.idx..tend.idx];
                                 @memset(field_slice, @field(val, name));
                             }
                         },
@@ -808,9 +827,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             assert_with_reason(start <= end_exclusive and end_exclusive <= get_cap(self), @src(), "memset exceeds entire memory capacity, memset end = {d}, capacity = {d}", .{ end_exclusive, get_cap(self) });
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
+                    const root = hydrate(self.root_ptr);
                     var i = start;
                     while (i < end_exclusive) : (i += 1) {
-                        set_field_true_idx(self, field, true_idx(self, i), val);
+                        const tidx = true_idx(self, i);
+                        if (comptime IS_STRUCT) {
+                            @field(&root[tidx.idx], @tagName(field)) = val;
+                        } else {
+                            root[tidx.idx] = val;
+                        }
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -819,7 +844,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                             const tstart = true_idx(self, start);
                             const tend = true_idx(self, end_exclusive);
                             const fidx: usize = @intCast(@backingInt(field));
-                            const field_slice = field_slice_from_field_idx(self, fidx)[tstart.idx..tend.idx];
+                            const field_slice = field_slice_from_root(self, hydrate(self.root_ptr), fidx)[tstart.idx..tend.idx];
                             @memset(field_slice, val);
                         },
                     }
@@ -838,12 +863,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn get_true_idx(self: List, tidx: TrueIdx) ELEM {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return self.root_ptr[tidx.idx];
+                    return hydrate(self.root_ptr)[tidx.idx];
                 },
                 .SPLIT_FIELDS => {
                     var val: ELEM = undefined;
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..], 0..) |name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         @field(val, name) = field_slice[tidx.idx];
                     }
                     return val;
@@ -857,12 +883,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn get_ptr_true_idx(self: List, tidx: TrueIdx) ElemPtr {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return &self.root_ptr[tidx.idx];
+                    return &hydrate(self.root_ptr)[tidx.idx];
                 },
                 .SPLIT_FIELDS => {
                     var ptr_container: ElemPtr = undefined;
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..NUM_FIELDS], 0..) |f_name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         @field(ptr_container, f_name) = &field_slice[tidx.idx];
                     }
                     return ptr_container;
@@ -879,12 +906,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn get_ptr_const_true_idx(self: List, tidx: TrueIdx) ElemPtrConst {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return &self.root_ptr[tidx.idx];
+                    return &hydrate(self.root_ptr)[tidx.idx];
                 },
                 .SPLIT_FIELDS => {
                     var ptr_container: ElemPtrConst = undefined;
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..NUM_FIELDS], 0..) |f_name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         @field(ptr_container, f_name) = &field_slice[tidx.idx];
                     }
                     return ptr_container;
@@ -901,9 +929,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (IS_STRUCT) {
-                        return @field(&self.root_ptr[tidx.idx], @tagName(field));
+                        return @field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field));
                     } else {
-                        return self.root_ptr[tidx.idx];
+                        return hydrate(self.root_ptr)[tidx.idx];
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -920,9 +948,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (comptime IS_STRUCT) {
-                        return &@field(&self.root_ptr[tidx.idx], @tagName(field));
+                        return &@field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field));
                     } else {
-                        return &self.root_ptr[tidx.idx];
+                        return &hydrate(self.root_ptr)[tidx.idx];
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -940,9 +968,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (comptime IS_STRUCT) {
-                        return &@field(&self.root_ptr[tidx.idx], @tagName(field));
+                        return &@field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field));
                     } else {
-                        return &self.root_ptr[tidx.idx];
+                        return &hydrate(self.root_ptr)[tidx.idx];
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -955,9 +983,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (comptime IS_STRUCT) {
-                        return @ptrCast(&@field(&self.root_ptr[tidx.idx], @tagName(field)));
+                        return @ptrCast(&@field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field)));
                     } else {
-                        return @ptrCast(&self.root_ptr[tidx.idx]);
+                        return @ptrCast(&hydrate(self.root_ptr)[tidx.idx]);
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -970,9 +998,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
                     if (comptime IS_STRUCT) {
-                        return @ptrCast(&@field(&self.root_ptr[tidx.idx], @tagName(field)));
+                        return @ptrCast(&@field(&hydrate(self.root_ptr)[tidx.idx], @tagName(field)));
                     } else {
-                        return @ptrCast(&self.root_ptr[tidx.idx]);
+                        return @ptrCast(&hydrate(self.root_ptr)[tidx.idx]);
                     }
                 },
                 .SPLIT_FIELDS => {
@@ -1016,12 +1044,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn get_many_item_ptr_true_idx(self: List, tidx: TrueIdx) ElemPtrMany {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return @ptrCast(&self.root_ptr[tidx.idx]);
+                    return @ptrCast(&hydrate(self.root_ptr)[tidx.idx]);
                 },
                 .SPLIT_FIELDS => {
                     var ptr_container: ElemPtrMany = undefined;
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..NUM_FIELDS], 0..) |f_name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         @field(ptr_container, f_name) = @ptrCast(&field_slice[tidx.idx]);
                     }
                     return ptr_container;
@@ -1031,12 +1060,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn get_many_item_ptr_const_true_idx(self: List, tidx: TrueIdx) ElemPtrManyConst {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    return @ptrCast(&self.root_ptr[tidx.idx]);
+                    return @ptrCast(&hydrate(self.root_ptr)[tidx.idx]);
                 },
                 .SPLIT_FIELDS => {
                     var ptr_container: ElemPtrManyConst = undefined;
+                    const root = hydrate(self.root_ptr);
                     inline for (ORDERED_FIELD_NAMES[0..NUM_FIELDS], 0..) |f_name, fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         @field(ptr_container, f_name) = @ptrCast(&field_slice[tidx.idx]);
                     }
                     return ptr_container;
@@ -1313,7 +1343,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn slice_const(self: List, start: IDX, end_exclusive: IDX) SliceConst {
             assert_valid_range(self, start, end_exclusive, @src());
             return SliceConst{
-                .root_ptr = self.root_ptr,
+                .root_ptr = self.root_ptr.to_const(),
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = end_exclusive - start,
@@ -1439,7 +1469,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             assert_reference(@src());
             assert_count_less_equal_len(self.*, count, @src());
             const new_slice = SliceConst{
-                .root_ptr = self.root_ptr,
+                .root_ptr = self.root_ptr.to_const(),
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
@@ -1465,7 +1495,7 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         pub fn split_off_slice_from_end_const(self: *List, count: IDX) SliceConst {
             assert_count_less_equal_len(self.*, count, @src());
             const new_slice = SliceConst{
-                .root_ptr = self.root_ptr,
+                .root_ptr = self.root_ptr.to_const(),
                 .root_cap = self.root_cap,
                 .root_offset = self.root_offset,
                 .data_len = count,
@@ -1512,13 +1542,14 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .SERIAL_INDEXES => {
                             const tstart = true_idx(self, start);
                             const tend = true_idx(self, end_exclusive);
-                            std.mem.reverse(ELEM, self.root_ptr[tstart.idx..tend.idx]);
+                            std.mem.reverse(ELEM, hydrate(self.root_ptr)[tstart.idx..tend.idx]);
                         },
                     }
                 },
                 .SPLIT_FIELDS => {
+                    const root = hydrate(self.root_ptr);
                     inline for (0..NUM_FIELDS) |fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         switch (comptime INDEX_LAYOUT) {
                             .SERIAL_INDEXES => {
                                 const tstart = true_idx(self, start);
@@ -1673,11 +1704,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     const t_new_end_exclusive = true_idx(self, new_end_exclusive);
                     switch (comptime FIELD_LAYOUT) {
                         .WHOLE_STRUCTS => {
-                            @memmove(self.root_ptr[t_new_start.idx..t_new_end_exclusive.idx], self.root_ptr[t_old_start.idx..t_old_end_exclusive.idx]);
+                            const root = hydrate(self.root_ptr);
+                            @memmove(root[t_new_start.idx..t_new_end_exclusive.idx], root[t_old_start.idx..t_old_end_exclusive.idx]);
                         },
                         .SPLIT_FIELDS => {
+                            const root = hydrate(self.root_ptr);
                             inline for (0..NUM_FIELDS) |fidx| {
-                                const field_slice = field_slice_from_field_idx(self, fidx);
+                                const field_slice = field_slice_from_root(self, root, fidx);
                                 @memmove(field_slice[t_new_start.idx..t_new_end_exclusive.idx], field_slice[t_old_start.idx..t_old_end_exclusive.idx]);
                             }
                         },
@@ -1713,17 +1746,19 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .SERIAL_INDEXES => {
                             const t_old_idx = true_idx(self, old_idx);
                             const t_new_idx = true_idx(self, new_idx);
-                            const temp = self.root_ptr[t_old_idx.idx];
-                            @memmove(self.root_ptr[t_old_idx.idx..t_new_idx.idx], self.root_ptr[(t_old_idx.idx + 1)..(t_new_idx.idx + 1)]);
-                            self.root_ptr[t_new_idx.idx] = temp;
+                            const root = hydrate(self.root_ptr);
+                            const temp = root[t_old_idx.idx];
+                            @memmove(root[t_old_idx.idx..t_new_idx.idx], root[(t_old_idx.idx + 1)..(t_new_idx.idx + 1)]);
+                            root[t_new_idx.idx] = temp;
                         },
                     }
                 },
                 .SPLIT_FIELDS => {
                     const t_old_idx = true_idx(self, old_idx);
                     const t_new_idx = true_idx(self, new_idx);
+                    const root = hydrate(self.root_ptr);
                     inline for (0..NUM_FIELDS) |fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         switch (comptime INDEX_LAYOUT) {
                             .SERIAL_INDEXES => {
                                 const temp = field_slice[t_old_idx.idx];
@@ -1749,17 +1784,19 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         .SERIAL_INDEXES => {
                             const t_old_idx = true_idx(self, old_idx);
                             const t_new_idx = true_idx(self, new_idx);
-                            const temp = self.root_ptr[t_old_idx.idx];
-                            @memmove(self.root_ptr[(t_new_idx.idx + 1)..(t_old_idx.idx + 1)], self.root_ptr[t_new_idx.idx..t_old_idx.idx]);
-                            self.root_ptr[t_new_idx.idx] = temp;
+                            const root = hydrate(self.root_ptr);
+                            const temp = root[t_old_idx.idx];
+                            @memmove(root[(t_new_idx.idx + 1)..(t_old_idx.idx + 1)], root[t_new_idx.idx..t_old_idx.idx]);
+                            root[t_new_idx.idx] = temp;
                         },
                     }
                 },
                 .SPLIT_FIELDS => {
                     const t_old_idx = true_idx(self, old_idx);
                     const t_new_idx = true_idx(self, new_idx);
+                    const root = hydrate(self.root_ptr);
                     inline for (0..NUM_FIELDS) |fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         switch (comptime INDEX_LAYOUT) {
                             .SERIAL_INDEXES => {
                                 const temp = field_slice[t_old_idx.idx];
@@ -1781,11 +1818,13 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn move_one_overwrite_true_idx(self: List, t_old_idx: TrueIdx, t_new_idx: TrueIdx) void {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    self.root_ptr[t_new_idx.idx] = self.root_ptr[t_old_idx.idx];
+                    const root = hydrate(self.root_ptr);
+                    root[t_new_idx.idx] = root[t_old_idx.idx];
                 },
                 .SPLIT_FIELDS => {
+                    const root = hydrate(self.root_ptr);
                     inline for (0..NUM_FIELDS) |fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         field_slice[t_new_idx.idx] = field_slice[t_old_idx.idx];
                     }
                 },
@@ -1799,13 +1838,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn swap_true_idx(self: List, idx_a: TrueIdx, idx_b: TrueIdx) void {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    const tmp = self.root_ptr[idx_a.idx];
-                    self.root_ptr[idx_a.idx] = self.root_ptr[idx_b.idx];
-                    self.root_ptr[idx_b.idx] = tmp;
+                    const root = hydrate(self.root_ptr);
+                    const tmp = root[idx_a.idx];
+                    root[idx_a.idx] = root[idx_b.idx];
+                    root[idx_b.idx] = tmp;
                 },
                 .SPLIT_FIELDS => {
+                    const root = hydrate(self.root_ptr);
                     inline for (0..NUM_FIELDS) |fidx| {
-                        const field_slice = field_slice_from_field_idx(self, fidx);
+                        const field_slice = field_slice_from_root(self, root, fidx);
                         const tmp = field_slice[idx_a.idx];
                         field_slice[idx_a.idx] = field_slice[idx_b.idx];
                         field_slice[idx_b.idx] = tmp;
@@ -1908,29 +1949,49 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
             self.data_len = @min(self.data_len, new_exact_cap);
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    const new_mem = self.alloc.realloc_types_custom_data_count(ELEM, self.root_ptr[0..self.root_cap], @intCast(self.data_len), @intCast(new_exact_cap), passed_alloc) orelse return ERRORS.handle(@src(), AllocErr.OutOfMemory);
-                    self.root_ptr = new_mem.ptr;
-                    self.root_cap = @intCast(new_mem.len);
+                    if (new_exact_cap == 0) {
+                        if (self.root_cap != 0) self.alloc.free_types(ELEM, self.root_ptr, @intCast(self.root_cap), passed_alloc);
+                        self.root_ptr = undefined;
+                        self.root_cap = 0;
+                        return;
+                    }
+                    const new_mem = if (self.root_cap == 0)
+                        self.alloc.alloc_types(ELEM, @intCast(new_exact_cap), passed_alloc)
+                    else
+                        self.alloc.realloc_types_custom_data_len(ELEM, self.root_ptr, @intCast(self.root_cap), @intCast(self.data_len), @intCast(new_exact_cap), passed_alloc);
+                    if (new_mem.is_null()) return ERRORS.handle(@src(), AllocErr.OutOfMemory);
+                    self.root_ptr = new_mem.to_non_null();
+                    self.root_cap = new_exact_cap;
                 },
                 .SPLIT_FIELDS => {
+                    const A = comptime PowerOf2.align_of_type(ELEM);
                     const old_byte_cap = end_stride() * self.root_cap;
                     const new_byte_cap = end_stride() * new_exact_cap;
-                    // remap would require doing a @memmove on each field region to correctly reposition them,
+                    if (new_exact_cap == 0) {
+                        if (self.root_cap != 0) self.alloc.free_bytes_with_align(A, self.root_ptr, @intCast(old_byte_cap), passed_alloc);
+                        self.root_ptr = undefined;
+                        self.root_cap = 0;
+                        return;
+                    }
+                    // remap/resize would require doing a @memmove on each field region to correctly reposition them,
                     // so might as well just alloc and go for the potentially faster @memcpy
-                    const new_mem = self.alloc.alloc_bytes_with_align(new_byte_cap, .fromByteUnits(@alignOf(ELEM)), passed_alloc) orelse return ERRORS.handle(@src(), AllocErr.OutOfMemory);
+                    const new_mem = self.alloc.alloc_bytes_with_align(A, new_byte_cap, passed_alloc);
+                    if (new_mem.is_null()) return ERRORS.handle(@src(), AllocErr.OutOfMemory);
+                    const new_root = new_mem.ptr_many_never_null();
                     if (self.data_len > 0) {
+                        const old_root = hydrate(self.root_ptr);
                         inline for (ORDERED_FIELD_OFFSETS[0..NUM_FIELDS], ORDERED_FIELD_TYPES[0..]) |offset, t| {
                             const field_start_offset_old = offset * self.root_cap;
                             const field_start_offset_new = offset * new_exact_cap;
-                            const field_ptr_old: [*]t = @ptrCast(@alignCast(self.root_ptr + field_start_offset_old));
-                            const field_ptr_new: [*]t = @ptrCast(@alignCast(new_mem.ptr + field_start_offset_new));
+                            const field_ptr_old: [*]t = @ptrCast(@alignCast(old_root + field_start_offset_old));
+                            const field_ptr_new: [*]t = @ptrCast(@alignCast(new_root + field_start_offset_new));
                             @memcpy(field_ptr_new[0..self.data_len], field_ptr_old[0..self.data_len]);
                         }
                     }
                     if (self.root_cap > 0) {
-                        self.alloc.free_bytes_with_align(.fromByteUnits(@alignOf(ELEM)), self.root_ptr[0..old_byte_cap], passed_alloc);
+                        self.alloc.free_bytes_with_align(A, self.root_ptr, @intCast(old_byte_cap), passed_alloc);
                     }
-                    self.root_ptr = @alignCast(new_mem.ptr);
+                    self.root_ptr = new_mem.to_non_null();
                     self.root_cap = new_exact_cap;
                 },
             }
@@ -1994,14 +2055,15 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
         fn free_internal(self: *List, alloc_fn: PassedAlloc) void {
             switch (comptime FIELD_LAYOUT) {
                 .WHOLE_STRUCTS => {
-                    self.alloc.free_types(ELEM, self.root_ptr[0..self.root_cap], alloc_fn);
+                    self.alloc.free_types(ELEM, self.root_ptr, @intCast(self.root_cap), alloc_fn);
                     self.root_ptr = undefined;
                     self.data_len = 0;
                     self.root_cap = 0;
                 },
                 .SPLIT_FIELDS => {
+                    const A = comptime PowerOf2.align_of_type(ELEM);
                     const byte_cap = end_stride() * self.root_cap;
-                    self.alloc.free_bytes_with_align(.fromByteUnits(@alignOf(ELEM)), self.root_ptr[0..byte_cap], alloc_fn);
+                    self.alloc.free_bytes_with_align(A, self.root_ptr, @intCast(byte_cap), alloc_fn);
                     self.root_ptr = undefined;
                     self.data_len = 0;
                     self.root_cap = 0;
@@ -5930,7 +5992,8 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                     }
                 };
                 inline fn get_next_child(self: ListSelfTraverser, depth: IDX) IDX {
-                    return self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path];
+                    const frame = &hydrate(self.stack.root_ptr)[depth];
+                    return frame.next_child_for_each_path[frame.curr_path];
                 }
                 inline fn push_stack_frame(self: *ListSelfTraverser, root: IDX, comptime allowed_paths: AllowedPaths) IDX {
                     const new_frame = StackFrame{
@@ -5956,10 +6019,11 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                 }
                 inline fn increment_next_child(self: *ListSelfTraverser, depth: IDX, curr_child_idx: IDX) void {
                     var next = if (comptime HAS_NEXT_SIBLING_FIELD) self.list.get_field(NEXT_SIBLING_FIELD, curr_child_idx) else NULL_IDX;
-                    self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path] = next;
-                    while (next == NULL_IDX and self.stack.root_ptr[depth].curr_path < (NUM_CHILD_PATHS - 1)) {
-                        self.stack.root_ptr[depth].curr_path += 1;
-                        next = self.stack.root_ptr[depth].next_child_for_each_path[self.stack.root_ptr[depth].curr_path];
+                    const frame = &hydrate(self.stack.root_ptr)[depth];
+                    frame.next_child_for_each_path[frame.curr_path] = next;
+                    while (next == NULL_IDX and frame.curr_path < (NUM_CHILD_PATHS - 1)) {
+                        frame.curr_path += 1;
+                        next = frame.next_child_for_each_path[frame.curr_path];
                     }
                 }
                 inline fn pop_stack_frame(self: *ListSelfTraverser, depth: IDX) struct { IDX, bool } {
@@ -6029,9 +6093,9 @@ pub fn GLSInternal(comptime DEF: ListDef, comptime NUM: DEF.IDX, comptime _E_INT
                         }
                         if (comptime ORDER == .CHILDREN_FIRST) {
                             if (comptime ACTION_ERROR != null) {
-                                try eval_for_each(self.list, self.stack.root_ptr[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                                try eval_for_each(self.list, hydrate(self.stack.root_ptr)[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
                             } else {
-                                eval_for_each(self.list, self.stack.root_ptr[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
+                                eval_for_each(self.list, hydrate(self.stack.root_ptr)[depth].this, ACTION_ERROR, ACTION_FN_KIND, action_context, ACTION_CONTEXT, action, ACTION);
                             }
                         }
                         depth, more_to_process = self.pop_stack_frame(depth);

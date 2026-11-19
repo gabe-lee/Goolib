@@ -27,6 +27,9 @@ const Root = @import("./_root.zig");
 const Buckets = @import("./Allocator_BucketSlabs.zig");
 const QuickBucket = @import("./Allocator_QuickBucket.zig");
 const AllocMod = Root.Allocator;
+const AllocSource = AllocMod.AllocSource;
+const PointerModule = Root.Pointer;
+const PointerSource = PointerModule.PointerSource;
 const PowerOf2 = Root.Math.PowerOf2;
 const Allocator = std.mem.Allocator;
 const Alignment = std.mem.Alignment;
@@ -178,50 +181,181 @@ const QuickHugeAligned = struct {
     value: u64 align(8_192),
 };
 
-/// A minimal allocator implementing the "compliant local allocator" interface
-/// (`alloc_raw`/`free_raw`/`resize_raw`/`remap_raw` taking `self`).
-const CompliantLocalAlloc = struct {
+/// A minimal `AllocatorAdapter` source using the native `*_raw_native` family.
+/// The adapter detects the absence of `POINTER_SOURCE` and calls these methods
+/// with a `std.mem.Alignment`.
+const NativeLocalAlloc = struct {
     backing: Allocator,
 
-    pub fn alloc_raw(self: *CompliantLocalAlloc, size: usize, alignment: ?Alignment) ?[*]u8 {
-        return self.backing.rawAlloc(size, alignment orelse Alignment.@"1", @returnAddress());
+    pub fn alloc_raw_native(self: *NativeLocalAlloc, size: usize, alignment: Alignment) ?[*]u8 {
+        return self.backing.rawAlloc(size, alignment, @returnAddress());
     }
-    pub fn free_raw(self: *CompliantLocalAlloc, memory: []u8, alignment: ?Alignment) void {
-        self.backing.rawFree(memory, alignment orelse Alignment.@"1", @returnAddress());
+    pub fn free_raw_native(self: *NativeLocalAlloc, memory: []u8, alignment: Alignment) void {
+        self.backing.rawFree(memory, alignment, @returnAddress());
     }
-    pub fn resize_raw(self: *CompliantLocalAlloc, memory: []u8, new_len: usize, alignment: ?Alignment) bool {
-        return self.backing.rawResize(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
+    pub fn resize_raw_native(self: *NativeLocalAlloc, memory: []u8, new_len: usize, alignment: Alignment) bool {
+        return self.backing.rawResize(memory, alignment, new_len, @returnAddress());
     }
-    pub fn remap_raw(self: *CompliantLocalAlloc, memory: []u8, new_len: usize, alignment: ?Alignment) ?[*]u8 {
-        return self.backing.rawRemap(memory, alignment orelse Alignment.@"1", new_len, @returnAddress());
+    pub fn remap_raw_native(self: *NativeLocalAlloc, memory: []u8, new_len: usize, alignment: Alignment) ?[*]u8 {
+        return self.backing.rawRemap(memory, alignment, new_len, @returnAddress());
     }
 };
 
-/// Used by the comptime-pointer source mode. The address of this global is
-/// comptime-known, while its contents are filled in by the owning test.
-var adapter_comptime_alloc_state: CompliantLocalAlloc = undefined;
+/// A minimal compliant allocator that declares a native `POINTER_SOURCE` and
+/// uses the `Pointer(SOURCE)` wrapper API for its raw functions.
+const WrappedLocalAlloc = struct {
+    backing: Allocator,
+
+    pub const POINTER_SOURCE = PointerSource.native_pointer();
+    pub const PointerU8 = PointerModule.Pointer(u8, POINTER_SOURCE);
+    pub const NullablePointerU8 = PointerModule.NullablePointer(u8, POINTER_SOURCE);
+
+    pub fn alloc_raw_wrapper(self: *WrappedLocalAlloc, len: usize, alignment: PowerOf2) NullablePointerU8 {
+        return NullablePointerU8.new_from(self.backing.rawAlloc(len, alignment.to_std_align(), @returnAddress()));
+    }
+    pub fn free_raw_wrapper(self: *WrappedLocalAlloc, ptr: PointerU8, len: usize, alignment: PowerOf2) void {
+        self.backing.rawFree(ptr.slice(len), alignment.to_std_align(), @returnAddress());
+    }
+    pub fn resize_raw_wrapper(self: *WrappedLocalAlloc, ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) bool {
+        return self.backing.rawResize(ptr.slice(old_len), alignment.to_std_align(), new_len, @returnAddress());
+    }
+    pub fn remap_raw_wrapper(self: *WrappedLocalAlloc, ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) NullablePointerU8 {
+        return NullablePointerU8.new_from(self.backing.rawRemap(ptr.slice(old_len), alignment.to_std_align(), new_len, @returnAddress()));
+    }
+};
+
+/// A minimal compliant allocator whose `POINTER_SOURCE` is a static address
+/// resolver. Handles are `u32` byte offsets into a global buffer, so the
+/// adapter's wrapper path has to resolve them through the source.
+const RESOLVER_HEAP_SIZE = 64 * 1_024;
+var resolver_heap: [RESOLVER_HEAP_SIZE]u8 align(64) = undefined;
+
+fn resolverResolve(local: u32) usize {
+    return @intFromPtr(&resolver_heap[0]) + local;
+}
+fn resolverIncrement(local: u32, byte_offset: usize) u32 {
+    return local + @as(u32, @intCast(byte_offset));
+}
+fn resolverDecrement(local: u32, byte_offset: usize) u32 {
+    return local - @as(u32, @intCast(byte_offset));
+}
+
+const RESOLVER = PointerModule.StaticAddressResolver{
+    .FUNCS = .{ .U32 = .{
+        .HAS_NULL_VALUE = true,
+        .NULL_VALUE = std.math.maxInt(u32),
+        .RESOLVE = resolverResolve,
+        .INCREMENT = resolverIncrement,
+        .DECREMENT = resolverDecrement,
+    } },
+    .ADDRESS_GRANULARITY = ._1,
+};
+
+const ResolverLocalAlloc = struct {
+    bump: usize = 0,
+
+    pub const POINTER_SOURCE = PointerSource.static_address_resolver(RESOLVER);
+    pub const PointerU8 = PointerModule.Pointer(u8, POINTER_SOURCE);
+    pub const NullablePointerU8 = PointerModule.NullablePointer(u8, POINTER_SOURCE);
+
+    pub fn alloc_raw_wrapper(self: *ResolverLocalAlloc, len: usize, alignment: PowerOf2) NullablePointerU8 {
+        const aligned = std.mem.alignForward(usize, self.bump, alignment.value_as_type(usize));
+        const end = aligned + len;
+        if (end > resolver_heap.len) return NullablePointerU8.new_null();
+        self.bump = end;
+        return NullablePointerU8.new_from(@intCast(aligned));
+    }
+    pub fn free_raw_wrapper(self: *ResolverLocalAlloc, ptr: PointerU8, len: usize, alignment: PowerOf2) void {
+        _ = ptr;
+        _ = len;
+        _ = alignment;
+        _ = self;
+    }
+    pub fn resize_raw_wrapper(self: *ResolverLocalAlloc, ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) bool {
+        _ = ptr;
+        _ = old_len;
+        _ = new_len;
+        _ = alignment;
+        _ = self;
+        return false;
+    }
+    pub fn remap_raw_wrapper(self: *ResolverLocalAlloc, ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) NullablePointerU8 {
+        _ = ptr;
+        _ = old_len;
+        _ = new_len;
+        _ = alignment;
+        _ = self;
+        return NullablePointerU8.new_null();
+    }
+};
+
+/// Used by the comptime-pointer source modes. The addresses of these globals
+/// are comptime-known while their contents are filled in by the owning test.
+var native_comptime_alloc_state: NativeLocalAlloc = undefined;
+var wrapped_comptime_alloc_state: WrappedLocalAlloc = undefined;
 
 /// A comptime-known `std.mem.Allocator` for the comptime-interface source mode.
 const ADAPTER_COMPTIME_INTERFACE_ALLOC: Allocator = std.heap.page_allocator;
 
-/// A dedicated global allocator so the adapter tests never share state with the
-/// other global allocator tests.
-const AdapterGlobalAlloc = Buckets.GlobalBucketSlabsAlloc(.{
-    .BUCKETS = &TEST_BUCKETS,
-    .BACKING_ALLOCATOR_MODE = .USE_BACKING_ALLOCATOR,
-    .TRACK_ALLOCATION_STATS = false,
-    .UNIQUE_NAME = "TEST_GLOBAL_BUCKET_SLABS_ALLOCATOR_ADAPTER",
-});
+/// Backing allocators for the global compliant source modes.
+var global_native_alloc_backing: Allocator = undefined;
+var global_wrapped_alloc_backing: Allocator = undefined;
+
+const GlobalNativeAlloc = struct {
+    pub fn alloc_raw_native(size: usize, alignment: Alignment) ?[*]u8 {
+        return global_native_alloc_backing.rawAlloc(size, alignment, @returnAddress());
+    }
+    pub fn free_raw_native(memory: []u8, alignment: Alignment) void {
+        global_native_alloc_backing.rawFree(memory, alignment, @returnAddress());
+    }
+    pub fn resize_raw_native(memory: []u8, new_len: usize, alignment: Alignment) bool {
+        return global_native_alloc_backing.rawResize(memory, alignment, new_len, @returnAddress());
+    }
+    pub fn remap_raw_native(memory: []u8, new_len: usize, alignment: Alignment) ?[*]u8 {
+        return global_native_alloc_backing.rawRemap(memory, alignment, new_len, @returnAddress());
+    }
+};
+
+const GlobalWrappedAlloc = struct {
+    pub const POINTER_SOURCE = PointerSource.native_pointer();
+    pub const PointerU8 = PointerModule.Pointer(u8, POINTER_SOURCE);
+    pub const NullablePointerU8 = PointerModule.NullablePointer(u8, POINTER_SOURCE);
+
+    pub fn alloc_raw_wrapper(len: usize, alignment: PowerOf2) NullablePointerU8 {
+        return NullablePointerU8.new_from(global_wrapped_alloc_backing.rawAlloc(len, alignment.to_std_align(), @returnAddress()));
+    }
+    pub fn free_raw_wrapper(ptr: PointerU8, len: usize, alignment: PowerOf2) void {
+        global_wrapped_alloc_backing.rawFree(ptr.slice(len), alignment.to_std_align(), @returnAddress());
+    }
+    pub fn resize_raw_wrapper(ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) bool {
+        return global_wrapped_alloc_backing.rawResize(ptr.slice(old_len), alignment.to_std_align(), new_len, @returnAddress());
+    }
+    pub fn remap_raw_wrapper(ptr: PointerU8, old_len: usize, new_len: usize, alignment: PowerOf2) NullablePointerU8 {
+        return NullablePointerU8.new_from(global_wrapped_alloc_backing.rawRemap(ptr.slice(old_len), alignment.to_std_align(), new_len, @returnAddress()));
+    }
+};
 
 const ADAPTER_ALIGN_64 = Alignment.fromByteUnits(64);
+const ADAPTER_ALIGN_64_POW2 = PowerOf2._64;
 
-const CachedAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.cached_allocator_interface());
-const PassedAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.passed_allocator_interface());
-const ComptimeIfaceAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.comptime_allocator_interface_ptr(&ADAPTER_COMPTIME_INTERFACE_ALLOC));
-const GlobalAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.compliant_global_allocator(AdapterGlobalAlloc));
-const LocalCachedAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.compliant_instantiated_allocator_cached_ptr(CompliantLocalAlloc));
-const LocalPassedAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.compliant_instantiated_allocator_passed_ptr(CompliantLocalAlloc));
-const LocalComptimeAdapter = AllocMod.AllocatorAdapter(AllocMod.AllocSource.compliant_instantiated_allocator_comptime_ptr(CompliantLocalAlloc, &adapter_comptime_alloc_state));
+const CachedAdapter = AllocMod.AllocatorAdapter(AllocSource.cached_allocator_interface());
+const PassedAdapter = AllocMod.AllocatorAdapter(AllocSource.passed_allocator_interface());
+const ComptimeIfaceAdapter = AllocMod.AllocatorAdapter(AllocSource.comptime_allocator_interface_ptr(&ADAPTER_COMPTIME_INTERFACE_ALLOC));
+const NeverAdapter = AllocMod.AllocatorAdapter(AllocSource.never_allocates());
+
+const GlobalNativeAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_global_allocator(GlobalNativeAlloc));
+const GlobalWrappedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_global_allocator(GlobalWrappedAlloc));
+
+const NativeCachedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_cached_ptr(NativeLocalAlloc));
+const NativePassedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_passed_ptr(NativeLocalAlloc));
+const NativeComptimeAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_comptime_ptr(NativeLocalAlloc, &native_comptime_alloc_state));
+
+const WrappedCachedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_cached_ptr(WrappedLocalAlloc));
+const WrappedPassedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_passed_ptr(WrappedLocalAlloc));
+const WrappedComptimeAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_comptime_ptr(WrappedLocalAlloc, &wrapped_comptime_alloc_state));
+
+const ResolverCachedAdapter = AllocMod.AllocatorAdapter(AllocSource.compliant_instantiated_allocator_cached_ptr(ResolverLocalAlloc));
+var resolver_alloc_state: ResolverLocalAlloc = .{};
 
 fn fillSlice(memory: []u8, value: u8) void {
     @memset(memory, value);
@@ -231,6 +365,14 @@ fn expectFilled(memory: []const u8, value: u8) !void {
     for (memory) |byte| {
         try testing.expectEqual(value, byte);
     }
+}
+
+/// Adapter results are nullable wrappers, not optionals, so they cannot use
+/// `orelse`. This converts one to the non-null wrapper type the free/resize/
+/// remap helpers expect, or returns an out-of-memory error.
+fn expectAllocation(p: anytype) !@TypeOf(p.to_non_null()) {
+    if (p.is_null()) return error.OutOfMemory;
+    return p.to_non_null();
 }
 
 fn exerciseAdapterAllocator(allocator: Allocator) !void {
@@ -250,6 +392,88 @@ fn exerciseAdapterAllocator(allocator: Allocator) !void {
 
     const empty = try allocator.alloc(u8, 0);
     allocator.free(empty);
+}
+
+/// Exercises the helper surface shared by every allocator-backed source.
+fn exerciseAdapterHelpers(allocator: anytype, alloc_param: anytype) !void {
+    const A = @TypeOf(allocator);
+    const bytes = try expectAllocation(allocator.alloc_bytes(32, alloc_param));
+    {
+        const s = bytes.slice_never_null(32);
+        for (s, 0..) |*byte, i| byte.* = @intCast(i);
+    }
+
+    const grown = try expectAllocation(allocator.realloc_bytes(bytes, 32, 256, alloc_param));
+    const grown_slice = grown.slice_never_null(256);
+    for (grown_slice[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+    allocator.free_bytes(grown, 256, alloc_param);
+
+    const aligned = try expectAllocation(allocator.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 33, alloc_param));
+    const aligned_slice = aligned.slice_never_null(33);
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_slice.ptr) % 64);
+    fillSlice(aligned_slice, 0x5A);
+    try expectFilled(aligned_slice, 0x5A);
+    const aligned_grown = try expectAllocation(allocator.realloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned, 33, 96, alloc_param));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_grown.slice_never_null(96).ptr) % 64);
+    try expectFilled(aligned_grown.slice_never_null(96)[0..33], 0x5A);
+    allocator.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_grown, 96, alloc_param);
+
+    const values = try expectAllocation(allocator.alloc_types(u32, 4, alloc_param));
+    {
+        const s = values.slice_never_null(4);
+        s[0] = 0xAAAA_AAAA;
+        s[3] = 0xDDDD_DDDD;
+    }
+    const values_grown = try expectAllocation(allocator.realloc_types(u32, values, 4, 8, alloc_param));
+    const values_slice = values_grown.slice_never_null(8);
+    try testing.expectEqual(@as(u32, 0xAAAA_AAAA), values_slice[0]);
+    try testing.expectEqual(@as(u32, 0xDDDD_DDDD), values_slice[3]);
+    allocator.free_types(u32, values_grown, 8, alloc_param);
+
+    const custom = try expectAllocation(allocator.alloc_bytes(64, alloc_param));
+    fillSlice(custom.slice_never_null(64), 0x11);
+    const custom_grown = try expectAllocation(allocator.realloc_bytes_custom_data_len(custom, 64, 16, 128, alloc_param));
+    try testing.expectEqual(@as(usize, 128), custom_grown.slice_never_null(128).len);
+    try expectFilled(custom_grown.slice_never_null(128)[0..16], 0x11);
+    allocator.free_bytes(custom_grown, 128, alloc_param);
+
+    const data = try expectAllocation(allocator.alloc_types(u16, 8, alloc_param));
+    {
+        const s = data.slice_never_null(8);
+        s[0] = 0x1111;
+        s[2] = 0x3333;
+    }
+    const data_grown = try expectAllocation(allocator.realloc_types_custom_data_len(u16, data, 8, 3, 32, alloc_param));
+    try testing.expectEqual(@as(usize, 32), data_grown.slice_never_null(32).len);
+    try testing.expectEqual(@as(u16, 0x1111), data_grown.slice_never_null(32)[0]);
+    try testing.expectEqual(@as(u16, 0x3333), data_grown.slice_never_null(32)[2]);
+    allocator.free_types(u16, data_grown, 32, alloc_param);
+
+    const AlignedU32 = struct { value: u32 align(64) };
+    const aligned_values = try expectAllocation(allocator.alloc_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, 2, alloc_param));
+    aligned_values.slice_never_null(2)[0].value = 0x1122_3344;
+    const aligned_values_grown = try expectAllocation(allocator.realloc_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 2, 8, alloc_param));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_values_grown.slice_never_null(8).ptr) % 64);
+    try testing.expectEqual(@as(u32, 0x1122_3344), aligned_values_grown.slice_never_null(8)[0].value);
+    allocator.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values_grown, 8, alloc_param);
+
+    const created = try expectAllocation(allocator.create(u64, alloc_param));
+    const created_ptr = created.ptr();
+    created_ptr.* = 0x1234_5678_9ABC_DEF0;
+    const cloned_one = try expectAllocation(allocator.clone_one(u64, A.ConstPointer(u64).new_from(@as([*]const u64, @ptrCast(created_ptr))), alloc_param));
+    try testing.expectEqual(@as(u64, 0x1234_5678_9ABC_DEF0), cloned_one.ptr().*);
+    allocator.destroy(u64, cloned_one, alloc_param);
+    allocator.destroy(u64, created, alloc_param);
+
+    const native_bytes = allocator.alloc_bytes_native(24, alloc_param) orelse return error.OutOfMemory;
+    fillSlice(native_bytes[0..24], 0x21);
+    try expectFilled(native_bytes[0..24], 0x21);
+    allocator.free_bytes_native(native_bytes[0..24], alloc_param);
+
+    const native_aligned = allocator.alloc_bytes_with_align_native(ADAPTER_ALIGN_64, 24, alloc_param) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(native_aligned) % 64);
+    fillSlice(native_aligned[0..24], 0x42);
+    allocator.free_bytes_with_align_native(ADAPTER_ALIGN_64, native_aligned[0..24], alloc_param);
 }
 
 fn globalBucketSlabsThreadlocalWorker(result: *bool) void {
@@ -1249,51 +1473,74 @@ test "QuickBucket -> block metadata grows and deinit releases every block" {
 }
 
 test "AllocatorAdapter -> source metadata maps each mode to the right storage" {
-    const Source = AllocMod.AllocSource;
-
-    const passed = Source.passed_allocator_interface();
+    const passed = AllocSource.passed_allocator_interface();
     try testing.expect(passed.PARAM_TYPE() == Allocator);
     try testing.expect(passed.FIELD_TYPE() == void);
     try testing.expect(passed.USE_PARAM_TYPE());
     try testing.expect(!passed.USE_FIELD_TYPE());
     try testing.expect(!passed.USE_CONST_TYPE());
+    try testing.expect(passed.equals(AllocSource.passed_allocator_interface()));
+    try testing.expect(!passed.equals(AllocSource.cached_allocator_interface()));
 
-    const cached = Source.cached_allocator_interface();
+    const cached = AllocSource.cached_allocator_interface();
     try testing.expect(cached.FIELD_TYPE() == Allocator);
     try testing.expect(cached.PARAM_TYPE() == void);
     try testing.expect(cached.USE_FIELD_TYPE());
     try testing.expect(!cached.USE_PARAM_TYPE());
     try testing.expect(!cached.USE_CONST_TYPE());
 
-    const iface = Source.comptime_allocator_interface_ptr(&ADAPTER_COMPTIME_INTERFACE_ALLOC);
+    const iface = AllocSource.comptime_allocator_interface_ptr(&ADAPTER_COMPTIME_INTERFACE_ALLOC);
     try testing.expect(iface.CONST_TYPE() == *const Allocator);
     try testing.expect(iface.USE_CONST_TYPE());
     try testing.expect(!iface.USE_FIELD_TYPE());
     try testing.expect(!iface.USE_PARAM_TYPE());
 
-    const global = Source.compliant_global_allocator(AdapterGlobalAlloc);
-    try testing.expect(global.CONST_TYPE() == type);
-    try testing.expect(global.COMPLIANT_TYPE() == AdapterGlobalAlloc);
-    try testing.expect(global.INSTANTIATED_COMPLIANT_TYPE_PTR() == void);
-    try testing.expect(global.USE_CONST_TYPE());
+    const never = AllocSource.never_allocates();
+    try testing.expect(never.CAN_NEVER_ALLOCATE());
+    try testing.expect(never.PARAM_TYPE() == void);
+    try testing.expect(never.FIELD_TYPE() == void);
+    try testing.expect(never.CONST_TYPE() == void);
 
-    const local_cached = Source.compliant_instantiated_allocator_cached_ptr(CompliantLocalAlloc);
-    try testing.expect(local_cached.FIELD_TYPE() == *CompliantLocalAlloc);
-    try testing.expect(local_cached.INSTANTIATED_COMPLIANT_TYPE_PTR() == *CompliantLocalAlloc);
+    const global_native = AllocSource.compliant_global_allocator(GlobalNativeAlloc);
+    try testing.expect(global_native.CONST_TYPE() == type);
+    try testing.expect(global_native.COMPLIANT_TYPE() == GlobalNativeAlloc);
+    try testing.expect(global_native.INSTANTIATED_COMPLIANT_TYPE_PTR() == void);
+    try testing.expect(global_native.USE_CONST_TYPE());
+    try testing.expect(global_native.equals(AllocSource.compliant_global_allocator(GlobalNativeAlloc)));
+    try testing.expect(!global_native.equals(AllocSource.compliant_global_allocator(GlobalWrappedAlloc)));
+    try testing.expectEqualStrings("COMPILANT_GLOBAL_ALLOCATOR" ++ @typeName(GlobalNativeAlloc), global_native.debug_str());
+
+    const local_cached = AllocSource.compliant_instantiated_allocator_cached_ptr(NativeLocalAlloc);
+    try testing.expect(local_cached.FIELD_TYPE() == *NativeLocalAlloc);
+    try testing.expect(local_cached.INSTANTIATED_COMPLIANT_TYPE_PTR() == *NativeLocalAlloc);
     try testing.expect(local_cached.USE_FIELD_TYPE());
 
-    const local_passed = Source.compliant_instantiated_allocator_passed_ptr(CompliantLocalAlloc);
-    try testing.expect(local_passed.PARAM_TYPE() == *CompliantLocalAlloc);
-    try testing.expect(local_passed.INSTANTIATED_COMPLIANT_TYPE_PTR() == *CompliantLocalAlloc);
+    const local_passed = AllocSource.compliant_instantiated_allocator_passed_ptr(NativeLocalAlloc);
+    try testing.expect(local_passed.PARAM_TYPE() == *NativeLocalAlloc);
+    try testing.expect(local_passed.INSTANTIATED_COMPLIANT_TYPE_PTR() == *NativeLocalAlloc);
     try testing.expect(local_passed.USE_PARAM_TYPE());
 
-    const local_comptime = Source.compliant_instantiated_allocator_comptime_ptr(CompliantLocalAlloc, &adapter_comptime_alloc_state);
-    try testing.expect(local_comptime.CONST_TYPE() == *CompliantLocalAlloc);
-    try testing.expect(local_comptime.INSTANTIATED_COMPLIANT_TYPE_PTR() == *CompliantLocalAlloc);
+    const local_comptime = AllocSource.compliant_instantiated_allocator_comptime_ptr(NativeLocalAlloc, &native_comptime_alloc_state);
+    try testing.expect(local_comptime.CONST_TYPE() == *NativeLocalAlloc);
+    try testing.expect(local_comptime.INSTANTIATED_COMPLIANT_TYPE_PTR() == *NativeLocalAlloc);
     try testing.expect(local_comptime.USE_CONST_TYPE());
+
+    // Adapter-level metadata. Both compliant source styles must be detected as
+    // native here because the wrapper style declares a native `POINTER_SOURCE`.
+    try testing.expect(CachedAdapter.PassedAlloc == void);
+    try testing.expect(CachedAdapter.CachedAlloc == Allocator);
+    try testing.expect(PassedAdapter.PassedAlloc == Allocator);
+    try testing.expect(PassedAdapter.CachedAlloc == void);
+    try testing.expect(NativeCachedAdapter.PassedAlloc == void);
+    try testing.expect(NativeCachedAdapter.CachedAlloc == *NativeLocalAlloc);
+    try testing.expect(NativePassedAdapter.PassedAlloc == *NativeLocalAlloc);
+    try testing.expect(NativeCachedAdapter.POINTER_SOURCE_IS_NATIVE);
+    try testing.expect(WrappedCachedAdapter.POINTER_SOURCE_IS_NATIVE);
+    try testing.expect(NativeCachedAdapter.POINTER_SOURCE == .NATIVE);
+    try testing.expect(WrappedCachedAdapter.POINTER_SOURCE == .NATIVE);
 }
 
-test "AllocatorAdapter -> std allocator interface works for stateful and stateless sources" {
+test "AllocatorAdapter -> std allocator interface for every interface-backed source" {
     {
         var adapter = CachedAdapter.new(testing.allocator);
         try exerciseAdapterAllocator(adapter.interface());
@@ -1301,348 +1548,589 @@ test "AllocatorAdapter -> std allocator interface works for stateful and statele
 
     try exerciseAdapterAllocator(ComptimeIfaceAdapter.interface());
 
-    AdapterGlobalAlloc.init(testing.allocator, {});
-    defer AdapterGlobalAlloc.deinit();
-    try exerciseAdapterAllocator(GlobalAdapter.interface());
-
     {
-        var state = CompliantLocalAlloc{ .backing = testing.allocator };
-        var adapter = LocalCachedAdapter.new(&state);
+        const passed = PassedAdapter{};
+        var adapter = passed.passed_source_interface_adapter(testing.allocator);
         try exerciseAdapterAllocator(adapter.interface());
     }
 
-    adapter_comptime_alloc_state = .{ .backing = testing.allocator };
-    try exerciseAdapterAllocator(LocalComptimeAdapter.interface());
+    global_native_alloc_backing = testing.allocator;
+    try exerciseAdapterAllocator(GlobalNativeAdapter.interface());
+    global_wrapped_alloc_backing = testing.allocator;
+    try exerciseAdapterAllocator(GlobalWrappedAdapter.interface());
+
+    {
+        var state = NativeLocalAlloc{ .backing = testing.allocator };
+        var adapter = NativeCachedAdapter.new(&state);
+        try exerciseAdapterAllocator(adapter.interface());
+    }
+    {
+        var state = WrappedLocalAlloc{ .backing = testing.allocator };
+        var adapter = WrappedCachedAdapter.new(&state);
+        try exerciseAdapterAllocator(adapter.interface());
+    }
+
+    native_comptime_alloc_state = .{ .backing = testing.allocator };
+    try exerciseAdapterAllocator(NativeComptimeAdapter.interface());
+    wrapped_comptime_alloc_state = .{ .backing = testing.allocator };
+    try exerciseAdapterAllocator(WrappedComptimeAdapter.interface());
 }
 
-test "AllocatorAdapter -> cached allocator interface forwards every helper family" {
-    var adapter = CachedAdapter{};
-    adapter.init(testing.allocator);
+test "AllocatorAdapter -> cached allocator interface helper surface" {
+    const adapter = CachedAdapter.new(testing.allocator);
+    try exerciseAdapterHelpers(adapter, {});
+}
 
-    // Raw/bytes allocation, growth and realloc.
-    const bytes = adapter.alloc_bytes(32, {}) orelse return error.OutOfMemory;
-    for (bytes, 0..) |*byte, i| byte.* = @intCast(i);
+test "AllocatorAdapter -> passed allocator interface helper surface" {
+    const adapter = PassedAdapter{};
+    try exerciseAdapterHelpers(adapter, testing.allocator);
+}
 
-    const grown = adapter.realloc_bytes(bytes, 256, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 256), grown.len);
-    for (grown[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
+test "AllocatorAdapter -> compliant global allocator helper surface" {
+    global_native_alloc_backing = testing.allocator;
+    try exerciseAdapterHelpers(GlobalNativeAdapter{}, {});
 
-    const custom = adapter.realloc_bytes_custom_data_len(grown, 32, 64, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 64), custom.len);
-    for (custom[0..32], 0..) |byte, i| try testing.expectEqual(@as(u8, @intCast(i)), byte);
-    adapter.free_bytes(custom, {});
+    global_wrapped_alloc_backing = testing.allocator;
+    try exerciseAdapterHelpers(GlobalWrappedAdapter{}, {});
+}
 
-    // Aligned bytes and typed allocation, including an aligned realloc.
-    const aligned_bytes = adapter.alloc_bytes_with_align(33, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    fillSlice(aligned_bytes, 0x5A);
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_bytes.ptr) % 64);
+test "AllocatorAdapter -> compliant instantiated allocator helper surface" {
+    var native_state = NativeLocalAlloc{ .backing = testing.allocator };
+    try exerciseAdapterHelpers(NativeCachedAdapter.new(&native_state), {});
+    try exerciseAdapterHelpers(NativePassedAdapter{}, &native_state);
 
-    const aligned_grown = adapter.realloc_bytes_with_align(ADAPTER_ALIGN_64, aligned_bytes, 96, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_grown.ptr) % 64);
-    try expectFilled(aligned_grown[0..33], 0x5A);
+    native_comptime_alloc_state = .{ .backing = testing.allocator };
+    try exerciseAdapterHelpers(NativeComptimeAdapter{}, {});
 
-    const custom_aligned = adapter.realloc_bytes_with_align_custom_data_len(ADAPTER_ALIGN_64, aligned_grown, 16, 128, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(custom_aligned.ptr) % 64);
-    try expectFilled(custom_aligned[0..16], 0x5A);
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, custom_aligned, {});
+    var wrapped_state = WrappedLocalAlloc{ .backing = testing.allocator };
+    try exerciseAdapterHelpers(WrappedCachedAdapter.new(&wrapped_state), {});
+    try exerciseAdapterHelpers(WrappedPassedAdapter{}, &wrapped_state);
 
-    const items = adapter.alloc_types(u32, 4, {}) orelse return error.OutOfMemory;
-    items[0] = 0xAAAA_AAAA;
-    items[3] = 0xDDDD_DDDD;
-    const items_grown = adapter.realloc_types(u32, items, 8, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 8), items_grown.len);
-    try testing.expectEqual(@as(u32, 0xAAAA_AAAA), items_grown[0]);
-    try testing.expectEqual(@as(u32, 0xDDDD_DDDD), items_grown[3]);
-    adapter.free_types(u32, items_grown, {});
+    wrapped_comptime_alloc_state = .{ .backing = testing.allocator };
+    try exerciseAdapterHelpers(WrappedComptimeAdapter{}, {});
+}
+
+test "AllocatorAdapter -> cached source resize families" {
+    const adapter = CachedAdapter.new(testing.allocator);
+
+    // Both outcomes are valid; a successful resize keeps the leading data and
+    // the caller frees the block at the new length.
+    const raw_mem = try expectAllocation(adapter.alloc_raw(256, PowerOf2._1, {}));
+    fillSlice(raw_mem.slice_never_null(256), 0x3C);
+    if (adapter.resize_raw(raw_mem, 256, 64, PowerOf2._1, {})) {
+        try expectFilled(raw_mem.slice_never_null(64), 0x3C);
+        adapter.free_raw(raw_mem, 64, PowerOf2._1, {});
+    } else {
+        adapter.free_raw(raw_mem, 256, PowerOf2._1, {});
+    }
+
+    const byte_mem = try expectAllocation(adapter.alloc_bytes(128, {}));
+    fillSlice(byte_mem.slice_never_null(128), 0x4D);
+    if (adapter.resize_bytes(byte_mem, 128, 64, {})) {
+        try expectFilled(byte_mem.slice_never_null(64), 0x4D);
+        adapter.free_bytes(byte_mem, 64, {});
+    } else {
+        adapter.free_bytes(byte_mem, 128, {});
+    }
+
+    const aligned_mem = try expectAllocation(adapter.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 128, {}));
+    fillSlice(aligned_mem.slice_never_null(128), 0x4E);
+    if (adapter.resize_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_mem, 128, 64, {})) {
+        try expectFilled(aligned_mem.slice_never_null(64), 0x4E);
+        adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_mem, 64, {});
+    } else {
+        adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_mem, 128, {});
+    }
+
+    const values = try expectAllocation(adapter.alloc_types(u32, 8, {}));
+    for (values.slice_never_null(8), 0..) |*value, i| value.* = @intCast(i);
+    if (adapter.resize_types(u32, values, 8, 4, {})) {
+        try testing.expectEqual(@as(u32, 0), values.slice_never_null(4)[0]);
+        try testing.expectEqual(@as(u32, 3), values.slice_never_null(4)[3]);
+        adapter.free_types(u32, values, 4, {});
+    } else {
+        adapter.free_types(u32, values, 8, {});
+    }
 
     const AlignedU32 = struct { value: u32 align(64) };
-    const aligned_items = adapter.alloc_types_with_align(AlignedU32, 2, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    aligned_items[0].value = 0x1122_3344;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_items.ptr) % 64);
-
-    const aligned_items_grown = adapter.realloc_types_with_align(ADAPTER_ALIGN_64, AlignedU32, aligned_items, 6, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u32, 0x1122_3344), aligned_items_grown[0].value);
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned_items_grown.ptr) % 64);
-
-    const aligned_items_custom = adapter.realloc_types_with_align_custom_data_count(ADAPTER_ALIGN_64, AlignedU32, aligned_items_grown, 1, 4, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u32, 0x1122_3344), aligned_items_custom[0].value);
-    adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, aligned_items_custom, {});
-
-    // Resize path. Both outcomes are valid, but a successful resize must keep
-    // the leading data and be freeable at the new length.
-    const resize_mem = adapter.alloc_bytes(256, {}) orelse return error.OutOfMemory;
-    fillSlice(resize_mem, 0x3C);
-    if (adapter.resize_bytes(resize_mem, 64, {})) {
-        try expectFilled(resize_mem[0..64], 0x3C);
-        adapter.free_bytes(resize_mem[0..64], {});
+    const aligned_values = try expectAllocation(adapter.alloc_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, 4, {}));
+    aligned_values.slice_never_null(4)[2].value = 42;
+    if (adapter.resize_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 4, 3, {})) {
+        try testing.expectEqual(@as(u32, 42), aligned_values.slice_never_null(3)[2].value);
+        adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 3, {});
     } else {
-        adapter.free_bytes(resize_mem, {});
+        adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 4, {});
+    }
+}
+
+test "AllocatorAdapter -> cached source remap families" {
+    const adapter = CachedAdapter.new(testing.allocator);
+
+    const raw_src = try expectAllocation(adapter.alloc_raw(64, PowerOf2._1, {}));
+    fillSlice(raw_src.slice_never_null(64), 0x6E);
+    const raw_remapped = adapter.remap_raw(raw_src, 64, 32, PowerOf2._1, {});
+    if (!raw_remapped.is_null()) {
+        const remapped = raw_remapped.to_non_null();
+        try expectFilled(remapped.slice_never_null(32), 0x6E);
+        adapter.free_raw(remapped, 32, PowerOf2._1, {});
+    } else {
+        adapter.free_raw(raw_src, 64, PowerOf2._1, {});
     }
 
-    const resize_aligned = adapter.alloc_bytes_with_align(128, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    fillSlice(resize_aligned, 0x4D);
-    if (adapter.resize_bytes_with_align(ADAPTER_ALIGN_64, resize_aligned, 64, {})) {
-        try expectFilled(resize_aligned[0..64], 0x4D);
-        adapter.free_bytes_with_align(ADAPTER_ALIGN_64, resize_aligned[0..64], {});
+    const byte_src = try expectAllocation(adapter.alloc_bytes(64, {}));
+    fillSlice(byte_src.slice_never_null(64), 0x7F);
+    const byte_remapped = adapter.remap_bytes(byte_src, 64, 32, {});
+    if (!byte_remapped.is_null()) {
+        const remapped = byte_remapped.to_non_null();
+        try expectFilled(remapped.slice_never_null(32), 0x7F);
+        adapter.free_bytes(remapped, 32, {});
     } else {
-        adapter.free_bytes_with_align(ADAPTER_ALIGN_64, resize_aligned, {});
+        adapter.free_bytes(byte_src, 64, {});
     }
 
-    const resize_values = adapter.alloc_types(u32, 8, {}) orelse return error.OutOfMemory;
-    for (resize_values, 0..) |*value, i| value.* = @intCast(i);
-    if (adapter.resize_types(u32, resize_values, 4, {})) {
-        try testing.expectEqual(@as(u32, 0), resize_values[0]);
-        try testing.expectEqual(@as(u32, 3), resize_values[3]);
-        adapter.free_types(u32, resize_values.ptr[0..4], {});
+    const aligned_src = try expectAllocation(adapter.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 64, {}));
+    fillSlice(aligned_src.slice_never_null(64), 0x8A);
+    const aligned_remapped = adapter.remap_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_src, 64, 32, {});
+    if (!aligned_remapped.is_null()) {
+        const remapped = aligned_remapped.to_non_null();
+        try expectFilled(remapped.slice_never_null(32), 0x8A);
+        try testing.expectEqual(@as(usize, 0), @intFromPtr(remapped.slice_never_null(32).ptr) % 64);
+        adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, remapped, 32, {});
     } else {
-        adapter.free_types(u32, resize_values, {});
+        adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_src, 64, {});
     }
 
-    const resize_aligned_values = adapter.alloc_types_with_align(AlignedU32, 4, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    resize_aligned_values[2].value = 42;
-    if (adapter.resize_types_with_align(ADAPTER_ALIGN_64, AlignedU32, resize_aligned_values, 3, {})) {
-        try testing.expectEqual(@as(u32, 42), resize_aligned_values[2].value);
-        adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, resize_aligned_values.ptr[0..3], {});
+    const values = try expectAllocation(adapter.alloc_types(u16, 8, {}));
+    {
+        const s = values.slice_never_null(8);
+        s[0] = 0x1111;
+        s[7] = 0x8888;
+    }
+    const values_remapped = adapter.remap_types(u16, values, 8, 4, {});
+    if (!values_remapped.is_null()) {
+        const remapped = values_remapped.to_non_null();
+        try testing.expectEqual(@as(u16, 0x1111), remapped.slice_never_null(4)[0]);
+        adapter.free_types(u16, remapped, 4, {});
     } else {
-        adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, resize_aligned_values, {});
+        adapter.free_types(u16, values, 8, {});
     }
 
-    // Remap path.
-    const remap_src = adapter.alloc_bytes(64, {}) orelse return error.OutOfMemory;
-    fillSlice(remap_src, 0x6E);
-    if (adapter.remap_bytes(remap_src, 32, {})) |remapped| {
-        try expectFilled(remapped, 0x6E);
-        adapter.free_bytes(remapped, {});
+    const AlignedU32 = struct { value: u32 align(64) };
+    const aligned_values = try expectAllocation(adapter.alloc_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, 4, {}));
+    aligned_values.slice_never_null(4)[0].value = 0xCAFE;
+    const aligned_values_remapped = adapter.remap_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 4, 2, {});
+    if (!aligned_values_remapped.is_null()) {
+        const remapped = aligned_values_remapped.to_non_null();
+        try testing.expectEqual(@as(u32, 0xCAFE), remapped.slice_never_null(2)[0].value);
+        adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, remapped, 2, {});
     } else {
-        adapter.free_bytes(remap_src, {});
+        adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 4, {});
     }
+}
 
-    const remap_aligned_src = adapter.alloc_bytes_with_align(64, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    fillSlice(remap_aligned_src, 0x7F);
-    if (adapter.remap_bytes_with_align(ADAPTER_ALIGN_64, remap_aligned_src, 32, {})) |remapped| {
-        try expectFilled(remapped, 0x7F);
-        adapter.free_bytes_with_align(ADAPTER_ALIGN_64, remapped, {});
-    } else {
-        adapter.free_bytes_with_align(ADAPTER_ALIGN_64, remap_aligned_src, {});
+test "AllocatorAdapter -> cached source clone families" {
+    const adapter = CachedAdapter.new(testing.allocator);
+    const A = CachedAdapter;
+
+    const src = try expectAllocation(adapter.alloc_bytes(48, {}));
+    for (src.slice_never_null(48), 0..) |*byte, i| byte.* = @intCast(i);
+    const src_c = A.ConstPointerU8.new_from(src.slice_never_null(48).ptr);
+
+    const cloned = try expectAllocation(adapter.clone_bytes(src_c, 48, {}));
+    try testing.expectEqualSlices(u8, src.slice_never_null(48), cloned.slice_never_null(48));
+    try testing.expect(@intFromPtr(cloned.slice_never_null(48).ptr) != @intFromPtr(src.slice_never_null(48).ptr));
+    adapter.free_bytes(cloned, 48, {});
+
+    const cloned_custom = try expectAllocation(adapter.clone_bytes_custom_data_len(src_c, 48, 8, {}));
+    try testing.expectEqualSlices(u8, src.slice_never_null(48)[0..8], cloned_custom.slice_never_null(48)[0..8]);
+    adapter.free_bytes(cloned_custom, 48, {});
+
+    const slim_cloned = try expectAllocation(adapter.slim_clone_bytes_custom_data_len(src_c, 48, 8, {}));
+    try testing.expectEqualSlices(u8, src.slice_never_null(48)[0..8], slim_cloned.slice_never_null(8));
+    adapter.free_bytes(slim_cloned, 8, {});
+
+    const raw_clone = try expectAllocation(adapter.clone_raw(src_c, 48, 24, PowerOf2._1, {}));
+    try testing.expectEqualSlices(u8, src.slice_never_null(48)[0..24], raw_clone.slice_never_null(48)[0..24]);
+    adapter.free_raw(raw_clone, 48, PowerOf2._1, {});
+
+    const raw_slim = try expectAllocation(adapter.clone_slim_raw(src_c, 48, 24, PowerOf2._1, {}));
+    try testing.expectEqualSlices(u8, src.slice_never_null(48)[0..24], raw_slim.slice_never_null(24));
+    adapter.free_raw(raw_slim, 24, PowerOf2._1, {});
+    adapter.free_bytes(src, 48, {});
+
+    const values = try expectAllocation(adapter.alloc_types(u32, 3, {}));
+    {
+        const s = values.slice_never_null(3);
+        s[0] = 7;
+        s[2] = 9;
     }
+    const values_c = A.ConstPointer(u32).new_from(values.slice_never_null(3).ptr);
 
-    const remap_values = adapter.alloc_types(u16, 8, {}) orelse return error.OutOfMemory;
-    remap_values[0] = 0x1111;
-    remap_values[7] = 0x8888;
-    if (adapter.remap_types(u16, remap_values, 4, {})) |remapped| {
-        try testing.expectEqual(@as(u16, 0x1111), remapped[0]);
-        adapter.free_types(u16, remapped, {});
-    } else {
-        adapter.free_types(u16, remap_values, {});
-    }
+    const cloned_types = try expectAllocation(adapter.clone_types(u32, values_c, 3, {}));
+    try testing.expectEqualSlices(u32, values.slice_never_null(3), cloned_types.slice_never_null(3));
+    adapter.free_types(u32, cloned_types, 3, {});
 
-    const remap_aligned_values = adapter.alloc_types_with_align(AlignedU32, 4, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    remap_aligned_values[0].value = 0xCAFE;
-    if (adapter.remap_types_with_align(ADAPTER_ALIGN_64, AlignedU32, remap_aligned_values, 2, {})) |remapped| {
-        try testing.expectEqual(@as(u32, 0xCAFE), remapped[0].value);
-        adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, remapped, {});
-    } else {
-        adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, remap_aligned_values, {});
-    }
+    const cloned_types_custom = try expectAllocation(adapter.clone_types_custom_data_len(u32, values_c, 3, 1, {}));
+    try testing.expectEqual(@as(usize, 3), cloned_types_custom.slice_never_null(3).len);
+    try testing.expectEqual(@as(u32, 7), cloned_types_custom.slice_never_null(3)[0]);
+    adapter.free_types(u32, cloned_types_custom, 3, {});
 
-    // Clone helpers.
-    const clone_src = adapter.alloc_bytes(48, {}) orelse return error.OutOfMemory;
-    for (clone_src, 0..) |*byte, i| byte.* = @intCast(i);
+    const slim_types = try expectAllocation(adapter.slim_clone_types_custom_data_len(u32, values_c, 3, 1, {}));
+    try testing.expectEqual(@as(usize, 1), slim_types.slice_never_null(1).len);
+    try testing.expectEqual(@as(u32, 7), slim_types.slice_never_null(1)[0]);
+    adapter.free_types(u32, slim_types, 1, {});
+    adapter.free_types(u32, values, 3, {});
 
-    const cloned = adapter.clone_bytes(clone_src, {}) orelse return error.OutOfMemory;
-    try testing.expectEqualSlices(u8, clone_src, cloned);
-    try testing.expect(@intFromPtr(cloned.ptr) != @intFromPtr(clone_src.ptr));
-    adapter.free_bytes(cloned, {});
+    const aligned_bytes = try expectAllocation(adapter.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 48, {}));
+    for (aligned_bytes.slice_never_null(48), 0..) |*byte, i| byte.* = @intCast(i);
+    const aligned_bytes_c = A.ConstPointerU8Align(ADAPTER_ALIGN_64_POW2).new_from(aligned_bytes.slice_never_null(48).ptr);
 
-    const cloned_custom = adapter.clone_bytes_custom_data_len(clone_src, 8, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, clone_src.len), cloned_custom.len);
-    try testing.expectEqualSlices(u8, clone_src[0..8], cloned_custom[0..8]);
-    adapter.free_bytes(cloned_custom, {});
+    const cloned_aligned_bytes = try expectAllocation(adapter.clone_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_bytes_c, 48, {}));
+    try testing.expectEqualSlices(u8, aligned_bytes.slice_never_null(48), cloned_aligned_bytes.slice_never_null(48));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(cloned_aligned_bytes.slice_never_null(48).ptr) % 64);
+    adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, cloned_aligned_bytes, 48, {});
 
-    const slim_cloned = adapter.slim_clone_bytes_custom_data_len(clone_src, 8, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 8), slim_cloned.len);
-    try testing.expectEqualSlices(u8, clone_src[0..8], slim_cloned);
-    adapter.free_bytes(slim_cloned, {});
-    adapter.free_bytes(clone_src, {});
+    const cloned_aligned_custom = try expectAllocation(adapter.clone_bytes_with_align_custom_data_len(ADAPTER_ALIGN_64_POW2, aligned_bytes_c, 48, 8, {}));
+    try testing.expectEqualSlices(u8, aligned_bytes.slice_never_null(48)[0..8], cloned_aligned_custom.slice_never_null(48)[0..8]);
+    adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, cloned_aligned_custom, 48, {});
 
-    const clone_aligned_src = adapter.alloc_bytes_with_align(48, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    for (clone_aligned_src, 0..) |*byte, i| byte.* = @intCast(i);
+    const slim_aligned = try expectAllocation(adapter.slim_clone_bytes_with_align_custom_data_len(ADAPTER_ALIGN_64_POW2, aligned_bytes_c, 48, 8, {}));
+    try testing.expectEqualSlices(u8, aligned_bytes.slice_never_null(48)[0..8], slim_aligned.slice_never_null(8));
+    adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, slim_aligned, 8, {});
+    adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned_bytes, 48, {});
 
-    const cloned_aligned = adapter.clone_bytes_with_align(ADAPTER_ALIGN_64, clone_aligned_src, {}) orelse return error.OutOfMemory;
-    try testing.expectEqualSlices(u8, clone_aligned_src, cloned_aligned);
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, cloned_aligned, {});
+    const AlignedU32 = struct { value: u32 align(64) };
+    const aligned_values = try expectAllocation(adapter.alloc_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, 3, {}));
+    aligned_values.slice_never_null(3)[0].value = 0xBEEF;
+    const aligned_values_c = A.ConstPointerAlign(AlignedU32, ADAPTER_ALIGN_64_POW2).new_from(aligned_values.slice_never_null(3).ptr);
 
-    const slim_cloned_aligned = adapter.slim_clone_bytes_with_align_custom_data_len(ADAPTER_ALIGN_64, clone_aligned_src, 8, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 8), slim_cloned_aligned.len);
-    try testing.expectEqualSlices(u8, clone_aligned_src[0..8], slim_cloned_aligned);
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, slim_cloned_aligned, {});
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, clone_aligned_src, {});
+    const cloned_aligned_types = try expectAllocation(adapter.clone_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values_c, 3, {}));
+    try testing.expectEqual(@as(u32, 0xBEEF), cloned_aligned_types.slice_never_null(3)[0].value);
+    adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, cloned_aligned_types, 3, {});
 
-    const clone_types_src = adapter.alloc_types(u32, 3, {}) orelse return error.OutOfMemory;
-    clone_types_src[0] = 7;
-    clone_types_src[2] = 9;
+    const cloned_aligned_types_custom = try expectAllocation(adapter.clone_types_with_align_custom_data_len(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values_c, 3, 1, {}));
+    try testing.expectEqual(@as(u32, 0xBEEF), cloned_aligned_types_custom.slice_never_null(3)[0].value);
+    adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, cloned_aligned_types_custom, 3, {});
 
-    const cloned_types = adapter.clone_types(u32, clone_types_src, {}) orelse return error.OutOfMemory;
-    try testing.expectEqualSlices(u32, clone_types_src, cloned_types);
-    adapter.free_types(u32, cloned_types, {});
+    const slim_aligned_types = try expectAllocation(adapter.slim_clone_types_with_align_custom_data_len(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values_c, 3, 1, {}));
+    try testing.expectEqual(@as(usize, 1), slim_aligned_types.slice_never_null(1).len);
+    try testing.expectEqual(@as(u32, 0xBEEF), slim_aligned_types.slice_never_null(1)[0].value);
+    adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, slim_aligned_types, 1, {});
+    adapter.free_types_with_align(ADAPTER_ALIGN_64_POW2, AlignedU32, aligned_values, 3, {});
+}
 
-    const cloned_types_custom = adapter.clone_types_custom_data_count(u32, clone_types_src, 1, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u32, 7), cloned_types_custom[0]);
-    adapter.free_types(u32, cloned_types_custom, {});
+test "AllocatorAdapter -> cached source create, destroy, and clone-one families" {
+    const adapter = CachedAdapter.new(testing.allocator);
+    const A = CachedAdapter;
 
-    const slim_types = adapter.slim_clone_types_custom_data_count(u32, clone_types_src, 1, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 1), slim_types.len);
-    try testing.expectEqual(@as(u32, 7), slim_types[0]);
-    adapter.free_types(u32, slim_types, {});
-    adapter.free_types(u32, clone_types_src, {});
-
-    const clone_aligned_types_src = adapter.alloc_types_with_align(AlignedU32, 3, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    clone_aligned_types_src[0].value = 0xBEEF;
-
-    const cloned_aligned_types = adapter.clone_types_with_align(ADAPTER_ALIGN_64, AlignedU32, clone_aligned_types_src, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u32, 0xBEEF), cloned_aligned_types[0].value);
-    adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, cloned_aligned_types, {});
-
-    const cloned_aligned_types_custom = adapter.clone_types_with_align_custom_data_count(ADAPTER_ALIGN_64, AlignedU32, clone_aligned_types_src, 1, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u32, 0xBEEF), cloned_aligned_types_custom[0].value);
-    adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, cloned_aligned_types_custom, {});
-
-    const slim_aligned_types = adapter.slim_clone_types_with_align_custom_data_count(ADAPTER_ALIGN_64, AlignedU32, clone_aligned_types_src, 1, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 1), slim_aligned_types.len);
-    try testing.expectEqual(@as(u32, 0xBEEF), slim_aligned_types[0].value);
-    adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, slim_aligned_types, {});
-    adapter.free_types_with_align(ADAPTER_ALIGN_64, AlignedU32, clone_aligned_types_src, {});
-
-    // Raw clone variants.
-    const raw_src = adapter.alloc_bytes(24, {}) orelse return error.OutOfMemory;
-    fillSlice(raw_src, 0x21);
-    const raw_clone = adapter.clone_raw(raw_src, 24, null, {}) orelse return error.OutOfMemory;
-    try expectFilled(raw_clone[0..24], 0x21);
-    adapter.free_raw(raw_clone, 24, null, {});
-
-    const raw_slim = adapter.clone_slim_raw(raw_src, 8, null, {}) orelse return error.OutOfMemory;
-    try expectFilled(raw_slim[0..8], 0x21);
-    adapter.free_raw(raw_slim, 8, null, {});
-    adapter.free_bytes(raw_src, {});
-
-    // create/destroy and single-value clones.
-    const created = adapter.create(u64, {}) orelse return error.OutOfMemory;
-    created.* = 0x1234_5678_9ABC_DEF0;
-    const cloned_one = adapter.clone_one(u64, created, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u64, 0x1234_5678_9ABC_DEF0), cloned_one.*);
-    try testing.expect(@intFromPtr(cloned_one) != @intFromPtr(created));
+    const created = try expectAllocation(adapter.create(u64, {}));
+    created.ptr().* = 0x1234_5678_9ABC_DEF0;
+    const cloned_one = try expectAllocation(adapter.clone_one(u64, A.ConstPointer(u64).new_from(@as([*]const u64, @ptrCast(created.ptr()))), {}));
+    try testing.expectEqual(@as(u64, 0x1234_5678_9ABC_DEF0), cloned_one.ptr().*);
+    try testing.expect(@intFromPtr(cloned_one.ptr()) != @intFromPtr(created.ptr()));
     adapter.destroy(u64, cloned_one, {});
     adapter.destroy(u64, created, {});
 
-    const created_aligned = adapter.create_with_align(u64, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    created_aligned.* = 0xF00D;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(created_aligned) % 64);
-    const cloned_aligned_one = adapter.clone_one_with_align(ADAPTER_ALIGN_64, u64, created_aligned, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u64, 0xF00D), cloned_aligned_one.*);
-    adapter.destroy_with_align(ADAPTER_ALIGN_64, u64, cloned_aligned_one, {});
-    adapter.destroy_with_align(ADAPTER_ALIGN_64, u64, created_aligned, {});
+    const created_aligned = try expectAllocation(adapter.create_with_align(ADAPTER_ALIGN_64_POW2, u64, {}));
+    created_aligned.ptr().* = 0xF00D;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(created_aligned.ptr()) % 64);
+    const cloned_aligned = try expectAllocation(adapter.clone_one_with_align(ADAPTER_ALIGN_64_POW2, u64, A.ConstPointerAlign(u64, ADAPTER_ALIGN_64_POW2).new_from(@as([*]align(64) const u64, @ptrCast(created_aligned.ptr()))), {}));
+    try testing.expectEqual(@as(u64, 0xF00D), cloned_aligned.ptr().*);
+    adapter.destroy_with_align(ADAPTER_ALIGN_64_POW2, u64, cloned_aligned, {});
+    adapter.destroy_with_align(ADAPTER_ALIGN_64_POW2, u64, created_aligned, {});
 
-    const created_raw = adapter.create_raw(u64, Alignment.fromByteUnits(8), {}) orelse return error.OutOfMemory;
-    created_raw.* = 0xDEAD;
-    const cloned_raw = adapter.clone_one_raw(u64, created_raw, Alignment.fromByteUnits(8), {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(u64, 0xDEAD), cloned_raw.*);
-    adapter.destroy_raw(u64, cloned_raw, Alignment.fromByteUnits(8), {});
-    adapter.destroy_raw(u64, created_raw, Alignment.fromByteUnits(8), {});
+    const native_created = adapter.create_native(u64, {}) orelse return error.OutOfMemory;
+    native_created.* = 0xDEAD;
+    const native_cloned = adapter.clone_one_native(u64, native_created, {}) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u64, 0xDEAD), native_cloned.*);
+    adapter.destroy_native(u64, native_cloned, {});
+    adapter.destroy_native(u64, native_created, {});
+
+    const native_aligned_created = adapter.create_with_align_native(ADAPTER_ALIGN_64, u64, {}) orelse return error.OutOfMemory;
+    native_aligned_created.* = 0xBEEF;
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(native_aligned_created) % 64);
+    const native_aligned_cloned = adapter.clone_one_with_align_native(ADAPTER_ALIGN_64, u64, native_aligned_created, {}) orelse return error.OutOfMemory;
+    try testing.expectEqual(@as(u64, 0xBEEF), native_aligned_cloned.*);
+    adapter.destroy_with_align_native(ADAPTER_ALIGN_64, u64, native_aligned_cloned, {});
+    adapter.destroy_with_align_native(ADAPTER_ALIGN_64, u64, native_aligned_created, {});
 }
 
-test "AllocatorAdapter -> passed allocator interface uses the allocator argument" {
+test "AllocatorAdapter -> cached source realloc to zero and raw/native realloc" {
+    const adapter = CachedAdapter.new(testing.allocator);
+
+    const fresh = try expectAllocation(adapter.alloc_bytes(128, {}));
+    fillSlice(fresh.slice_never_null(128), 0x9C);
+    // Reallocating to zero frees the block in place and returns the same
+    // zero-length pointer. It must not be freed a second time.
+    const emptied = adapter.realloc_bytes(fresh, 128, 0, {});
+    try testing.expect(!emptied.is_null());
+    try testing.expectEqual(@as(usize, 0), emptied.slice_never_null(0).len);
+
+    const reused = try expectAllocation(adapter.alloc_bytes(128, {}));
+    fillSlice(reused.slice_never_null(128), 0x9D);
+    adapter.free_bytes(reused, 128, {});
+
+    const raw_mem = try expectAllocation(adapter.alloc_raw(32, PowerOf2._8, {}));
+    fillSlice(raw_mem.slice_never_null(32), 0x8A);
+    const raw_grown = try expectAllocation(adapter.realloc_raw(raw_mem, 32, 32, 512, PowerOf2._8, {}));
+    try expectFilled(raw_grown.slice_never_null(512)[0..32], 0x8A);
+    adapter.free_raw(raw_grown, 512, PowerOf2._8, {});
+
+    const native_mem = adapter.alloc_bytes_native(32, {}) orelse return error.OutOfMemory;
+    fillSlice(native_mem[0..32], 0x5D);
+    const native_grown = adapter.realloc_bytes_native(native_mem[0..32], 256, {}) orelse return error.OutOfMemory;
+    try expectFilled(native_grown[0..32], 0x5D);
+    adapter.free_bytes_native(native_grown[0..256], {});
+}
+
+test "AllocatorAdapter -> never-allocates source refuses allocations" {
+    const adapter = NeverAdapter{};
+    var buf: [16]u8 = @splat(0);
+    const ptr = NeverAdapter.PointerU8.new_from(@as([*]u8, @ptrCast(&buf)));
+    const cptr = NeverAdapter.ConstPointerU8.new_from(@as([*]const u8, @ptrCast(&buf)));
+
+    try testing.expect(adapter.alloc_raw(16, PowerOf2._1, {}).is_null());
+    try testing.expect(adapter.alloc_bytes(16, {}).is_null());
+    try testing.expect(adapter.alloc_types(u8, 16, {}).is_null());
+    try testing.expect(adapter.create(u64, {}).is_null());
+    try testing.expect(!adapter.resize_raw(ptr, 16, 32, PowerOf2._1, {}));
+    try testing.expect(!adapter.resize_bytes(ptr, 16, 32, {}));
+    try testing.expect(adapter.remap_raw(ptr, 16, 32, PowerOf2._1, {}).is_null());
+    try testing.expect(adapter.remap_bytes(ptr, 16, 32, {}).is_null());
+    try testing.expect(adapter.realloc_bytes(ptr, 16, 32, {}).is_null());
+    try testing.expect(adapter.clone_bytes(cptr, 16, {}).is_null());
+    adapter.free_raw(ptr, 16, PowerOf2._1, {});
+    adapter.free_bytes(ptr, 16, {});
+
+    try testing.expectError(error.OutOfMemory, NeverAdapter.interface().alloc(u8, 8));
+}
+
+test "AllocatorAdapter -> passed source takes the allocator per call and exposes a passed interface adapter" {
     const adapter = PassedAdapter{};
 
-    const bytes = adapter.alloc_bytes(24, testing.allocator) orelse return error.OutOfMemory;
-    fillSlice(bytes, 0xAB);
+    const bytes = try expectAllocation(adapter.alloc_bytes(24, testing.allocator));
+    fillSlice(bytes.slice_never_null(24), 0xAB);
 
-    const grown = adapter.realloc_bytes(bytes, 128, testing.allocator) orelse return error.OutOfMemory;
-    try expectFilled(grown[0..24], 0xAB);
-    adapter.free_bytes(grown, testing.allocator);
+    const grown = try expectAllocation(adapter.realloc_bytes(bytes, 24, 128, testing.allocator));
+    try expectFilled(grown.slice_never_null(128)[0..24], 0xAB);
+    adapter.free_bytes(grown, 128, testing.allocator);
 
-    const values = adapter.alloc_types(u64, 2, testing.allocator) orelse return error.OutOfMemory;
-    values[0] = 11;
-    values[1] = 22;
-    adapter.free_types(u64, values, testing.allocator);
+    const values = try expectAllocation(adapter.alloc_types(u64, 2, testing.allocator));
+    {
+        const s = values.slice_never_null(2);
+        s[0] = 11;
+        s[1] = 22;
+    }
+    adapter.free_types(u64, values, 2, testing.allocator);
 
-    const aligned = adapter.alloc_bytes_with_align(16, ADAPTER_ALIGN_64, testing.allocator) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, aligned, testing.allocator);
+    const aligned = try expectAllocation(adapter.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 16, testing.allocator));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.slice_never_null(16).ptr) % 64);
+    adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, aligned, 16, testing.allocator);
 
-    const created = adapter.create(u32, testing.allocator) orelse return error.OutOfMemory;
-    created.* = 77;
-    try testing.expectEqual(@as(u32, 77), created.*);
+    const created = try expectAllocation(adapter.create(u32, testing.allocator));
+    created.ptr().* = 77;
+    try testing.expectEqual(@as(u32, 77), created.ptr().*);
     adapter.destroy(u32, created, testing.allocator);
+
+    var iface_adapter = adapter.passed_source_interface_adapter(testing.allocator);
+    try exerciseAdapterAllocator(iface_adapter.interface());
 }
 
 test "AllocatorAdapter -> comptime allocator interface pointer" {
     const adapter = ComptimeIfaceAdapter{};
 
-    const bytes = adapter.alloc_bytes(32, {}) orelse return error.OutOfMemory;
-    fillSlice(bytes, 0xCD);
-    try expectFilled(bytes, 0xCD);
-    adapter.free_bytes(bytes, {});
+    const bytes = try expectAllocation(adapter.alloc_bytes(32, {}));
+    fillSlice(bytes.slice_never_null(32), 0xCD);
+    try expectFilled(bytes.slice_never_null(32), 0xCD);
+    adapter.free_bytes(bytes, 32, {});
 
-    const values = adapter.alloc_types(u32, 2, {}) orelse return error.OutOfMemory;
-    values[0] = 1;
-    values[1] = 2;
-    adapter.free_types(u32, values, {});
+    const values = try expectAllocation(adapter.alloc_types(u32, 2, {}));
+    {
+        const s = values.slice_never_null(2);
+        s[0] = 1;
+        s[1] = 2;
+    }
+    adapter.free_types(u32, values, 2, {});
 }
 
-test "AllocatorAdapter -> compliant global allocator" {
-    AdapterGlobalAlloc.init(testing.allocator, {});
-    defer AdapterGlobalAlloc.deinit();
+test "AllocatorAdapter -> compliant global allocator native and wrapper sources" {
+    global_native_alloc_backing = testing.allocator;
 
-    const adapter = GlobalAdapter{};
+    const native_adapter = GlobalNativeAdapter{};
+    const native_bytes = try expectAllocation(native_adapter.alloc_bytes(32, {}));
+    fillSlice(native_bytes.slice_never_null(32), 0x5A);
+    const native_grown = try expectAllocation(native_adapter.realloc_bytes(native_bytes, 32, 256, {}));
+    try expectFilled(native_grown.slice_never_null(256)[0..32], 0x5A);
+    native_adapter.free_bytes(native_grown, 256, {});
 
-    const bytes = adapter.alloc_bytes(32, {}) orelse return error.OutOfMemory;
-    fillSlice(bytes, 0x5A);
+    const created = try expectAllocation(native_adapter.create(u32, {}));
+    created.ptr().* = 0x1234;
+    native_adapter.destroy(u32, created, {});
 
-    const grown = adapter.realloc_bytes(bytes, 256, {}) orelse return error.OutOfMemory;
-    try expectFilled(grown[0..32], 0x5A);
-    adapter.free_bytes(grown, {});
+    global_wrapped_alloc_backing = testing.allocator;
 
-    const values = adapter.alloc_types(u64, 4, {}) orelse return error.OutOfMemory;
-    values[0] = 100;
-    values[3] = 400;
-    adapter.free_types(u64, values, {});
+    const wrapped_adapter = GlobalWrappedAdapter{};
+    const wrapped_bytes = try expectAllocation(wrapped_adapter.alloc_bytes(32, {}));
+    fillSlice(wrapped_bytes.slice_never_null(32), 0xA5);
+    const wrapped_grown = try expectAllocation(wrapped_adapter.realloc_bytes(wrapped_bytes, 32, 256, {}));
+    try expectFilled(wrapped_grown.slice_never_null(256)[0..32], 0xA5);
+    wrapped_adapter.free_bytes(wrapped_grown, 256, {});
 
-    const aligned = adapter.alloc_bytes_with_align(24, ADAPTER_ALIGN_64, {}) orelse return error.OutOfMemory;
-    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 64);
-    adapter.free_bytes_with_align(ADAPTER_ALIGN_64, aligned, {});
-
-    const created = adapter.create(u32, {}) orelse return error.OutOfMemory;
-    created.* = 0x1234;
-    adapter.destroy(u32, created, {});
+    const promoted = try expectAllocation(wrapped_adapter.alloc_bytes_with_align(ADAPTER_ALIGN_64_POW2, 24, {}));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(promoted.slice_never_null(24).ptr) % 64);
+    wrapped_adapter.free_bytes_with_align(ADAPTER_ALIGN_64_POW2, promoted, 24, {});
 }
 
-test "AllocatorAdapter -> compliant instantiated allocator source modes" {
-    var state = CompliantLocalAlloc{ .backing = testing.allocator };
+test "AllocatorAdapter -> static resolver pointer source stays in wrapper form" {
+    resolver_alloc_state = .{};
+    const adapter = ResolverCachedAdapter.new(&resolver_alloc_state);
 
-    // Cached pointer mode.
-    const cached = LocalCachedAdapter.new(&state);
-    const cached_bytes = cached.alloc_bytes(32, {}) orelse return error.OutOfMemory;
-    fillSlice(cached_bytes, 0x11);
-    const cached_grown = cached.realloc_bytes(cached_bytes, 128, {}) orelse return error.OutOfMemory;
-    try expectFilled(cached_grown[0..32], 0x11);
-    cached.free_bytes(cached_grown, {});
+    try testing.expect(!ResolverCachedAdapter.POINTER_SOURCE_IS_NATIVE);
+    try testing.expect(ResolverCachedAdapter.POINTER_SOURCE == .STATIC_RESOLVER);
 
-    // Passed pointer mode.
-    const passed = LocalPassedAdapter{};
-    const passed_bytes = passed.alloc_bytes(32, &state) orelse return error.OutOfMemory;
-    fillSlice(passed_bytes, 0x22);
-    try expectFilled(passed_bytes, 0x22);
-    const passed_grown = passed.realloc_bytes(passed_bytes, 128, &state) orelse return error.OutOfMemory;
-    try expectFilled(passed_grown[0..32], 0x22);
-    passed.free_bytes(passed_grown, &state);
+    const bytes = try expectAllocation(adapter.alloc_bytes(32, {}));
+    fillSlice(bytes.slice_never_null(32), 0x77);
+    try expectFilled(bytes.slice_never_null(32), 0x77);
 
-    // Comptime pointer mode.
-    adapter_comptime_alloc_state = .{ .backing = testing.allocator };
-    const comptime_adapter = LocalComptimeAdapter{};
-    const comptime_bytes = comptime_adapter.alloc_bytes(32, {}) orelse return error.OutOfMemory;
-    fillSlice(comptime_bytes, 0x33);
-    try expectFilled(comptime_bytes, 0x33);
-    const comptime_grown = comptime_adapter.realloc_bytes(comptime_bytes, 128, {}) orelse return error.OutOfMemory;
-    try expectFilled(comptime_grown[0..32], 0x33);
-    comptime_adapter.free_bytes(comptime_grown, {});
+    // The wrapper allocator always refuses in-place resize and remap, so this
+    // realloc must go through alloc + memcopy + free while still using handles.
+    const grown = try expectAllocation(adapter.realloc_bytes(bytes, 32, 64, {}));
+    try expectFilled(grown.slice_never_null(64)[0..32], 0x77);
+    adapter.free_bytes(grown, 64, {});
+
+    const values = try expectAllocation(adapter.alloc_types(u32, 4, {}));
+    values.slice_never_null(4)[0] = 0xABCD;
+    values.slice_never_null(4)[3] = 0x1234;
+    try testing.expectEqual(@as(u32, 0xABCD), values.slice_never_null(4)[0]);
+    try testing.expectEqual(@as(u32, 0x1234), values.slice_never_null(4)[3]);
+    adapter.free_types(u32, values, 4, {});
+
+    const aligned = try expectAllocation(adapter.alloc_bytes_with_align(PowerOf2._64, 16, {}));
+    try testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.slice_never_null(16).ptr) % 64);
+    fillSlice(aligned.slice_never_null(16), 0x66);
+    try expectFilled(aligned.slice_never_null(16), 0x66);
+    adapter.free_bytes_with_align(PowerOf2._64, aligned, 16, {});
+
+    const cloned = try expectAllocation(adapter.clone_bytes(bytes.to_const(), 32, {}));
+    try expectFilled(cloned.slice_never_null(32), 0x77);
+    adapter.free_bytes(cloned, 32, {});
+}
+
+test "AllocatorAdapter -> ListSlice stores the matching Pointer wrapper" {
+    const Item = struct { a: u32, b: u16, c: u8 };
+    const SOURCE = AllocSource.compliant_instantiated_allocator_cached_ptr(ResolverLocalAlloc);
+    const FlatList = Root.ListSlice.ListFullDefinition(u32, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, SOURCE);
+    const SplitList = Root.ListSlice.ListFullDefinition(Item, u32, .SPLIT_FIELDS, .SERIAL_INDEXES, .OWNED_ALLOCATED, SOURCE);
+
+    // The root field must be a wrapper tied to the allocator's pointer source.
+    try testing.expect(@TypeOf((FlatList{}).root_ptr) == FlatList.RootPtr);
+    try testing.expect(FlatList.RootPtr == ResolverCachedAdapter.Pointer(u32));
+    try testing.expect(SplitList.RootPtr == ResolverCachedAdapter.PointerAlign(u8, PowerOf2.align_of_type(Item)));
+    try testing.expect(FlatList.RootPtr.USE_STATIC_RESOLVER);
+    try testing.expect(SplitList.RootPtr.USE_STATIC_RESOLVER);
+
+    resolver_alloc_state = .{};
+    var flat = FlatList.allocate_new(4, &resolver_alloc_state);
+    defer flat.free_if_non_zero({});
+
+    flat.append_one(10, {});
+    flat.append_one(20, {});
+    flat.append_one(30, {});
+    flat.append_one(40, {});
+    flat.append_one(50, {}); // forces a growth + copy through the resolver
+    try testing.expectEqual(@as(u32, 5), flat.get_len());
+    try testing.expectEqual(@as(u32, 10), flat.get(0));
+    try testing.expectEqual(@as(u32, 50), flat.get(4));
+    flat.set(2, 99);
+    try testing.expectEqual(@as(u32, 99), flat.get(2));
+
+    flat.insert_one(1, 15, {});
+    try testing.expectEqual(@as(u32, 15), flat.get(1));
+    flat.swap(0, 5);
+    try testing.expectEqual(@as(u32, 50), flat.get(0));
+    try testing.expectEqual(@as(u32, 10), flat.get(5));
+    flat.reverse_range(0, flat.get_len());
+    try testing.expectEqual(@as(u32, 10), flat.get(0));
+    try testing.expectEqual(@as(u32, 50), flat.get(5));
+
+    // Keep the bump pointer going: resolver free is a no-op, so reusing the
+    // state here without a reset guarantees the two lists never overlap.
+    var split = SplitList.allocate_new(2, &resolver_alloc_state);
+    defer split.free_if_non_zero({});
+
+    split.append_one(.{ .a = 1, .b = 2, .c = 3 }, {});
+    split.append_one(.{ .a = 4, .b = 5, .c = 6 }, {});
+    split.append_one(.{ .a = 7, .b = 8, .c = 9 }, {});
+    const second = split.get(1);
+    try testing.expectEqual(@as(u32, 4), second.a);
+    try testing.expectEqual(@as(u16, 5), second.b);
+    try testing.expectEqual(@as(u8, 6), second.c);
+    split.set(1, .{ .a = 40, .b = 50, .c = 60 });
+    try testing.expectEqual(@as(u32, 40), split.get(1).a);
+    split.swap(0, 2);
+    try testing.expectEqual(@as(u32, 7), split.get(0).a);
+    split.reverse_range(0, split.get_len());
+    try testing.expectEqual(@as(u32, 1), split.get(0).a);
+    split.memset_range(.{ .a = 0, .b = 0, .c = 0 }, 0, split.get_len());
+    try testing.expectEqual(@as(u32, 0), split.get(2).a);
+}
+
+test "AllocatorAdapter -> compliant instantiated sources expose the right pointer-source path" {
+    // Native source: the adapter takes the `*_raw_native` path.
+    var native_state = NativeLocalAlloc{ .backing = testing.allocator };
+    {
+        const adapter = NativeCachedAdapter.new(&native_state);
+        const bytes = try expectAllocation(adapter.alloc_bytes(32, {}));
+        fillSlice(bytes.slice_never_null(32), 0x11);
+        const grown = try expectAllocation(adapter.realloc_bytes(bytes, 32, 128, {}));
+        try expectFilled(grown.slice_never_null(128)[0..32], 0x11);
+        adapter.free_bytes(grown, 128, {});
+    }
+
+    // Wrapper source: the adapter takes the `*_raw_wrapper` path.
+    var wrapped_state = WrappedLocalAlloc{ .backing = testing.allocator };
+    {
+        const adapter = WrappedCachedAdapter.new(&wrapped_state);
+        const bytes = try expectAllocation(adapter.alloc_bytes(32, {}));
+        fillSlice(bytes.slice_never_null(32), 0x22);
+        const grown = try expectAllocation(adapter.realloc_bytes(bytes, 32, 128, {}));
+        try expectFilled(grown.slice_never_null(128)[0..32], 0x22);
+        adapter.free_bytes(grown, 128, {});
+    }
+
+    // Passed pointer mode for both source styles.
+    {
+        const adapter = NativePassedAdapter{};
+        const bytes = try expectAllocation(adapter.alloc_bytes(16, &native_state));
+        fillSlice(bytes.slice_never_null(16), 0x33);
+        adapter.free_bytes(bytes, 16, &native_state);
+
+        var iface_adapter = adapter.passed_source_interface_adapter(&native_state);
+        try exerciseAdapterAllocator(iface_adapter.interface());
+    }
+    {
+        const adapter = WrappedPassedAdapter{};
+        const bytes = try expectAllocation(adapter.alloc_bytes(16, &wrapped_state));
+        fillSlice(bytes.slice_never_null(16), 0x44);
+        adapter.free_bytes(bytes, 16, &wrapped_state);
+
+        var iface_adapter = adapter.passed_source_interface_adapter(&wrapped_state);
+        try exerciseAdapterAllocator(iface_adapter.interface());
+    }
+
+    // Comptime pointer mode for both source styles.
+    native_comptime_alloc_state = .{ .backing = testing.allocator };
+    {
+        const adapter = NativeComptimeAdapter{};
+        const bytes = try expectAllocation(adapter.alloc_bytes(16, {}));
+        fillSlice(bytes.slice_never_null(16), 0x55);
+        adapter.free_bytes(bytes, 16, {});
+    }
+    wrapped_comptime_alloc_state = .{ .backing = testing.allocator };
+    {
+        const adapter = WrappedComptimeAdapter{};
+        const bytes = try expectAllocation(adapter.alloc_bytes(16, {}));
+        fillSlice(bytes.slice_never_null(16), 0x66);
+        adapter.free_bytes(bytes, 16, {});
+    }
 }

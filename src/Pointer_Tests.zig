@@ -357,13 +357,13 @@ test "Pointer -> native pointer arithmetic" {
     try testing.expectEqual(@as(u32, 30), ptr.increment(2).get());
     try testing.expectEqual(@as(u32, 10), ptr.increment(2).decrement(2).get());
     try testing.expectEqual(@as(u32, 40), ptr.move(3).get());
-    try testing.expectEqual(@as(u32, 10), ptr.move(3).move(-3).get());
-    try testing.expectEqual(@as(u32, 30), ptr.move(-2).move(4).get());
+    try testing.expectEqual(@as(u32, 10), ptr.move(3).decrement(3).get());
+    try testing.expectEqual(@as(u32, 30), ptr.move(2).get());
 
     try testing.expectEqual(@as(u32, 20), ptr.increment_assert_contiguous(1).get());
     try testing.expectEqual(@as(u32, 10), ptr.increment_assert_contiguous(1).decrement_assert_contiguous(1).get());
     try testing.expectEqual(@as(u32, 30), ptr.move_assert_contiguous(2).get());
-    try testing.expectEqual(@as(u32, 10), ptr.move_assert_contiguous(2).move_assert_contiguous(-2).get());
+    try testing.expectEqual(@as(u32, 10), ptr.move_assert_contiguous(2).decrement_assert_contiguous(2).get());
 
     ptr.increment_in_place(1);
     try testing.expectEqual(@as(u32, 20), ptr.get());
@@ -371,7 +371,7 @@ test "Pointer -> native pointer arithmetic" {
     try testing.expectEqual(@as(u32, 10), ptr.get());
     ptr.move_in_place(2);
     try testing.expectEqual(@as(u32, 30), ptr.get());
-    ptr.move_in_place(-2);
+    ptr.decrement_in_place(2);
     try testing.expectEqual(@as(u32, 10), ptr.get());
     ptr.increment_in_place_assert_contiguous(3);
     try testing.expectEqual(@as(u32, 40), ptr.get());
@@ -379,7 +379,7 @@ test "Pointer -> native pointer arithmetic" {
     try testing.expectEqual(@as(u32, 10), ptr.get());
     ptr.move_in_place_assert_contiguous(4);
     try testing.expectEqual(@as(u32, 50), ptr.get());
-    ptr.move_in_place_assert_contiguous(-4);
+    ptr.decrement_in_place_assert_contiguous(4);
     try testing.expectEqual(@as(u32, 10), ptr.get());
 
     try testing.expectEqual(@intFromPtr(&values[2]), ptr.increment(2).addr());
@@ -959,7 +959,7 @@ test "Pointer -> static resolver pointer basics with u32 handles" {
     try testing.expectEqual(@as(usize, buffer_base() + 8), back.addr());
     try testing.expectEqual(@as(u32, 0xAABBCCDD), back.get());
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.move(2).addr());
-    try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.move(-1).move(1).addr());
+    try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.move(2).decrement(2).addr());
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.increment_assert_contiguous(2).addr());
     try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.increment_assert_contiguous(2).decrement_assert_contiguous(2).addr());
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.move_assert_contiguous(2).addr());
@@ -970,7 +970,7 @@ test "Pointer -> static resolver pointer basics with u32 handles" {
     try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.addr());
     ptr.move_in_place(2);
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.addr());
-    ptr.move_in_place(-2);
+    ptr.decrement_in_place(2);
     try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.addr());
     ptr.increment_in_place_assert_contiguous(2);
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.addr());
@@ -978,7 +978,7 @@ test "Pointer -> static resolver pointer basics with u32 handles" {
     try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.addr());
     ptr.move_in_place_assert_contiguous(2);
     try testing.expectEqual(@as(usize, buffer_base() + 16), ptr.addr());
-    ptr.move_in_place_assert_contiguous(-2);
+    ptr.decrement_in_place_assert_contiguous(2);
     try testing.expectEqual(@as(usize, buffer_base() + 8), ptr.addr());
 
     const slice = ptr.slice(2);
@@ -1135,7 +1135,7 @@ test "Pointer -> static resolver address granularity" {
     try testing.expectEqual(@as(u32, 0x05060708), next.get());
     try testing.expectEqual(@as(usize, buffer_base()), next.decrement(4).addr());
     try testing.expectEqual(@as(usize, buffer_base() + 32), ptr.move(8).addr());
-    try testing.expectEqual(@as(usize, buffer_base()), ptr.move(8).move(-8).addr());
+    try testing.expectEqual(@as(usize, buffer_base()), ptr.move(8).decrement(8).addr());
 
     const slice = ptr.slice(2);
     ptr.set_at_index(1, 0x05060708);
@@ -1292,7 +1292,7 @@ test "Pointer -> direct make pointer and default helpers" {
     try testing.expect(null_from_def == null);
 }
 
-test "pointer source and wrapper helper functions agree" {
+test "Pointer -> pointer source and wrapper helper functions agree" {
     try testing.expect(PointerSource.Pointer(NATIVE, u32) == Pointer(u32, NATIVE));
     try testing.expect(PointerSource.PointerAlign(NATIVE, u32, PowerOf2._16) == PointerAlign(u32, PowerOf2._16, NATIVE));
     try testing.expect(PointerSource.NullablePointer(NATIVE, u32) == NullablePointer(u32, NATIVE));
