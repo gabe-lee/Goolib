@@ -539,24 +539,24 @@ test "Pointer -> native pointer element casts" {
     const WordAligned = PointerAlign(u32, PowerOf2._16, NATIVE);
     const byte_ptr = ByteAligned.new_from_any(&word);
 
-    const word_ptr = byte_ptr.cast_to_element(u32);
+    const word_ptr = byte_ptr.to_element(u32);
     try testing.expect(@TypeOf(word_ptr) == Pointer(u32, NATIVE));
     try testing.expectEqual(@as(u32, 0x11223344), word_ptr.get());
 
-    const aligned_byte_ptr = word_ptr.cast_to_element_aligned(u8, PowerOf2._16);
+    const aligned_byte_ptr = word_ptr.to_element_aligned(u8, PowerOf2._16);
     try testing.expect(@TypeOf(aligned_byte_ptr) == ByteAligned);
     try testing.expectEqualSlices(u8, std.mem.asBytes(&word), aligned_byte_ptr.slice(4));
 
-    const aligned_word_ptr = aligned_byte_ptr.cast_to_element_aligned(u32, PowerOf2._16);
+    const aligned_word_ptr = aligned_byte_ptr.to_element_aligned(u32, PowerOf2._16);
     try testing.expect(@TypeOf(aligned_word_ptr) == WordAligned);
     try testing.expectEqual(@as(u32, 0x11223344), aligned_word_ptr.get());
 
-    const sentinel_byte_ptr = word_ptr.cast_to_element_with_sentinel(u8, 0);
+    const sentinel_byte_ptr = word_ptr.to_element_with_sentinel(u8, 0);
     try testing.expect(@TypeOf(sentinel_byte_ptr) == SentU8);
     try testing.expect(sentinel_byte_ptr.has_sentinel());
     try testing.expectEqual(@as(u8, 0), sentinel_byte_ptr.sentinel_value());
 
-    const sentinel_aligned_byte_ptr = word_ptr.cast_to_element_with_sentinel_aligned(u8, 0, PowerOf2._16);
+    const sentinel_aligned_byte_ptr = word_ptr.to_element_with_sentinel_aligned(u8, 0, PowerOf2._16);
     try testing.expect(sentinel_aligned_byte_ptr.has_sentinel());
     try testing.expectEqual(@as(u8, 0), sentinel_aligned_byte_ptr.sentinel_value());
     try testing.expectEqual(@as(usize, 16), sentinel_aligned_byte_ptr.ptr_alignment());
@@ -565,7 +565,7 @@ test "Pointer -> native pointer element casts" {
     var sentinel_words: [2]u32 align(16) = .{ 0, 0 };
     const sentinel_word_bytes: [*]u8 = @ptrCast(&sentinel_words[0]);
     sentinel_word_bytes[0] = 0x41;
-    const sentinel_word_ptr = Pointer(u32, NATIVE).new_from_any(&sentinel_words[0]).cast_to_element_with_sentinel(u8, 0);
+    const sentinel_word_ptr = Pointer(u32, NATIVE).new_from_any(&sentinel_words[0]).to_element_with_sentinel(u8, 0);
     try testing.expectEqual(@as(usize, 1), sentinel_word_ptr.find_len_from_sentinel());
 }
 
@@ -1159,7 +1159,7 @@ test "Pointer -> static resolver element casts, sentinels, and opaque-free casts
     try testing.expect(@TypeOf(words) == WordPtr);
     try testing.expectEqual(granularity_word, words.get());
 
-    const back_to_bytes = words.cast_to_element(u8);
+    const back_to_bytes = words.to_element(u8);
     try testing.expectEqualSlices(u8, granularity_word_bytes, back_to_bytes.slice(4));
 
     const sentinel_bytes = SentU8Resolver.new_from(4);

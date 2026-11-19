@@ -1718,14 +1718,21 @@ pub const PowerOf2 = enum(u8) {
         return @fromBackingInt(@max(@backingInt(self), @backingInt(other)));
     }
 
-    pub fn to_alloc_align(self: PowerOf2) std.mem.Alignment {
-        const raw = @backingInt(self);
-        const raw_cast: math.Log2Int(usize) = @intCast(raw);
-        return @fromBackingInt(@intCast(raw_cast));
+    pub fn to_std_align(self: PowerOf2) std.mem.Alignment {
+        return @fromBackingInt(@as(math.Log2Int(usize), @intCast(@backingInt(self))));
     }
 
-    pub fn from_alloc_align(alignment: std.mem.Alignment) PowerOf2 {
+    pub fn from_std_align(alignment: std.mem.Alignment) PowerOf2 {
         return @fromBackingInt(@as(u8, @intCast(@backingInt(alignment))));
+    }
+
+    pub fn to_std_align_opt(self: ?PowerOf2) ?std.mem.Alignment {
+        if (self == null) return null;
+        return @fromBackingInt(@as(math.Log2Int(usize), @intCast(@backingInt(self.?))));
+    }
+    pub fn from_std_align_opt(alignment: ?std.mem.Alignment) ?PowerOf2 {
+        if (alignment == null) return null;
+        return @fromBackingInt(@as(u8, @intCast(@backingInt(alignment.?))));
     }
 
     pub fn align_of_type(comptime T: type) PowerOf2 {

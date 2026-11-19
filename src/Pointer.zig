@@ -1003,23 +1003,20 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             self.assert_not_allowzero_addr_0_for_c_ptr(@src());
             return @ptrCast(self.complete_cast_to(PTR_DEF.with_c_pointer_constraints()).ptr_many());
         }
-        pub inline fn slice(self: Self, len: anytype) Slice {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice(self: Self, len: usize) Slice {
             if (comptime CAN_BE_NULL) {
                 if (self.is_null()) return null;
             }
             return self.slice_never_null(len);
         }
-        pub inline fn slice_or_null(self: Self, len: anytype) SliceNullable {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice_or_null(self: Self, len: usize) SliceNullable {
             if (self.is_null()) return null;
             return self.slice_never_null(len);
         }
-        pub inline fn slice_never_null(self: Self, len: anytype) SliceNeverNull {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice_never_null(self: Self, len: usize) SliceNeverNull {
             self.assert_not_null(@src());
 
-            const n = num_cast(len, usize);
+            const n = len;
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) {
                 if (comptime HAS_SENTINEL) {
@@ -1042,42 +1039,38 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
                 return p[0..n];
             }
         }
-        pub inline fn slice_and_write_sentinel(self: Self, len: anytype) Slice {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice_and_write_sentinel(self: Self, len: usize) Slice {
             if (comptime CAN_BE_NULL) {
                 if (self.is_null()) return null;
             }
             return self.slice_and_write_sentinel_never_null(len);
         }
-        pub inline fn slice_and_write_sentinel_or_null(self: Self, len: anytype) SliceNullable {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice_and_write_sentinel_or_null(self: Self, len: usize) SliceNullable {
             if (self.is_null()) return null;
             return self.slice_and_write_sentinel_never_null(len);
         }
-        pub inline fn slice_and_write_sentinel_never_null(self: Self, len: anytype) SliceNeverNull {
-            self.assert_index_not_negative(len, @src());
+        pub inline fn slice_and_write_sentinel_never_null(self: Self, len: usize) SliceNeverNull {
             self.assert_not_null(@src());
             self.write_sentinel_at_len(len);
-            const n = num_cast(len, usize);
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) {
                 if (comptime HAS_SENTINEL) {
-                    return p[0..n :SENTINEL];
+                    return p[0..len :SENTINEL];
                 } else {
-                    return p[0..n];
+                    return p[0..len];
                 }
             }
             if (comptime ASSERT_CONTIG) {
                 if (comptime HAS_SENTINEL) {
-                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * (n + 1)) - 1, @src());
-                } else if (n > 0) {
-                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * n) - 1, @src());
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * (len + 1)) - 1, @src());
+                } else if (len > 0) {
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * len) - 1, @src());
                 }
             }
             if (comptime HAS_SENTINEL) {
-                return p[0..n :SENTINEL];
+                return p[0..len :SENTINEL];
             } else {
-                return p[0..n];
+                return p[0..len];
             }
         }
         pub inline fn slice_find_len_from_sentinel(self: Self) Slice {
@@ -1095,35 +1088,32 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             const len = self.find_len_from_sentinel();
             return self.slice_never_null(len);
         }
-        pub inline fn slice_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: anytype) Slice {
+        pub inline fn slice_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: usize) Slice {
             if (comptime CAN_BE_NULL) {
                 if (self.is_null()) return null;
             }
             return self.slice_never_null_find_len_from_sentinel_with_upper_limit_assert(limit);
         }
-        pub inline fn slice_or_null_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: anytype) SliceNullable {
+        pub inline fn slice_or_null_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: usize) SliceNullable {
             if (self.is_null()) return null;
             return self.slice_never_null_find_len_from_sentinel_with_upper_limit_assert(limit);
         }
-        pub inline fn slice_never_null_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: anytype) SliceNeverNull {
+        pub inline fn slice_never_null_find_len_from_sentinel_with_upper_limit_assert(self: Self, limit: usize) SliceNeverNull {
             self.assert_not_null(@src());
             const len = self.find_len_from_sentinel_max_length_assert(limit);
             return self.slice_never_null(len);
         }
-        pub inline fn byte_slice(self: Self, elem_len: anytype) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).Slice {
-            self.assert_index_not_negative(elem_len, @src());
-            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice(num_cast(elem_len, usize) * ELEMENT_SIZE);
+        pub inline fn byte_slice(self: Self, elem_len: usize) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).Slice {
+            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice(elem_len * ELEMENT_SIZE);
         }
-        pub inline fn byte_slice_or_null(self: Self, elem_len: anytype) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).SliceNullable {
-            self.assert_index_not_negative(elem_len, @src());
-            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice_or_null(num_cast(elem_len, usize) * ELEMENT_SIZE);
+        pub inline fn byte_slice_or_null(self: Self, elem_len: usize) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).SliceNullable {
+            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice_or_null(elem_len * ELEMENT_SIZE);
         }
-        pub inline fn byte_slice_never_null(self: Self, elem_len: anytype) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).SliceNeverNull {
-            self.assert_index_not_negative(elem_len, @src());
-            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice_never_null(num_cast(elem_len, usize) * ELEMENT_SIZE);
+        pub inline fn byte_slice_never_null(self: Self, elem_len: usize) PointerAdvanced(SOURCE, PTR_DEF.with_element(u8)).SliceNeverNull {
+            return self.complete_cast_to(PTR_DEF.with_element(u8)).slice_never_null(elem_len * ELEMENT_SIZE);
         }
 
-        pub inline fn write_sentinel_at_len(self: Self, len: anytype) void {
+        pub inline fn write_sentinel_at_len(self: Self, len: usize) void {
             if (comptime !HAS_SENTINEL) return;
             self.set_at_index_if_not_null(len, SENTINEL);
         }
@@ -1137,11 +1127,10 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             }
             return i;
         }
-        pub inline fn find_len_from_sentinel_max_length_assert(self: Self, max_length: anytype) usize {
+        pub inline fn find_len_from_sentinel_max_length_assert(self: Self, max_len: usize) usize {
             comptime assert_with_reason(HAS_SENTINEL, @src(), "pointer type does not have a sentinel value", .{});
-            assert_with_reason(max_length >= 0, @src(), "limit must be >= 0, got {d}", .{max_length});
+            assert_with_reason(max_len >= 0, @src(), "limit must be >= 0, got {d}", .{max_len});
             const p = self.ptr_many_never_null();
-            const max_len = num_cast(max_length, usize);
             var i: usize = 0;
             // We will let the compiler auto-vectorize this, if possible;
             while (i <= max_len and p[i] != SENTINEL) {
@@ -1231,16 +1220,16 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
                 if (comptime NEW_DEF.ALIGNMENT) |NEW_A| {
                     if (comptime NEW_DEF.SENTINEL) |NEW_S_OPQ| {
                         const NEW_S: *const NEW_DEF.ELEMENT = @ptrCast(@alignCast(NEW_S_OPQ));
-                        break :blk p5.cast_to_element_with_sentinel_aligned(NEW_DEF.ELEMENT, NEW_S.*, NEW_A);
+                        break :blk p5.to_element_with_sentinel_aligned(NEW_DEF.ELEMENT, NEW_S.*, NEW_A);
                     } else {
-                        break :blk p5.cast_to_element_aligned(NEW_DEF.ELEMENT, NEW_A);
+                        break :blk p5.to_element_aligned(NEW_DEF.ELEMENT, NEW_A);
                     }
                 } else {
                     if (comptime NEW_DEF.SENTINEL) |NEW_S_OPQ| {
                         const NEW_S: *const NEW_DEF.ELEMENT = @ptrCast(@alignCast(NEW_S_OPQ));
-                        break :blk p5.cast_to_element_with_sentinel(NEW_DEF.ELEMENT, NEW_S.*);
+                        break :blk p5.to_element_with_sentinel(NEW_DEF.ELEMENT, NEW_S.*);
                     } else {
-                        break :blk p5.cast_to_element(NEW_DEF.ELEMENT);
+                        break :blk p5.to_element(NEW_DEF.ELEMENT);
                     }
                 }
             };
@@ -1292,7 +1281,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             if (comptime ADDRSPACE == null or ADDRSPACE.? == .generic) return self;
             return self.addrspace_cast(PTR_DEF.with_addrspace(null));
         }
-        pub inline fn cast_to_element(self: Self, comptime NEW_ELEM: type) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(null)) {
+        pub inline fn to_element(self: Self, comptime NEW_ELEM: type) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(null)) {
             if (comptime ELEMENT == NEW_ELEM and !HAS_SPECIFIC_ALIGN and !HAS_SENTINEL) return self;
             const NewPtr = PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(null));
             if (self.not_null()) {
@@ -1303,7 +1292,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             }
             return self.pointer_align_cast(PTR_DEF.with_element(NEW_ELEM).with_align(null));
         }
-        pub inline fn cast_to_element_with_sentinel(self: Self, comptime NEW_ELEM: type, comptime NEW_SENTINEL: NEW_ELEM) PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(null)) {
+        pub inline fn to_element_with_sentinel(self: Self, comptime NEW_ELEM: type, comptime NEW_SENTINEL: NEW_ELEM) PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(null)) {
             if (comptime ELEMENT == NEW_ELEM and !HAS_SPECIFIC_ALIGN and HAS_SENTINEL and SENTINEL == NEW_SENTINEL) return self;
             const NewPtr = PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(null));
             if (self.not_null()) {
@@ -1314,7 +1303,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             }
             return self.pointer_align_cast(PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(null));
         }
-        pub inline fn cast_to_element_aligned(self: Self, comptime NEW_ELEM: type, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN)) {
+        pub inline fn to_element_aligned(self: Self, comptime NEW_ELEM: type, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN)) {
             if (comptime ELEMENT == NEW_ELEM and HAS_SPECIFIC_ALIGN and ALIGN_POW2 == SPECIFIC_ALIGN and !HAS_SENTINEL) return self;
             const NewPtr = PointerAdvanced(SOURCE, PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN));
             if (self.not_null()) {
@@ -1325,7 +1314,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             }
             return self.pointer_align_cast(PTR_DEF.with_element(NEW_ELEM).with_align(SPECIFIC_ALIGN));
         }
-        pub inline fn cast_to_element_with_sentinel_aligned(self: Self, comptime NEW_ELEM: type, comptime NEW_SENTINEL: NEW_ELEM, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(SPECIFIC_ALIGN)) {
+        pub inline fn to_element_with_sentinel_aligned(self: Self, comptime NEW_ELEM: type, comptime NEW_SENTINEL: NEW_ELEM, comptime SPECIFIC_ALIGN: PowerOf2) PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(SPECIFIC_ALIGN)) {
             if (comptime ELEMENT == NEW_ELEM and HAS_SENTINEL and SENTINEL == NEW_SENTINEL and HAS_SPECIFIC_ALIGN and ALIGN_POW2 == SPECIFIC_ALIGN) return self;
             const NewPtr = PointerAdvanced(SOURCE, PTR_DEF.with_element_and_sentinel(NEW_ELEM, NEW_SENTINEL).with_align(SPECIFIC_ALIGN));
             if (self.not_null()) {
@@ -1371,11 +1360,6 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         }
         pub inline fn assert_aligned_std_mem(self: Self, alignment: mem.Alignment, comptime src: ?SourceLocation) void {
             assert_with_reason(self.is_aligned_std_mem(alignment), src, "pointer was not aligned to std.mem.Alignment `{s}`", .{@tagName(alignment)});
-        }
-
-        inline fn assert_index_not_negative(self: Self, idx_or_len: anytype, comptime src: ?SourceLocation) void {
-            _ = self;
-            assert_with_reason(idx_or_len >= 0, src, "index or len cannot be negative, got {d}", .{idx_or_len});
         }
 
         inline fn assert_granularity(byte_offset: usize, comptime src: ?SourceLocation) void {
@@ -1425,31 +1409,25 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             if (self.is_null()) return default;
             return self.ptr_never_null().*;
         }
-        pub inline fn get_at_index(self: Self, index: anytype) ELEMENT {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn get_at_index(self: Self, index: usize) ELEMENT {
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) return p[0];
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            return p[idx];
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            return p[index];
         }
-        pub inline fn get_at_index_or_null(self: Self, index: anytype) ?ELEMENT {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn get_at_index_or_null(self: Self, index: usize) ?ELEMENT {
             if (self.is_null()) return null;
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) return p[0];
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            return p[idx];
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            return p[index];
         }
-        pub inline fn get_at_index_orelse(self: Self, index: anytype, default: ELEMENT) ELEMENT {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn get_at_index_orelse(self: Self, index: usize, default: ELEMENT) ELEMENT {
             if (self.is_null()) return default;
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) return p[0];
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            return p[idx];
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            return p[index];
         }
         pub inline fn set(self: Self, val: ELEMENT) void {
             assert_mutable(@src());
@@ -1473,146 +1451,132 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             self.ptr_never_null().* = val;
             return false;
         }
-        pub inline fn set_at_index(self: Self, index: anytype, val: ELEMENT) void {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn set_at_index(self: Self, index: usize, val: ELEMENT) void {
             assert_mutable(@src());
             self.assert_not_null(@src());
             if (comptime ZERO_SIZE_ELEM) return;
             const p = self.ptr_many_never_null();
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            p[idx] = val;
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            p[index] = val;
         }
-        pub inline fn set_at_index_if_not_null(self: Self, index: anytype, val: ELEMENT) void {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn set_at_index_if_not_null(self: Self, index: usize, val: ELEMENT) void {
             assert_mutable(@src());
             if (comptime ZERO_SIZE_ELEM) return;
             if (self.is_null()) return;
             const p = self.ptr_many_never_null();
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            p[idx] = val;
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            p[index] = val;
         }
-        pub inline fn set_at_index_if_not_null_return_ptr_is_NOT_null(self: Self, index: anytype, val: ELEMENT) bool {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn set_at_index_if_not_null_return_ptr_is_NOT_null(self: Self, index: usize, val: ELEMENT) bool {
             assert_mutable(@src());
             if (comptime ZERO_SIZE_ELEM) return self.not_null();
             if (self.is_null()) return false;
             const p = self.ptr_many_never_null();
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            p[idx] = val;
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            p[index] = val;
             return true;
         }
-        pub inline fn set_at_index_if_not_null_return_ptr_IS_null(self: Self, index: anytype, val: ELEMENT) bool {
-            self.assert_index_not_negative(index, @src());
+        pub inline fn set_at_index_if_not_null_return_ptr_IS_null(self: Self, index: usize, val: ELEMENT) bool {
             assert_mutable(@src());
             if (comptime ZERO_SIZE_ELEM) return self.is_null();
             if (self.is_null()) return true;
             const p = self.ptr_many_never_null();
-            const idx = num_cast(index, usize);
-            assert_contiguous(self.internal, .ADD, ((idx + 1) * ELEMENT_SIZE) - 1, @src());
-            p[idx] = val;
+            assert_contiguous(self.internal, .ADD, ((index + 1) * ELEMENT_SIZE) - 1, @src());
+            p[index] = val;
             return false;
         }
         //**************************
         // ADDRESS ADD / SUB / MOVE
         //**************************
-        pub inline fn increment(self: Self, elem_offset: anytype) SelfIfMoved {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn increment(self: Self, elem_offset: usize) SelfIfMoved {
             self.assert_not_null(@src());
             switch (comptime SOURCE) {
                 .NATIVE => if (comptime CAN_BE_NULL) {
-                    return SelfIfMoved{ .internal = self.internal.? + num_cast(elem_offset, usize) };
+                    return SelfIfMoved{ .internal = self.internal.? + elem_offset };
                 } else {
-                    return SelfIfMoved{ .internal = self.internal + num_cast(elem_offset, usize) };
+                    return SelfIfMoved{ .internal = self.internal + elem_offset };
                 },
                 .STATIC_RESOLVER => {
-                    const byte_offset = num_cast(elem_offset, usize) * ELEMENT_SIZE;
+                    const byte_offset = elem_offset * ELEMENT_SIZE;
                     assert_granularity(byte_offset, @src());
-                    return SelfIfMoved{ .internal = static_ptr_incr(self.internal, num_cast(elem_offset, usize) * ELEMENT_SIZE) };
+                    return SelfIfMoved{ .internal = static_ptr_incr(self.internal, elem_offset * ELEMENT_SIZE) };
                 },
             }
         }
-        pub inline fn increment_in_place(self: *Self, offset: anytype) void {
+        pub inline fn increment_in_place(self: *Self, offset: usize) void {
             assert_not_overaligned(@src());
             self.* = self.increment(offset);
         }
 
-        pub inline fn increment_assert_contiguous(self: Self, elem_offset: anytype) SelfIfMoved {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn increment_assert_contiguous(self: Self, elem_offset: usize) SelfIfMoved {
             self.assert_not_null(@src());
             if (comptime !ZERO_SIZE_ELEM) {
-                assert_contiguous(self.internal, .ADD, ((num_cast(elem_offset, usize) + 1) * ELEMENT_SIZE) - 1, @src());
+                assert_contiguous(self.internal, .ADD, ((elem_offset + 1) * ELEMENT_SIZE) - 1, @src());
             }
             return self.increment(elem_offset);
         }
-        pub inline fn increment_in_place_assert_contiguous(self: *Self, elem_offset: anytype) void {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn increment_in_place_assert_contiguous(self: *Self, elem_offset: usize) void {
             self.assert_not_null(@src());
             if (comptime !ZERO_SIZE_ELEM) {
-                assert_contiguous(self.internal, .ADD, ((num_cast(elem_offset, usize) + 1) * ELEMENT_SIZE) - 1, @src());
+                assert_contiguous(self.internal, .ADD, ((elem_offset + 1) * ELEMENT_SIZE) - 1, @src());
             }
             self.increment_in_place(elem_offset);
         }
 
-        pub inline fn decrement(self: Self, elem_offset: anytype) SelfIfMoved {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn decrement(self: Self, elem_offset: usize) SelfIfMoved {
             self.assert_not_null(@src());
             switch (comptime SOURCE) {
                 .NATIVE => if (comptime CAN_BE_NULL) {
-                    return SelfIfMoved{ .internal = self.internal.? - num_cast(elem_offset, usize) };
+                    return SelfIfMoved{ .internal = self.internal.? - elem_offset };
                 } else {
-                    return SelfIfMoved{ .internal = self.internal - num_cast(elem_offset, usize) };
+                    return SelfIfMoved{ .internal = self.internal - elem_offset };
                 },
                 .STATIC_RESOLVER => {
-                    const byte_offset = num_cast(elem_offset, usize) * ELEMENT_SIZE;
+                    const byte_offset = elem_offset * ELEMENT_SIZE;
                     assert_granularity(byte_offset, @src());
-                    return SelfIfMoved{ .internal = static_ptr_decr(self.internal, num_cast(elem_offset, usize) * ELEMENT_SIZE) };
+                    return SelfIfMoved{ .internal = static_ptr_decr(self.internal, elem_offset * ELEMENT_SIZE) };
                 },
             }
         }
-        pub inline fn decrement_in_place(self: *Self, elem_offset: anytype) void {
+        pub inline fn decrement_in_place(self: *Self, elem_offset: usize) void {
             assert_not_overaligned(@src());
             self.* = self.decrement(elem_offset);
         }
 
-        pub inline fn decrement_assert_contiguous(self: Self, elem_offset: anytype) SelfIfMoved {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn decrement_assert_contiguous(self: Self, elem_offset: usize) SelfIfMoved {
             self.assert_not_null(@src());
             if (comptime !ZERO_SIZE_ELEM) {
-                assert_contiguous(self.internal, .SUB, num_cast(elem_offset, usize) * ELEMENT_SIZE, @src());
+                assert_contiguous(self.internal, .SUB, elem_offset * ELEMENT_SIZE, @src());
             }
             return self.decrement(elem_offset);
         }
-        pub inline fn decrement_in_place_assert_contiguous(self: *Self, elem_offset: anytype) void {
-            self.assert_index_not_negative(elem_offset, @src());
+        pub inline fn decrement_in_place_assert_contiguous(self: *Self, elem_offset: usize) void {
             self.assert_not_null(@src());
             if (comptime !ZERO_SIZE_ELEM) {
-                assert_contiguous(self.internal, .SUB, num_cast(elem_offset, usize) * ELEMENT_SIZE, @src());
+                assert_contiguous(self.internal, .SUB, elem_offset * ELEMENT_SIZE, @src());
             }
             self.decrement_in_place(elem_offset);
         }
-        pub inline fn move(self: Self, elem_offset: anytype) SelfIfMoved {
+        pub inline fn move(self: Self, elem_offset: usize) SelfIfMoved {
             if (elem_offset < 0) {
                 return self.decrement(@abs(elem_offset));
             } else {
                 return self.increment(elem_offset);
             }
         }
-        pub inline fn move_in_place(self: *Self, elem_offset: anytype) void {
+        pub inline fn move_in_place(self: *Self, elem_offset: usize) void {
             assert_not_overaligned(@src());
             self.* = self.move(elem_offset);
         }
 
-        pub inline fn move_assert_contiguous(self: Self, elem_offset: anytype) SelfIfMoved {
+        pub inline fn move_assert_contiguous(self: Self, elem_offset: usize) SelfIfMoved {
             if (elem_offset < 0) {
                 return self.decrement_assert_contiguous(@abs(elem_offset));
             } else {
                 return self.increment_assert_contiguous(elem_offset);
             }
         }
-        pub inline fn move_in_place_assert_contiguous(self: *Self, elem_offset: anytype) void {
+        pub inline fn move_in_place_assert_contiguous(self: *Self, elem_offset: usize) void {
             assert_not_overaligned(@src());
             self.* = self.move_assert_contiguous(elem_offset);
         }
@@ -1904,15 +1868,15 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         //**************************
         // NULL-PRESERVING ARITHMETIC
         //**************************
-        pub inline fn increment_if_not_null(self: Self, offset: anytype) SelfIfMoved {
+        pub inline fn increment_if_not_null(self: Self, offset: usize) SelfIfMoved {
             if (self.is_null()) return SelfIfMoved{ .internal = self.internal };
             return self.increment(offset);
         }
-        pub inline fn decrement_if_not_null(self: Self, offset: anytype) SelfIfMoved {
+        pub inline fn decrement_if_not_null(self: Self, offset: usize) SelfIfMoved {
             if (self.is_null()) return SelfIfMoved{ .internal = self.internal };
             return self.decrement(offset);
         }
-        pub inline fn move_if_not_null(self: Self, offset: anytype) SelfIfMoved {
+        pub inline fn move_if_not_null(self: Self, offset: usize) SelfIfMoved {
             if (self.is_null()) return SelfIfMoved{ .internal = self.internal };
             return self.move(offset);
         }

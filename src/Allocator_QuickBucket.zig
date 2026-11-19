@@ -59,7 +59,7 @@ pub fn QuickBucketAllocator(comptime DEF: Def) type {
         pub const META_BACKING_BLOCK_POWER = DEF.BACKING_META_BLOCK_SIZE;
         pub const META_BACKING_BLOCK_SIZE = META_BACKING_BLOCK_POWER.value_as_type(usize);
         pub const META_PTRS_PER_BLOCK: u32 = @intCast(META_BACKING_BLOCK_SIZE / @sizeOf([*]u8));
-        pub const BACKING_BLOCK_ALIGN = MAX_CLASS_POWER.to_alloc_align();
+        pub const BACKING_BLOCK_ALIGN = MAX_CLASS_POWER.to_std_align();
 
         const FreeNode = struct {
             next: ?*FreeNode,

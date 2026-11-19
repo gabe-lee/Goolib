@@ -210,7 +210,7 @@ fn eval_def(comptime DEF: Def) ComptimeAllocInfo(DEF.BUCKETS.len) {
         ordered_blocks_per_slab[i] = blocks_per_slab;
         largest_blocks_per_slab = @max(largest_blocks_per_slab, blocks_per_slab);
         ordered_leftover_blocks_after_new_alloc[i] = blocks_per_slab - 1;
-        ordered_slab_alignments[i] = def.BUCKET_SIZE.to_alloc_align();
+        ordered_slab_alignments[i] = def.BUCKET_SIZE.to_std_align();
     }
     const num_buckets = max_bucket_power.raw_int() - min_bucket_power.raw_int() + 1;
     for (ordered_bucket_defs, 0..) |def, i| {
@@ -393,7 +393,7 @@ pub fn BucketSlabAlloc(comptime DEF: Def) type {
 
         inline fn bucket_index_from_size_align(size: usize, alignment: Alignment) u8 {
             const clamped = @max(size, MIN_BUCKET_SIZE);
-            const clamped_alignment = PowerOf2.from_alloc_align(alignment).max(MIN_BUCKET_POWER).raw_int();
+            const clamped_alignment = PowerOf2.from_std_align(alignment).max(MIN_BUCKET_POWER).raw_int();
             const biased_index_from_size = num_cast(std.math.log2_int_ceil(usize, clamped), u8) - MIN_BUCKET_RAW;
             const biased_index_from_align = clamped_alignment - MIN_BUCKET_RAW;
             return @max(biased_index_from_align, biased_index_from_size);
@@ -1148,7 +1148,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
 
         inline fn bucket_index_from_size_align(size: usize, alignment: Alignment) u8 {
             const clamped = @max(size, MIN_BUCKET_SIZE);
-            const clamped_alignment = PowerOf2.from_alloc_align(alignment).max(MIN_BUCKET_POWER).raw_int();
+            const clamped_alignment = PowerOf2.from_std_align(alignment).max(MIN_BUCKET_POWER).raw_int();
             const biased_index_from_size = num_cast(std.math.log2_int_ceil(usize, clamped), u8) - MIN_BUCKET_RAW;
             const biased_index_from_align = clamped_alignment - MIN_BUCKET_RAW;
             return @max(biased_index_from_align, biased_index_from_size);
