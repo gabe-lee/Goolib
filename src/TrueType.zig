@@ -103,6 +103,12 @@
 //!    misrepresented as being the original software.
 //! 3. This notice may not be removed or altered from any source distribution.
 
+comptime {
+    if (build.is_test) {
+        _ = @import("./TrueType_Tests.zig");
+    }
+}
+
 const std = @import("std");
 const build = @import("builtin");
 const math = std.math;
@@ -113,6 +119,7 @@ const Utils = Root.Utils;
 const Allocator = std.mem.Allocator;
 const DummyAllocator = Root.Allocator.Dummy;
 const List = Root.ListSlice.ListAllocated;
+const ListFull = Root.ListSlice.ListFullDefinition;
 const ListSlice = Root.ListSlice;
 const Vec2 = Root.Vec2;
 const AABB2 = Root.AABB2;
@@ -125,6 +132,11 @@ const DataGridModule = Root.DataGrid;
 const BitmapFormat = Root.FileFormat.Bitmap;
 const PoolModule = Root.Pool;
 const Shape = ShapeModule.Shape;
+const AllocSource = Root.Allocator.AllocSource;
+const AllocAdapter = Root.Allocator.AllocatorAdapter;
+const Io = std.Io;
+const Dir = Io.Dir;
+const File = Io.File;
 
 const AABB_i32 = AABB2.define_aabb2_type(i32);
 const AABB_i16 = AABB2.define_aabb2_type(i16);
@@ -331,6 +343,20 @@ pub const TrueTypeFont = struct {
     index_to_loc_format: u16,
     glyphs_len: u32,
     cff_data: CffData,
+
+    pub fn load_from_file_path(path: Utils.File.Path, options: Utils.File.OpenFileOptions, comptime ALLOC_SOURCE: AllocSource, alloc_adapter: AllocAdapter(ALLOC_SOURCE), passed_alloc: AllocAdapter(ALLOC_SOURCE).PassedAlloc) !struct { TrueTypeFont, AllocAdapter(ALLOC_SOURCE).Pointer(u8) } {
+        const file = try path.open_as_file(options);
+        return load_from_file(file, path.get_io(), ALLOC_SOURCE, alloc_adapter, passed_alloc);
+    }
+
+    pub fn load_from_file(file: File, io: Io, comptime ALLOC_SOURCE: AllocSource, alloc_adapter: AllocAdapter(ALLOC_SOURCE), passed_alloc: AllocAdapter(ALLOC_SOURCE).PassedAlloc) !struct { TrueTypeFont, AllocAdapter(ALLOC_SOURCE).Pointer(u8) } {
+        defer file.close(io);
+        const file_stat = try file.stat(io);
+        const ptr = alloc_adapter.alloc_bytes(file_stat.size, passed_alloc);
+        if (ptr.is_null()) return error.OutOfMemory;
+        const bytes = ptr.slice_never_null(@intCast(file_stat.size));
+        return .{ try load(bytes[0..file_stat.size]), ptr.to_non_null() };
+    }
 
     pub fn load(bytes: []const u8) !TrueTypeFont {
         // Find tables.
@@ -964,15 +990,16 @@ pub const TrueTypeFont = struct {
         };
     }
 
-    /// Shapes a UTF-8 string into a slice of glyphs with individual x-advances.
+    /// Lays out the glyphs a UTF-8 string into a slice of glyphs with individual x-advances.
     ///
     /// The provided `*ShapedGlyphList` is cleared, reallocated if necessary, and reused.
-    pub fn shape_text(
+    pub fn layout_text_single_line(
         font: *const TrueTypeFont,
         text_utf8: []const u8,
         scale: f32,
-        list: *ShapedGlyphList,
-        allocator: Allocator,
+        comptime ALLOC_SOURCE: AllocSource,
+        list: *ListFull(ShapedGlyph, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, ALLOC_SOURCE),
+        allocator: ALLOC_SOURCE.PARAM_TYPE(),
     ) !void {
         const valid, const count = Utils.UTF8.utf8_validate_slice_and_count_codepoints(text_utf8, .cannot_encode_surrogate_half);
         if (!valid) return error.invalid_utf8_string;
@@ -1417,7 +1444,7 @@ pub const TrueTypeFont = struct {
                 alloc.free(ctx.allVertices());
         }
 
-        fn trackVertex(ctx: *CharstringCtx, x: i32, y: i32) void {
+        fn track_vertex(ctx: *CharstringCtx, x: i32, y: i32) void {
             if (x > ctx.max_x or !ctx.flags.started) ctx.max_x = x;
             if (y > ctx.max_y or !ctx.flags.started) ctx.max_y = y;
             if (x < ctx.min_x or !ctx.flags.started) ctx.min_x = x;
@@ -1427,10 +1454,10 @@ pub const TrueTypeFont = struct {
 
         fn v(ctx: *CharstringCtx, ty: Vertex.Type, x: i32, y: i32, cx: i32, cy: i32, cx1: i32, cy1: i32) !void {
             if (ctx.flags.mode == .bounds) {
-                trackVertex(ctx, x, y);
+                track_vertex(ctx, x, y);
                 if (ty == .CUBIC) {
-                    trackVertex(ctx, cx, cy);
-                    trackVertex(ctx, cx1, cy1);
+                    track_vertex(ctx, cx, cy);
+                    track_vertex(ctx, cx1, cy1);
                 }
             } else {
                 ctx.vertices[ctx.num_vertices].set(ty, x, y, cx, cy);
@@ -1954,86 +1981,3 @@ pub fn debug_rasterize_vertex_list_control_points_to_data_grid(vertices: *List(V
     }
     std.debug.print("\n", .{});
 }
-
-test "TrueTypeFont -> load and render chars" {
-    @setEvalBranchQuota(5000);
-    const alloc = std.heap.smp_allocator;
-    const OUT_DEF = DataGridModule.GridDefinition{
-        .LIST_DEF = .{
-            .ELEM = u8,
-            .OWNERSHIP = .OWNED_ALLOCATED,
-        },
-        .ROW_COLUMN_ORDER = .ROW_MAJOR,
-        .X_ORDER = .LEFT_TO_RIGHT,
-        .Y_ORDER = .TOP_TO_BOTTOM,
-    };
-    const io = std.testing.io;
-    const OUT_GRID = DataGridModule.DataGrid(OUT_DEF);
-    const output_cells = OUT_GRID.CellList.allocate_new(4096, alloc);
-    var vertex_list = List(Vertex).allocate_new(128, alloc);
-    defer vertex_list.free(alloc);
-    const VertexListPoolST = VertexListPool(.SINGLE_THREADED);
-    var vertex_list_pool = VertexListPoolST.allocate_new(8, alloc);
-    const PROTO = struct {
-        fn free_vert_list(vert_list: *List(Vertex), vert_alloc: Allocator) void {
-            vert_list.free(vert_alloc);
-        }
-        fn free_contour(contour: *Contour(f32, void, {}), contour_alloc: Allocator) void {
-            contour.free(contour_alloc);
-        }
-    };
-    defer vertex_list_pool.free_items_then_free_pool(Allocator, PROTO.free_vert_list, alloc);
-    var shape = Shape(f32, void, {}).allocate_new(4, alloc);
-    defer shape.free(alloc);
-    const CHARS = [_]u32{ 'A', 'B', 'c', 'd', 'E', 'f', 'G', 'g', '&', 'ć' };
-    const font_file = try std.Io.Dir.cwd().openFile(io, "vendor/fonts/Lato/Lato-Regular.ttf", .{});
-    defer font_file.close(io);
-    const font_file_stat = try font_file.stat(io);
-    const font_file_len = font_file_stat.size;
-    var font_file_buf = List(u8).allocate_new_set_len(@intCast(font_file_len), alloc);
-    defer font_file_buf.free(alloc);
-    font_file_buf.set_len(@intCast(font_file_len));
-    _ = try font_file.readPositionalAll(io, font_file_buf.zig_slice_entire(), 0);
-    var font: TrueTypeFont = try TrueTypeFont.load(font_file_buf.zig_slice_entire());
-    try std.Io.Dir.cwd().createDirPath(io, "test_out/true_type");
-    const scale_54_px = font.get_scale_for_pixel_height(54.0);
-    const Rasterizer = Root.Shape.ASCA_Rasterizer.CellAccumulatorRasterizer(.{
-        .ROW_COLUMN_ORDER = .ROW_MAJOR,
-        .X_ORDER = .LEFT_TO_RIGHT,
-        .Y_ORDER = .BOTTOM_TO_TOP,
-    }, f32, u32, i32);
-    const RasterOpts = Rasterizer.RasterOptions;
-    const opts = RasterOpts{
-        .tolerance = 0.1,
-        .fill_rule = .EVEN_ODD,
-    };
-    var raster = Rasterizer.init_empty(alloc);
-    defer raster.free();
-    inline for (CHARS[0..]) |char| {
-        const glyph_index = font.get_codepoint_glyph_index(char);
-        try font.get_glyph_vertex_list(glyph_index, &vertex_list, alloc, .SINGLE_THREADED, &vertex_list_pool, alloc);
-        try convert_vertex_list_to_shape(&vertex_list, f32, &shape, alloc);
-        shape.scale(.new_splat(scale_54_px));
-        var shape_aabb = shape.get_bounds_default_estimate();
-        shape_aabb = shape_aabb.expand_by(2);
-        const shape_shift_to_frame = shape_aabb.get_min_point().negate();
-        shape.translate(shape_shift_to_frame);
-        shape_aabb = shape_aabb.with_mins_shifted_to_zero();
-        const shape_aabb_max = shape_aabb.get_max_point();
-        const raster_size = Vec_u32.new(@intFromFloat(shape_aabb_max.x), @intFromFloat(shape_aabb_max.y));
-        const grid_size = raster_size.add(.new_splat(3));
-        const output_grid = OUT_GRID.init_repurpose_existing_cell_list(grid_size, 0, output_cells, alloc);
-        const output_region = output_grid.get_entire_region();
-        raster.clear_and_realloc(raster_size.x, raster_size.y);
-        _ = try raster.rasterize_shape_to_grid(shape, opts, OUT_DEF, .existing_region(output_region, 0), 0, 255);
-        _ = try BitmapFormat.save_bitmap_to_file("test_out/true_type/shape_raster_char_" ++ std.fmt.comptimePrint("{d}", .{char}) ++ ".bmp", OUT_DEF, output_grid, .{ .bits_per_pixel = .BPP_8 }, .NO_CONVERSION_NEEDED_ALPHA_BECOMES_COLOR_CHANNELS, alloc, io);
-    }
-    var text_shape_list = ShapedGlyphList.allocate_new(10, alloc);
-    defer text_shape_list.free_if_non_zero(alloc);
-    try font.shape_text("ABcdEfGg&ć", 2.0, &text_shape_list, alloc);
-}
-
-// pub const TextList = ListSlice.ListFullDefinition(u8, u32, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, .PASSED_ALLOCATOR_INTERFACE);
-// pub const SimpleTextRect = struct {
-//     text: , //CHECKPOINT
-// };

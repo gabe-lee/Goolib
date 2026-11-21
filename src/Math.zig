@@ -1609,6 +1609,47 @@ pub const PowerOf2 = enum(u8) {
     _18_446_744_073_709_551_616 = 64,
     _,
 
+    pub const Integer = struct {
+        pub const Size = enum(u8) {
+            U8 = @backingInt(PowerOf2._256),
+            U16 = @backingInt(PowerOf2._65_536),
+            U32 = @backingInt(PowerOf2._4_294_967_296),
+            U64 = @backingInt(PowerOf2._18_446_744_073_709_551_616),
+
+            pub const USIZE: Size = if (@sizeOf(usize) == 4) Size.U32 else Size.U64;
+
+            pub fn to_pow2(self: Size) PowerOf2 {
+                return @fromBackingInt(@backingInt(self));
+            }
+        };
+
+        pub const Bits = enum(u8) {
+            U8 = @backingInt(PowerOf2._8),
+            U16 = @backingInt(PowerOf2._16),
+            U32 = @backingInt(PowerOf2._32),
+            U64 = @backingInt(PowerOf2._64),
+
+            pub const USIZE: Bits = if (@sizeOf(usize) == 4) Bits.U32 else Bits.U64;
+
+            pub fn to_pow2(self: Bits) PowerOf2 {
+                return @fromBackingInt(@backingInt(self));
+            }
+        };
+
+        pub const Bytes = enum(u8) {
+            U8 = @backingInt(PowerOf2._1),
+            U16 = @backingInt(PowerOf2._2),
+            U32 = @backingInt(PowerOf2._4),
+            U64 = @backingInt(PowerOf2._8),
+
+            pub const USIZE: Integer.Bytes = if (@sizeOf(usize) == 4) Integer.Bytes.U32 else Integer.Bytes.U64;
+
+            pub fn to_pow2(self: Integer.Bytes) PowerOf2 {
+                return @fromBackingInt(@backingInt(self));
+            }
+        };
+    };
+
     pub const Bytes = struct {
         pub const _1_B = PowerOf2._1;
         pub const _2_B = PowerOf2._2;

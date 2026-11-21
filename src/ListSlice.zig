@@ -341,6 +341,10 @@ pub fn SliceImmutableAdvanced(comptime T: type, comptime FIELD_LAYOUT: FieldLayo
     return ListFullDefinition(T, u32, FIELD_LAYOUT, INDEX_LAYOUT, .REFERENCED_IMMUTABLE, .PASSED_ALLOCATOR_INTERFACE);
 }
 
+pub inline fn ListFullWithDef(comptime DEF: ListDef) type {
+    return ListFullDefinition(DEF.ELEM, DEF.IDX, DEF.FIELD_LAYOUT, DEF.INDEX_LAYOUT, DEF.OWNERSHIP, DEF.ALLOC_SOURCE);
+}
+
 pub fn ListFullDefinition(
     comptime ELEM: type,
     comptime IDX: type,
@@ -492,8 +496,8 @@ pub fn ListFullDefinition(
         pub inline fn from_slice_const_keep_data(data_slice: []const ELEM) SliceConst {
             return IMPL.from_slice_const_keep_data(data_slice);
         }
-        pub inline fn allocate_new(init_cap: IDX, alloc: InitAlloc) ListAlloc {
-            return IMPL.allocate_new(init_cap, alloc);
+        pub inline fn allocate_new(init_cap: IDX, init_alloc: InitAlloc) ListAlloc {
+            return IMPL.allocate_new(init_cap, init_alloc);
         }
         pub inline fn allocate_new_set_len(init_cap: IDX, alloc: InitAlloc) ListAlloc {
             return IMPL.allocate_new_set_len(init_cap, alloc);

@@ -1064,15 +1064,17 @@ pub fn RowPackedAtlas(
         const IDX = PACKER_DEF.IDX;
         const LOCK_MODE = PACKER_DEF.LOCK_MODE;
         const MASTER_LOCK = LOCK_MODE != .NO_LOCKS;
-        const Alloc = AllocAdapter(PACKER_DEF.ALLOC_SOURCE);
-        const PassedAlloc = Alloc.PassedAlloc;
-        const InitAlloc = Alloc.InitAlloc;
+        pub const InitIo = if (MASTER_LOCK) Io else void;
+        pub const InitIoDefault: InitIo = if (MASTER_LOCK) Root.DummyIo.io_undefined else {};
+        pub const Alloc = AllocAdapter(PACKER_DEF.ALLOC_SOURCE);
+        pub const PassedAlloc = Alloc.PassedAlloc;
+        pub const InitAlloc = Alloc.InitAlloc;
 
         hash_map: Map = .{},
         packer: Packer = .{},
         alloc: Alloc = .{},
 
-        pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: if (MASTER_LOCK) Io else void) void {
+        pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: InitIo) void {
             self.alloc = Alloc.new_from_init_alloc(alloc);
             self.hash_map = Map.init_capacity(@intCast(hash_map_cap), self.alloc.get_alloc(Alloc.init_to_passed_alloc(alloc)));
             self.packer.init(@intCast(row_pack_cap), hole_cap, region, default_height_fit_threshold, alloc, io);

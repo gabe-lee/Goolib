@@ -590,6 +590,9 @@ pub const PointerSource = union(PointerSourceKind) {
             },
         };
     }
+    pub fn InternalPtrSize(comptime self: PointerSource, comptime PTR_DEF: MakePtrDefNoSize) usize {
+        return @sizeOf(self.InternalPtr(PTR_DEF));
+    }
     pub fn InternalPtrDefault(comptime self: PointerSource, comptime PTR_DEF: MakePtrDefNoSize) self.InternalPtr(PTR_DEF) {
         return switch (comptime self) {
             .NATIVE => PtrDefaultFromDef(PTR_DEF.to_make_ptr_def(.many)),
@@ -725,6 +728,7 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
     return struct {
         const Self = @This();
         pub const InternalPtr = SOURCE.InternalPtr(PTR_DEF);
+        pub const InternalPtrSize = SOURCE.InternalPtrSize(PTR_DEF);
         pub const PtrMany = MakePtrFromDef(PTR_DEF_FULL);
         pub const PtrOne = MakePtrFromDef(PTR_DEF_FULL.with_sentinel(null).with_size_kind(.one));
         pub const PtrC = MakePtrFromDef(PTR_DEF_FULL.with_c_pointer_constraints());
@@ -1810,6 +1814,16 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
             }
             assert_unreachable(@src(), "eql_native requires a pointer or optional pointer", .{});
             return false;
+        }
+        pub inline fn internal_to_u64(self: Self) u64 {
+            switch (comptime SOURCE) {
+                .NATIVE => {
+                    return @intCast(@intFromPtr(self.internal));
+                },
+                .STATIC_RESOLVER => {
+                    return @intCast(self.internal);
+                },
+            }
         }
         pub inline fn hash(self: Self) u64 {
             const addr_: usize = self.addr_orelse_0();

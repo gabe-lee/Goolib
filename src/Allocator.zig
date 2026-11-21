@@ -363,43 +363,46 @@ pub const AllocSource = union(AllocSourceKind) {
             .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |SELF_INFO| std.fmt.comptimePrint("{*}", .{@as(*SELF_INFO.INSTANTIATED_ALLOC, @ptrCast(@alignCast(SELF_INFO.INSTANTIATED_ALLOC_PTR)))}),
         };
     }
+
+    pub fn PointerSourceAndValidCheck(comptime self: AllocSource) struct { PointerSource, bool } {
+        comptime var PTR_SRC: PointerSource = PointerSource.native_pointer();
+        comptime var HAS_SRC: bool = false;
+        switch (comptime self) {
+            .COMPILANT_GLOBAL_ALLOCATOR => |T| {
+                HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_static(T);
+                if (!HAS_SRC) {
+                    assert_type_is_compliant_native_allocator_static(T);
+                }
+            },
+            .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |INFO| {
+                HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
+                if (!HAS_SRC) {
+                    assert_type_is_compliant_native_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
+                }
+            },
+            .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| {
+                HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
+                if (!HAS_SRC) {
+                    assert_type_is_compliant_native_allocator_instantiated(T);
+                }
+            },
+            .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| {
+                HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
+                if (!HAS_SRC) {
+                    assert_type_is_compliant_native_allocator_instantiated(T);
+                }
+            },
+            else => {},
+        }
+        return .{ PTR_SRC, HAS_SRC };
+    }
 };
 
 pub noinline fn ALLOCATOR_ADAPTER_GENERIC_ID() u64 {
     return comptime Utils.src_loc_hash(@src());
 }
 pub fn AllocatorAdapter(comptime SOURCE: AllocSource) type {
-    comptime var PTR_SRC: PointerSource = PointerSource.native_pointer();
-    comptime var HAS_SRC: bool = false;
-    switch (comptime SOURCE) {
-        .COMPILANT_GLOBAL_ALLOCATOR => |T| {
-            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_static(T);
-            if (!HAS_SRC) {
-                assert_type_is_compliant_native_allocator_static(T);
-            }
-        },
-        .COMPILANT_INSTANTIATED_ALLOCATOR_COMPTIME_PTR => |INFO| {
-            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
-            if (!HAS_SRC) {
-                assert_type_is_compliant_native_allocator_instantiated(INFO.INSTANTIATED_ALLOC);
-            }
-        },
-        .COMPILANT_INSTANTIATED_ALLOCATOR_CACHED_PTR => |T| {
-            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
-            if (!HAS_SRC) {
-                assert_type_is_compliant_native_allocator_instantiated(T);
-            }
-        },
-        .COMPILANT_INSTANTIATED_ALLOCATOR_PASSED_PTR => |T| {
-            HAS_SRC, PTR_SRC = is_compliant_goolib_allocator_instantiated(T);
-            if (!HAS_SRC) {
-                assert_type_is_compliant_native_allocator_instantiated(T);
-            }
-        },
-        else => {},
-    }
-    const PTR_SRC_ = PTR_SRC;
-    const HAS_SRC_ = HAS_SRC;
+    const PTR_SRC_, const HAS_SRC_ = SOURCE.PointerSourceAndValidCheck();
     return struct {
         const Self = @This();
         pub const GENERIC_ID = ALLOCATOR_ADAPTER_GENERIC_ID();
