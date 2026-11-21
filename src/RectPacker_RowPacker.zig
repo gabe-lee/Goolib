@@ -74,8 +74,40 @@ pub const PackerDef = struct {
     HOLE_POOL_BACK_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
     HOLE_POOL_SLOTS_PER_BLOCK: comptime_int = 64,
     HOLE_POOL_STATE_UINT: type = usize,
+    USERDATA_TYPE: type = void,
 
     pub fn with_alloc(comptime self: PackerDef, comptime ALLOC: AllocSource) PackerDef {
+        var out = self;
+        out.ALLOC_SOURCE = ALLOC;
+        return out;
+    }
+};
+
+pub const PackerDefNoLocks = struct {
+    SIZE_TYPE: type,
+    IDX: type = u32,
+    RELEASE_MODE: ReleaseMode = .CLAIM_AND_RELEASE,
+    ALLOC_SOURCE: AllocSource = .CACHED_ALLOCATOR_INTERFACE,
+    HOLE_POOL_BACK_STRATEGY: BackPointStrategy = .SORTED_BLOCKS_BINARY_SEARCH,
+    HOLE_POOL_SLOTS_PER_BLOCK: comptime_int = 64,
+    HOLE_POOL_STATE_UINT: type = usize,
+    USERDATA_TYPE: type = void,
+
+    pub fn to_def(self: PackerDefNoLocks) PackerDef {
+        return PackerDef{
+            .SIZE_TYPE = self.SIZE_TYPE,
+            .ALLOC_SOURCE = self.ALLOC_SOURCE,
+            .HOLE_POOL_BACK_STRATEGY = self.HOLE_POOL_BACK_STRATEGY,
+            .HOLE_POOL_SLOTS_PER_BLOCK = self.HOLE_POOL_SLOTS_PER_BLOCK,
+            .HOLE_POOL_STATE_UINT = self.HOLE_POOL_STATE_UINT,
+            .IDX = self.IDX,
+            .LOCK_MODE = .NO_LOCKS,
+            .RELEASE_MODE = self.RELEASE_MODE,
+            .USERDATA_TYPE = self.USERDATA_TYPE,
+        };
+    }
+
+    pub fn with_alloc(comptime self: PackerDefNoLocks, comptime ALLOC: AllocSource) PackerDefNoLocks {
         var out = self;
         out.ALLOC_SOURCE = ALLOC;
         return out;
@@ -106,6 +138,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         const HOLE_POOL_BACK_STRATEGY = DEF.HOLE_POOL_BACK_STRATEGY;
         const HOLE_POOL_SLOTS_PER_BLOCK = DEF.HOLE_POOL_SLOTS_PER_BLOCK;
         const HOLE_POOL_STATE_UINT = DEF.HOLE_POOL_STATE_UINT;
+        pub const Userdata = DEF.USERDATA_TYPE;
         pub const AABB = AABB2.define_aabb2_type(SIZE_TYPE);
         pub const Rect = Rect2.define_rect2_type(SIZE_TYPE);
         pub const Vec = Vec2.define_vec2_type(SIZE_TYPE);
@@ -259,10 +292,10 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`rect.size.x == size.y` AND `rect.size.y == size.x`)
-        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedRect {
+        pub fn claim_rect(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc, userdata: Userdata) ?PackedRect {
             self.lock_for_write();
             defer self.unlock_for_write();
-            if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
+            if (self.claim_position(size, threshold, waste, rotation, alloc, userdata)) |pos_with_rot| {
                 return PackedRect{
                     .rect = if (pos_with_rot.is_rotated) Rect{
                         .pos = pos_with_rot.pos,
@@ -273,6 +306,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                     },
                     .is_rotated = pos_with_rot.is_rotated,
                     .row_idx = pos_with_rot.row_idx,
+                    .userdata = pos_with_rot.userdata,
                 };
             }
             return null;
@@ -282,10 +316,10 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         ///
         /// If `rotation != .DO_NOT_ALLOW_ROTATION`, the returned result's `is_rotated` field indicates whether the space
         /// should be treated as rotated 90 degrees (`(aabb.x_max - aabb.x_min) == size.y` AND `(aabb.y_max - aabb.y_min) == size.x`)
-        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedAABB {
+        pub fn claim_aabb(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc, userdata: Userdata) ?PackedAABB {
             self.lock_for_write();
             defer self.unlock_for_write();
-            if (self.claim_position(size, threshold, waste, rotation, alloc)) |pos_with_rot| {
+            if (self.claim_position(size, threshold, waste, rotation, alloc, userdata)) |pos_with_rot| {
                 return PackedAABB{
                     .aabb = if (pos_with_rot.is_rotated) AABB{
                         .x_min = pos_with_rot.pos.x,
@@ -300,12 +334,13 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                     },
                     .is_rotated = pos_with_rot.is_rotated,
                     .row_idx = pos_with_rot.row_idx,
+                    .userdata = pos_with_rot.userdata,
                 };
             }
             return null;
         }
 
-        fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedPos {
+        fn claim_position(self: *Self, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc, userdata: Userdata) ?PackedPos {
             const allow_unrotated = rotation != .ALWAYS_FORCE_90_DEGREE_ROTATION;
             const allow_rotated = switch (rotation) {
                 .DO_NOT_ALLOW_ROTATION => false,
@@ -333,18 +368,18 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             while (constrained_row_idx < constrained_row_count) : (constrained_row_idx += 1) {
                 evaluate_constrained_row(rows[constrained_row_idx], constrained_row_idx, size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
                 if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
-                    return self.claim_candidate(candidate, waste, alloc);
+                    return self.claim_candidate(candidate, waste, alloc, userdata);
                 }
             }
 
             evaluate_unconstrained_row(self.unconstrained_row, self.constrained_rows.get_len(), size, rot_size, allow_unrotated, allow_rotated, waste, threshold_value, &best_threshold, &best_any);
             if (first_fit_ready(waste, threshold_value, best_threshold, best_any)) |candidate| {
-                return self.claim_candidate(candidate, waste, alloc);
+                return self.claim_candidate(candidate, waste, alloc, userdata);
             }
 
             const selected = if (best_threshold.kind != .NONE) best_threshold else best_any;
             if (best_threshold.kind == .NONE and threshold_value != null) {
-                if (self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated, alloc)) |pos| {
+                if (self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated, alloc, userdata)) |pos| {
                     return pos;
                 }
             }
@@ -357,11 +392,11 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 if (self.unconstrained_row.can_fit_size_on_new_row(selected.size) and
                     !self.unconstrained_row.new_height_is_within_threshold(extended_threshold, selected.size.y))
                 {
-                    return self.claim_on_new_row(selected.size, selected.rotated, alloc);
+                    return self.claim_on_new_row(selected.size, selected.rotated, alloc, userdata);
                 }
             }
 
-            return self.claim_candidate(selected, waste, alloc);
+            return self.claim_candidate(selected, waste, alloc, userdata);
         }
 
         const RowKind = enum(u2) {
@@ -522,33 +557,33 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             return if (best_threshold.kind == .NONE) null else best_threshold;
         }
 
-        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode, alloc: PassedAlloc) PackedPos {
+        inline fn claim_candidate(self: *Self, candidate: Candidate, waste_mode: WasteMode, alloc: PassedAlloc, userdata: Userdata) PackedPos {
             self.claim_count +|= 1;
             switch (candidate.kind) {
                 .CONSTRAINED => {
                     const row = &self.constrained_rows.zig_slice_entire()[candidate.row_idx];
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx, userdata);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
                         row.claim_pos_known_waste(candidate.size, candidate.waste, &self.total_wasted_area)
                     else
                         row.claim_pos(candidate.size, &self.total_wasted_area);
-                    return PackedPos.new(pos, candidate.rotated, candidate.row_idx);
+                    return PackedPos.new(pos, candidate.rotated, candidate.row_idx, userdata);
                 },
                 .UNCONSTRAINED => {
                     if (CAN_RELEASE) {
                         if (candidate.hole) |hole| {
-                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx);
+                            return PackedPos.new(claim_from_hole(&self.unconstrained_row, hole, candidate.size, &self.holes_pool, alloc), candidate.rotated, candidate.row_idx, userdata);
                         }
                     }
                     const pos = if (waste_mode == .LEAST_WASTE)
                         self.unconstrained_row.claim_pos_known_waste(candidate.size, candidate.waste, &self.total_wasted_area)
                     else
                         self.unconstrained_row.claim_pos(candidate.size, &self.total_wasted_area);
-                    return PackedPos.new(pos, candidate.rotated, candidate.row_idx);
+                    return PackedPos.new(pos, candidate.rotated, candidate.row_idx, userdata);
                 },
                 .NONE => unreachable,
             }
@@ -610,7 +645,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             return hole_rect.pos;
         }
 
-        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool, alloc: PassedAlloc) PackedPos {
+        fn claim_on_new_row(self: *Self, size: Vec, rotated: bool, alloc: PassedAlloc, userdata: Userdata) PackedPos {
             if (!self.unconstrained_row.is_empty()) {
                 const closed_row = self.unconstrained_row.extract_constrained_row(self.full_region);
                 self.constrained_rows.append_one(closed_row, alloc);
@@ -620,15 +655,16 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                 self.unconstrained_row.claim_pos_known_waste(size, 0, &self.total_wasted_area),
                 rotated,
                 self.constrained_rows.get_len(),
+                userdata,
             );
         }
 
-        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool, alloc: PassedAlloc) ?PackedPos {
+        inline fn try_claim_on_new_row(self: *Self, size: Vec, rot_size: Vec, allow_unrotated: bool, allow_rotated: bool, alloc: PassedAlloc, userdata: Userdata) ?PackedPos {
             if (allow_unrotated and self.unconstrained_row.can_fit_size_on_new_row(size)) {
-                return self.claim_on_new_row(size, false, alloc);
+                return self.claim_on_new_row(size, false, alloc, userdata);
             }
             if (allow_rotated and self.unconstrained_row.can_fit_size_on_new_row(rot_size)) {
-                return self.claim_on_new_row(rot_size, true, alloc);
+                return self.claim_on_new_row(rot_size, true, alloc, userdata);
             }
             return null;
         }
@@ -637,12 +673,14 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             pos: Vec = .{},
             is_rotated: bool = false,
             row_idx: IDX = 0,
+            userdata: Userdata,
 
-            pub fn new(pos: Vec, is_rotated: bool, row_idx: IDX) PackedPos {
+            pub fn new(pos: Vec, is_rotated: bool, row_idx: IDX, userdata: Userdata) PackedPos {
                 return PackedPos{
                     .pos = pos,
                     .is_rotated = is_rotated,
                     .row_idx = row_idx,
+                    .userdata = userdata,
                 };
             }
         };
@@ -650,12 +688,14 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             rect: Rect = .{ .pos = .{}, .size = .{} },
             is_rotated: bool = false,
             row_idx: IDX = 0,
+            userdata: Userdata,
 
-            pub fn new(rect: Rect, is_rotated: bool, row_idx: IDX) PackedRect {
+            pub fn new(rect: Rect, is_rotated: bool, row_idx: IDX, userdata: Userdata) PackedRect {
                 return PackedRect{
                     .rect = rect,
                     .is_rotated = is_rotated,
                     .row_idx = row_idx,
+                    .userdata = userdata,
                 };
             }
             pub fn to_packed_aabb(self: PackedRect) PackedAABB {
@@ -663,6 +703,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                     .aabb = self.rect.to_aabb2(),
                     .is_rotated = self.is_rotated,
                     .row_idx = self.row_idx,
+                    .userdata = self.userdata,
                 };
             }
 
@@ -700,12 +741,14 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             aabb: AABB = .{},
             is_rotated: bool = false,
             row_idx: IDX = 0,
+            userdata: Userdata,
 
-            pub fn new(aabb: AABB, is_rotated: bool, row_idx: IDX) PackedAABB {
+            pub fn new(aabb: AABB, is_rotated: bool, row_idx: IDX, userdata: Userdata) PackedAABB {
                 return PackedAABB{
                     .aabb = aabb,
                     .is_rotated = is_rotated,
                     .row_idx = row_idx,
+                    .userdata = userdata,
                 };
             }
             pub fn to_packed_rect(self: PackedAABB) PackedRect {
@@ -713,6 +756,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
                     .rect = self.aabb.to_rect2(),
                     .is_rotated = self.is_rotated,
                     .row_idx = self.row_idx,
+                    .userdata = self.userdata,
                 };
             }
 
