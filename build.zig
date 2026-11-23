@@ -5,6 +5,7 @@ const BreakoutAdvancedApp = @import("./build/BreakoutAdvanced.zig");
 const BreakoutAdvancedShaders = @import("./build/BreakoutAdvancedShaders.zig");
 const LayoutApp = @import("./build/Layout.zig");
 const SDL3 = @import("./build/SDL3.zig");
+const Box2D = @import("./build/Box2D.zig");
 const FuzzTests = @import("./build/FuzzTests.zig");
 const BenchTests = @import("./build/BenchTests.zig");
 const Tests = @import("./build/Tests.zig");
@@ -14,26 +15,38 @@ pub const Options = struct {
     TARGET: std.Build.ResolvedTarget,
     OPTIMIZE: std.lang.OptimizeMode,
     USE_LLVM: bool,
-    INCLUDE_SDL: bool,
     LINK_TIME_OPTIMIZE: std.zig.LtoMode,
     PREFERRED_LINKAGE: std.lang.LinkMode,
     STRIP_DEBUG: bool,
     POS_INDEPENDANT_CODE: bool,
-    SDL_EMSCRIPTEN_PTHREADS: bool,
-    SDL_INSTALL_BUILD_CONFIG_H: bool,
-    SDL_USER_HANDLES_MAIN: bool,
-    SDL_USER_PROVIDES_CALLBACKS: bool,
-    SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS: u32,
-};
-
-pub const OptionsInLib = struct {
-    USE_LLVM: bool,
+    // SDL options
     INCLUDE_SDL: bool,
     SDL_EMSCRIPTEN_PTHREADS: bool,
     SDL_INSTALL_BUILD_CONFIG_H: bool,
     SDL_USER_HANDLES_MAIN: bool,
     SDL_USER_PROVIDES_CALLBACKS: bool,
     SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS: u32,
+    // Box2D options
+    INCLUDE_BOX2D: bool,
+    BOX2D_DISABLE_SIMD: bool,
+    BOX2D_COMPILE_C_UNIT_TESTS: bool,
+    BOX2D_COMPILE_ZIG_UNIT_TESTS: bool,
+};
+
+pub const OptionsInLib = struct {
+    USE_LLVM: bool,
+    // SDL options
+    INCLUDE_SDL: bool,
+    SDL_EMSCRIPTEN_PTHREADS: bool,
+    SDL_INSTALL_BUILD_CONFIG_H: bool,
+    SDL_USER_HANDLES_MAIN: bool,
+    SDL_USER_PROVIDES_CALLBACKS: bool,
+    SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS: u32,
+    // Box2D options
+    INCLUDE_BOX2D: bool,
+    BOX2D_DISABLE_SIMD: bool,
+    BOX2D_COMPILE_C_UNIT_TESTS: bool,
+    BOX2D_COMPILE_ZIG_UNIT_TESTS: bool,
 };
 
 pub fn build(b: *std.Build) void {
@@ -55,22 +68,32 @@ pub fn build(b: *std.Build) void {
         .SDL_USER_HANDLES_MAIN = b.option(bool, "sdl-user-handles-main", "define `SDL_MAIN_HANDLED` when importing SDL (default: true)") orelse true,
         .SDL_USER_PROVIDES_CALLBACKS = b.option(bool, "sdl-user-provides-callbacks", "define `SDL_MAIN_USE_CALLBACKS` when importing SDL (default: false)") orelse false,
         .SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS = b.option(u32, "sdl-gfx-controller-max-storage-registers", "max number of storage registers that can exist in one shader (default: 64)\n\t(# sampled textures + # storage textures + # storage buffers)") orelse 64,
+        .INCLUDE_BOX2D = b.option(bool, "include-box2d", "include Box2D when building (default: true)") orelse true,
+        .BOX2D_DISABLE_SIMD = b.option(bool, "box2d-disable-simd", "disable Box2D SIMD math for compatibility (default: false)") orelse false,
+        .BOX2D_COMPILE_C_UNIT_TESTS = b.option(bool, "box2d-c-unit-tests", "compile Box2D C unit tests (default: false)") orelse false,
+        .BOX2D_COMPILE_ZIG_UNIT_TESTS = b.option(bool, "box2d-zig-unit-tests", "compile Box2D Zig unit tests (default: false)") orelse false,
     };
 
     const opts_in_lib = OptionsInLib{
+        .USE_LLVM = opts.USE_LLVM,
+        //
         .INCLUDE_SDL = opts.INCLUDE_SDL,
         .SDL_EMSCRIPTEN_PTHREADS = opts.SDL_EMSCRIPTEN_PTHREADS,
         .SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS = opts.SDL_GFX_CONTROLLER_MAX_STORAGE_REGISTERS,
         .SDL_INSTALL_BUILD_CONFIG_H = opts.SDL_INSTALL_BUILD_CONFIG_H,
         .SDL_USER_HANDLES_MAIN = opts.SDL_USER_HANDLES_MAIN,
         .SDL_USER_PROVIDES_CALLBACKS = opts.SDL_USER_PROVIDES_CALLBACKS,
-        .USE_LLVM = opts.USE_LLVM,
+        //
+        .INCLUDE_BOX2D = opts.INCLUDE_BOX2D,
+        .BOX2D_DISABLE_SIMD = opts.BOX2D_DISABLE_SIMD,
+        .BOX2D_COMPILE_C_UNIT_TESTS = opts.BOX2D_COMPILE_C_UNIT_TESTS,
+        .BOX2D_COMPILE_ZIG_UNIT_TESTS = opts.BOX2D_COMPILE_C_UNIT_TESTS,
     };
 
     const code_options = b.addOptions();
     code_options.addOption(OptionsInLib, "OPTS", opts_in_lib);
 
-    const LIBC = opts.INCLUDE_SDL;
+    const LIBC = opts.INCLUDE_SDL or opts.INCLUDE_BOX2D;
 
     //MAIN LIBRARY
     const goolib = b.addModule("Goolib", .{
@@ -86,6 +109,7 @@ pub fn build(b: *std.Build) void {
 
     //OPTIONAL DEPENDANCIES
     SDL3.sub_build(b, goolib, opts);
+    Box2D.sub_build(b, goolib, opts);
 
     //SAMPLE APPS
     BreakoutApp.sub_build(b, goolib, opts);

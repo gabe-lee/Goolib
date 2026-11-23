@@ -162,6 +162,12 @@ pub const LockKind = enum {
             .MUTEX, .RW_MUTEX, .KEYED_MUTEX, .KEYED_RW_MUTEX => Io,
         };
     }
+    pub fn null_io(comptime self: LockKind) self.io_type() {
+        return switch (comptime self) {
+            .NONE, .RW_SPIN_LOCK, .SPIN_LOCK, .KEYED_SPIN_LOCK, .KEYED_RW_SPIN_LOCK => {},
+            .MUTEX, .RW_MUTEX, .KEYED_MUTEX, .KEYED_RW_MUTEX => Root.DummyIo.io_undefined,
+        };
+    }
     pub fn get_lock_ptr(comptime self: LockKind, comptime USE_ASSERTS: bool, container: anytype, comptime field: []const u8) self.lock_ptr_type(USE_ASSERTS) {
         return switch (comptime self) {
             .NONE => {},
