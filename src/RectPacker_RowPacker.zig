@@ -150,7 +150,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         const InitAlloc = Alloc.InitAlloc;
         const HolePool = BitBlockPool(.{
             .ELEM = Hole,
-            .ALLOC_MODE = ALLOC_SOURCE,
+            .ALLOC_SOURCE = ALLOC_SOURCE,
             .BACK_POINT_STRATEGY = HOLE_POOL_BACK_STRATEGY,
             .IDX = IDX,
             .LOCK_MODE = LOCK_MODE,
@@ -385,7 +385,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
             if (selected.kind == .NONE) {
                 if (threshold_value != null) return null;
-                return self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated, alloc);
+                return self.try_claim_on_new_row(size, rot_size, allow_unrotated, allow_rotated, alloc, userdata);
             }
             if (waste == .LEAST_WASTE and best_threshold.kind == .NONE and selected.kind == .UNCONSTRAINED and selected.hole == null) {
                 const extended_threshold = doubled_threshold(threshold_value orelse self.default_height_fit_threshold);
@@ -1134,10 +1134,10 @@ pub fn RowPackedAtlas(
             self.packer.uninit(alloc);
         }
 
-        pub fn claim_rect(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedRect {
+        pub fn claim_rect(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc, userdata: Packer.Userdata) ?PackedRect {
             const hash_parts = Map.hash_parts(key);
             assert_with_reason(!self.hash_map.contains_hash_parts(key, hash_parts), @src(), "key `{}` is already claimed in the atlas", .{key});
-            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc);
+            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc, userdata);
             if (possible_rect) |packed_rect| {
                 self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, self.alloc.get_alloc(alloc));
                 return packed_rect;
@@ -1154,10 +1154,10 @@ pub fn RowPackedAtlas(
             const packed_rect = self.hash_map.remove_key(key);
             self.packer.release_rect(packed_rect, alloc);
         }
-        pub fn claim_aabb(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc) ?PackedAABB {
+        pub fn claim_aabb(self: *Self, key: KEY, size: Vec, threshold: Threshold, waste: WasteMode, rotation: RotationMode, alloc: PassedAlloc, userdata: Packer.Userdata) ?PackedAABB {
             const hash_parts = Map.hash_parts(key);
             assert_with_reason(!self.hash_map.contains_hash_parts(key, hash_parts), @src(), "key `{}` is already claimed in the atlas", .{key});
-            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc);
+            const possible_rect = self.packer.claim_rect(size, threshold, waste, rotation, alloc, userdata);
             if (possible_rect) |packed_rect| {
                 self.hash_map.insert_hash_parts(key, packed_rect, hash_parts, self.alloc.get_alloc(alloc));
                 return packed_rect.to_packed_aabb();

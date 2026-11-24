@@ -27,8 +27,16 @@ pub const RowPackerModule = @import("./RectPacker_RowPacker.zig");
 pub const RowPacker = RowPackerModule.RowPacker;
 pub const RowPackedAtlas = RowPackerModule.RowPackedAtlas;
 
+pub const RowArrayAtlasModule = @import("./RectPacker_LayeredRowPackedAtlas.zig");
+pub const RowArrayPacker = RowArrayAtlasModule.RowArrayPacker;
+pub const RowPackedArrayAtlas = RowArrayAtlasModule.RowPackedArrayAtlas;
+pub const ChannelRequest = RowArrayAtlasModule.ChannelRequest;
+pub const GrowMode = RowArrayAtlasModule.GrowMode;
+pub const RotationMode = RowArrayAtlasModule.RotationMode;
+
 comptime {
     if (build.is_test) {
         _ = @import("./RectPacker_RowPacker.zig");
+        _ = @import("./RectPacker_LayeredRowPackedAtlas.zig");
     }
 }

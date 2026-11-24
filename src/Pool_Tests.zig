@@ -487,7 +487,7 @@ const BitTrackedCachedPool = BitTrackedBlocksPool(.{
     .IDX = u32,
     .LOCK_MODE = .NO_LOCKS,
     .SLOTS_PER_BLOCK = 64,
-    .ALLOC_MODE = .CACHED_ALLOCATOR_INTERFACE,
+    .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE,
 });
 
 test "BitTrackedBlocksPool -> SLOTS_PER_BLOCK drives size and vals alignment" {
@@ -636,6 +636,35 @@ test "BitTrackedBlocksPool -> claim, write, release, and reuse" {
     for (reused) |slot| pool.release_slot(slot);
     for (slots[5..]) |slot| pool.release_slot(slot);
     try testing.expectEqual(@as(u32, @intCast(BLOCK_SLOTS)), pool.get_num_free());
+}
+
+test "BitTrackedBlocksPool -> slot index round trips across blocks" {
+    const Slot = *BitTrackedBasicPool.ELEM;
+    const N: usize = @as(usize, BitTrackedBasicPool.DATA_BLOCK_SLOT_LENGTH) + 10;
+
+    var pool: BitTrackedBasicPool = .{};
+    pool.init(0, testing.allocator, {});
+    defer pool.uninit(testing.allocator);
+
+    var slots: [N]Slot = undefined;
+    var indices: [N]BitTrackedBasicPool.IDX = undefined;
+    for (&slots, 0..) |*slot, i| {
+        slot.* = pool.claim_slot(testing.allocator);
+        slot.*.* = @intCast(i);
+
+        indices[i] = pool.slot_index(slot.*);
+        try testing.expectEqual(@as(BitTrackedBasicPool.IDX, @intCast(i)), indices[i]);
+        try testing.expect(pool.slot_from_index(indices[i]) == slot.*);
+    }
+
+    // The pool has grown and may have re-sorted its blocks. Indices captured
+    // before growth must still resolve to the same slots.
+    for (&slots, indices, 0..) |*slot, stored_idx, i| {
+        try testing.expectEqual(@as(BitTrackedBasicPool.IDX, @intCast(i)), stored_idx);
+        try testing.expectEqual(stored_idx, pool.slot_index(slot.*));
+        try testing.expect(pool.slot_from_index(stored_idx) == slot.*);
+        try testing.expectEqual(@as(BitTrackedBasicPool.IDX, @intCast(i)), pool.slot_from_index(stored_idx).*);
+    }
 }
 
 test "BitTrackedBlocksPool -> growth keeps values intact and release works across blocks" {
@@ -1014,7 +1043,7 @@ test "BitTrackedBlocksPool -> struct elements" {
         .IDX = u32,
         .LOCK_MODE = .NO_LOCKS,
         .SLOTS_PER_BLOCK = 320,
-        .ALLOC_MODE = .PASSED_ALLOCATOR_INTERFACE,
+        .ALLOC_SOURCE = .PASSED_ALLOCATOR_INTERFACE,
     });
 
     var pool: Pool = .{};
@@ -1049,7 +1078,7 @@ test "BitTrackedBlocksPool -> struct elements (u16 state int)" {
         .STATE_UINT = u16,
         .LOCK_MODE = .NO_LOCKS,
         .SLOTS_PER_BLOCK = 320,
-        .ALLOC_MODE = .PASSED_ALLOCATOR_INTERFACE,
+        .ALLOC_SOURCE = .PASSED_ALLOCATOR_INTERFACE,
     });
 
     var pool: Pool = .{};

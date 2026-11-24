@@ -1020,27 +1020,61 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn slice_never_null(self: Self, len: usize) SliceNeverNull {
             self.assert_not_null(@src());
 
-            const n = len;
             const p = self.ptr_many_never_null();
             if (comptime ZERO_SIZE_ELEM) {
                 if (comptime HAS_SENTINEL) {
-                    return p[0..n :SENTINEL];
+                    return p[0..len :SENTINEL];
                 } else {
-                    return p[0..n];
+                    return p[0..len];
                 }
             }
             if (comptime ASSERT_CONTIG) {
                 if (comptime HAS_SENTINEL) {
-                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * (n + 1)) - 1, @src());
-                } else if (n > 0) {
-                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * n) - 1, @src());
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * (len + 1)) - 1, @src());
+                } else if (len > 0) {
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * len) - 1, @src());
                 }
             }
             if (comptime HAS_SENTINEL) {
-                assert_with_reason(p[n] == SENTINEL, @src(), "the pointer type requires a sentinel, but the element at the 'len' index ({d}) did not equal the sentinel value {} (got {})", .{ n, SENTINEL, p[n] });
-                return p[0..n :SENTINEL];
+                assert_with_reason(p[len] == SENTINEL, @src(), "the pointer type requires a sentinel, but the element at the 'len' index ({d}) did not equal the sentinel value {} (got {})", .{ len, SENTINEL, p[len] });
+                return p[0..len :SENTINEL];
             } else {
-                return p[0..n];
+                return p[0..len];
+            }
+        }
+        pub inline fn slice_range(self: Self, start: usize, end_excluded: usize) Slice {
+            if (comptime CAN_BE_NULL) {
+                if (self.is_null()) return null;
+            }
+            return self.slice_range_never_null(start, end_excluded);
+        }
+        pub inline fn slice_range_or_null(self: Self, start: usize, end_excluded: usize) SliceNullable {
+            if (self.is_null()) return null;
+            return self.slice_range_never_null(start, end_excluded);
+        }
+        pub inline fn slice_range_never_null(self: Self, start: usize, end_excluded: usize) SliceNeverNull {
+            self.assert_not_null(@src());
+
+            const p = self.ptr_many_never_null();
+            if (comptime ZERO_SIZE_ELEM) {
+                if (comptime HAS_SENTINEL) {
+                    return p[start..end_excluded :SENTINEL];
+                } else {
+                    return p[start..end_excluded];
+                }
+            }
+            if (comptime ASSERT_CONTIG) {
+                if (comptime HAS_SENTINEL) {
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * (end_excluded + 1)) - 1, @src());
+                } else if (end_excluded > 0) {
+                    assert_contiguous(self.internal, .ADD, (ELEMENT_SIZE * end_excluded) - 1, @src());
+                }
+            }
+            if (comptime HAS_SENTINEL) {
+                assert_with_reason(p[end_excluded] == SENTINEL, @src(), "the pointer type requires a sentinel, but the element at the 'len' index ({d}) did not equal the sentinel value {} (got {})", .{ end_excluded, SENTINEL, p[end_excluded] });
+                return p[start..end_excluded :SENTINEL];
+            } else {
+                return p[start..end_excluded];
             }
         }
         pub inline fn slice_and_write_sentinel(self: Self, len: usize) Slice {
@@ -1257,6 +1291,11 @@ pub fn PointerAdvanced(comptime SOURCE_: PointerSource, comptime PTR_DEF_: MakeP
         pub inline fn to_non_null(self: Self) PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NEVER_NULL)) {
             if (comptime NEVER_NULL) return self;
             self.assert_not_null(@src());
+            return self.pointer_cast(PTR_DEF.with_nullability(.NEVER_NULL));
+        }
+        pub inline fn try_to_non_null(self: Self) ?PointerAdvanced(SOURCE, PTR_DEF.with_nullability(.NEVER_NULL)) {
+            if (comptime NEVER_NULL) return self;
+            if (self.is_null()) return null;
             return self.pointer_cast(PTR_DEF.with_nullability(.NEVER_NULL));
         }
 
