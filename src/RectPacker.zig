@@ -27,11 +27,11 @@ pub const RowPackerModule = @import("./RectPacker_RowPacker.zig");
 pub const RowPacker = RowPackerModule.RowPacker;
 pub const RowPackedAtlas = RowPackerModule.RowPackedAtlas;
 
-pub const RowArrayAtlasModule = @import("./RectPacker_LayeredRowPacker.zig");
-pub const LayeredRowPacker = RowArrayAtlasModule.LayeredRowPacker;
-pub const LayeredRowPackedAtlas = RowArrayAtlasModule.LayeredRowPackedAtlas;
-pub const GrowMode = RowArrayAtlasModule.GrowMode;
-pub const RotationMode = RowArrayAtlasModule.RotationMode;
+pub const LayeredRowPackerModule = @import("./RectPacker_LayeredRowPacker.zig");
+pub const LayeredRowPacker = LayeredRowPackerModule.LayeredRowPacker;
+pub const LayeredRowPackedAtlas = LayeredRowPackerModule.LayeredRowPackedAtlas;
+// pub const GrowMode = LayeredRowPackerModule.GrowMode;
+// pub const RotationMode = LayeredRowPackerModule.RotationMode;
 
 comptime {
     if (build.is_test) {

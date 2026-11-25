@@ -173,11 +173,20 @@ pub const PackerDefNoLocks = struct {
 /// Packs rects into horizontal shelves, like `RowPacker`, but over a variable
 /// number of equally sized layers.
 ///
-/// Every layer owns one active unconstrained shelf. Closed shelves from all
-/// layers are stored in one unified `rows` list, and each row records its
-/// owning layer. Row indices are stable, so packed rects only need a
-/// `location_info` of `(row_idx << 1) | is_rotated`; the layer index is
-/// hydrated through `rows[row_idx].layer_idx` when the rect is looked up.
+/// Packs rectangles into horizontal rows (shelves), filling each row from smaller x values
+/// to larger x values, and starting each new row at a larger y position. If no spot can be found,
+/// the user can allow adding an extra layer for more space.
+///
+/// The `Threshold` arguments are preferences, not hard limits. When a threshold is
+/// requested and no existing row has a compatible height within the threshold, a new row is started if
+/// there is vertical room; otherwise the least-waste (or first, depending on
+/// `WasteMode`) fitting row is used anyway. This packer works best with groups of
+/// rectangles that have relatively similar heights (or similar widths-to-heights
+/// and widths-to-widths with the `rotation` settings).
+///
+/// When constructed with `.CLAIM_AND_RELEASE`, a released rect becomes a hole in its
+/// row and later claims will fill holes before extending the row's unused tail.
+/// Individual live rects cannot be moved or resized.
 pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
     return struct {
         const Self = @This();
@@ -210,7 +219,7 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
         const ROTATION_MASK: ROW_IDX = 0b1;
         const LOCATION_ROW_SHIFT: comptime_int = 1;
         const MAX_ROW_INDEX: ROW_IDX = MathX.max_value(ROW_IDX) >> LOCATION_ROW_SHIFT;
-        const NULL_HOLE_IDX: ROW_IDX = HolePool.NULL_SLOT_IDX;
+        const NULL_HOLE_IDX: RECT_IDX = HolePool.NULL_SLOT_IDX;
         const MAX_HEIGHT: SIZE_TYPE = MathX.max_value(SIZE_TYPE);
 
         const RowList = ListFull(Row, ROW_IDX, .WHOLE_STRUCTS, .SERIAL_INDEXES, .OWNED_ALLOCATED, ALLOC_SOURCE);
@@ -283,8 +292,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
             LOCK_KIND.unlock_for_write(LOCK_ASSERT, &self.lock, self.io);
         }
 
-        /// Adds a new layer and returns its index. A layer starts with one
-        /// empty unconstrained row covering the packer's `layer_region`.
         pub fn add_layer(self: *Self, alloc: PassedAlloc) LAYER_IDX {
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -343,6 +350,7 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
             alloc: InitAlloc,
             io: LockIo,
         ) void {
+            self.lock = LOCK_INIT;
             self.io = io;
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -360,8 +368,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
             _ = self.add_layer_internal(passed);
         }
 
-        /// Resets all packing state and leaves the packer with one empty layer.
-        /// Existing `PackedRect` values are invalid after this call.
         pub fn reset(self: *Self, alloc: PassedAlloc) void {
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -381,12 +387,12 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
 
         pub fn uninit(self: *Self, alloc: PassedAlloc) void {
             self.lock_for_write();
-            defer self.unlock_for_write();
             self.rows.free_if_non_zero(alloc);
             self.layers.free_if_non_zero(alloc);
             if (comptime CAN_RELEASE) {
                 self.holes_pool.uninit(alloc);
             }
+            self.unlock_for_write();
             self.* = .{};
         }
 
@@ -408,7 +414,7 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
         }
 
         /// Claims a rect and returns the PackedRect (what is stored internally).
-        /// Use `locate_rect()` to get the layer index.
+        /// Use `hydrate_rect()` to get the layer index.
         ///
         /// A null result means no existing layer had a suitable spot. If
         /// `grow == .ADD_LAYER`, a new layer is appended and used as a last
@@ -553,7 +559,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
             size: Vec = .{},
             is_rotated: bool = false,
             waste: SIZE_TYPE = 0,
-            threshold_ok: bool = false,
 
             inline fn consider(self: *Candidate, waste_mode: WasteMode, candidate: Candidate) void {
                 if (self.kind == .NONE or (waste_mode == .LEAST_WASTE and candidate.waste < self.waste)) {
@@ -606,7 +611,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
                             .size = size,
                             .is_rotated = false,
                             .waste = if (waste_mode == .LEAST_WASTE) hole.wasted_area_if_claimed(size) else 0,
-                            .threshold_ok = true,
                         };
                         best_any.consider(waste_mode, candidate);
                         if (threshold_value != null) {
@@ -622,7 +626,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
                             .size = rot_size,
                             .is_rotated = true,
                             .waste = if (waste_mode == .LEAST_WASTE) hole.wasted_area_if_claimed(rot_size) else 0,
-                            .threshold_ok = true,
                         };
                         best_any.consider(waste_mode, candidate);
                         if (threshold_value != null) {
@@ -651,7 +654,6 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
             _ = self;
 
             if (allow_unrotated and row.can_fit_size(size)) {
-                const threshold_ok = if (threshold_value) |t| row.new_height_is_within_threshold(t, size.y) else true;
                 const candidate = Candidate{
                     .kind = .ROW_TAIL,
                     .row_idx = row_idx,
@@ -659,16 +661,16 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
                     .size = size,
                     .is_rotated = false,
                     .waste = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(size) else 0,
-                    .threshold_ok = threshold_ok,
                 };
                 best_any.consider(waste_mode, candidate);
-                if (threshold_ok) {
-                    best_threshold.consider(waste_mode, candidate);
+                if (threshold_value) |t| {
+                    if (row.new_height_is_within_threshold(t, size.y)) {
+                        best_threshold.consider(waste_mode, candidate);
+                    }
                 }
             }
 
             if (allow_rotated and row.can_fit_size(rot_size)) {
-                const threshold_ok = if (threshold_value) |t| row.new_height_is_within_threshold(t, rot_size.y) else true;
                 const candidate = Candidate{
                     .kind = .ROW_TAIL,
                     .row_idx = row_idx,
@@ -676,11 +678,12 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
                     .size = rot_size,
                     .is_rotated = true,
                     .waste = if (waste_mode == .LEAST_WASTE) row.wasted_area_if_claimed(rot_size) else 0,
-                    .threshold_ok = threshold_ok,
                 };
                 best_any.consider(waste_mode, candidate);
-                if (threshold_ok) {
-                    best_threshold.consider(waste_mode, candidate);
+                if (threshold_value) |t| {
+                    if (row.new_height_is_within_threshold(t, rot_size.y)) {
+                        best_threshold.consider(waste_mode, candidate);
+                    }
                 }
             }
         }
@@ -1060,20 +1063,13 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
         };
 
         /// A packed rect after its layer index has been hydrated from its row
-        /// index. The layer index is deliberately not part of `PackedRect`.
+        /// index. This is a one-way view for consumers: the row/location index
+        /// stays in `PackedRect`, so it cannot be reconstructed from this type.
         pub const HydratedRect = struct {
             rect: Rect = .{ .pos = .{}, .size = .{} },
             is_rotated: bool,
             layer_idx: LAYER_IDX = 0,
             userdata: Userdata,
-
-            pub fn to_packed(self: HydratedRect) PackedRect {
-                return PackedRect{
-                    .rect = self.rect,
-                    .location_info = self.location_info,
-                    .userdata = self.userdata,
-                };
-            }
 
             pub fn top_left(self: HydratedRect) Vec {
                 if (self.is_rotated) return self.rect.top_right();
@@ -1185,7 +1181,7 @@ pub fn LayeredRowPacker(comptime DEF: PackerDef) type {
                     .flat_tolerance = value.flat_tolerance * 2,
                     .percent = value.percent * 0.5,
                 },
-                else => @compileError("RowArrayPacker requires an integer or floating-point coordinate type"),
+                else => comptime assert_unreachable(@src(), "LayeredRowPacker requires an integer or floating-point coordinate type", .{}),
             };
         }
     };
@@ -1253,6 +1249,7 @@ pub fn LayeredRowPackedAtlas(
             alloc: InitAlloc,
             io: LockIo,
         ) void {
+            self.lock = LOCK_INIT;
             self.io = io;
             self.lock_for_write();
             defer self.unlock_for_write();

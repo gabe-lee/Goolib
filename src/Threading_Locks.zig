@@ -170,10 +170,8 @@ pub const LockKind = enum {
     }
     pub fn get_lock_ptr(comptime self: LockKind, comptime USE_ASSERTS: bool, container: anytype, comptime field: []const u8) self.lock_ptr_type(USE_ASSERTS) {
         return switch (comptime self) {
-            .NONE => {},
-            else => {
-                return &@field(container, field);
-            },
+            .NONE => @as(*void, undefined),
+            else => &@field(container, field),
         };
     }
     pub fn init_lock(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type(USE_ASSERTS) {

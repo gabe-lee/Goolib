@@ -1077,8 +1077,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         }
 
         pub fn deinit() void {
-            LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            LOCK_KIND.lock_for_write(true, &gbsa.lock, gbsa.io);
+            defer LOCK_KIND.unlock_for_write(true, &gbsa.lock, gbsa.io);
             for (gbsa.slab_tracker_ptr[0..gbsa.slab_tracker_len]) |slab| {
                 backing_free(slab.memory, slab.alignment);
             }
@@ -1191,8 +1191,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             }
         }
         pub fn alloc_raw(size: usize, alignment: ?Alignment) ?[*]u8 {
-            LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            LOCK_KIND.lock_for_write(true, &gbsa.lock, gbsa.io);
+            defer LOCK_KIND.unlock_for_write(true, &gbsa.lock, gbsa.io);
             if (size == 0) return Utils.invalid_ptr_many_align(u8, if (alignment) |a| a.toByteUnits() else 1);
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(size, a) else bucket_index_from_size(size);
             if (comptime TRACK_STATS) {
@@ -1289,8 +1289,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             return resize_raw(@alignCast(memory), new_len, alignment);
         }
         pub fn resize_raw(memory: []u8, new_len: usize, alignment: ?Alignment) bool {
-            LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            LOCK_KIND.lock_for_write(true, &gbsa.lock, gbsa.io);
+            defer LOCK_KIND.unlock_for_write(true, &gbsa.lock, gbsa.io);
             const old_bucket, const new_bucket = get: {
                 if (alignment) |a| break :get .{ bucket_index_from_size_align(memory.len, a), bucket_index_from_size_align(new_len, a) };
                 break :get .{ bucket_index_from_size(memory.len), bucket_index_from_size(new_len) };
@@ -1413,8 +1413,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             free_raw(@alignCast(memory), alignment);
         }
         pub fn free_raw(memory: []u8, alignment: ?Alignment) void {
-            LOCK_KIND.lock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            defer LOCK_KIND.unlock_for_write(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            LOCK_KIND.lock_for_write(true, &gbsa.lock, gbsa.io);
+            defer LOCK_KIND.unlock_for_write(true, &gbsa.lock, gbsa.io);
             if (memory.len == 0) return;
             const bucket_idx = if (alignment) |a| bucket_index_from_size_align(memory.len, a) else bucket_index_from_size(memory.len);
             if (bucket_idx < NUM_BUCKETS) {
@@ -1552,8 +1552,8 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
             log_alloc: Allocator,
             comptime log_name: []const u8,
         ) void {
-            LOCK_KIND.lock_for_read(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
-            defer LOCK_KIND.unlock_for_read(true, if (LOCK_KIND.has_lock()) &gbsa.lock else {}, gbsa.io);
+            LOCK_KIND.lock_for_read(true, &gbsa.lock, gbsa.io);
+            defer LOCK_KIND.unlock_for_read(true, &gbsa.lock, gbsa.io);
             log_buffer.clearRetainingCapacity();
 
             var total_slab_bytes: usize = 0;

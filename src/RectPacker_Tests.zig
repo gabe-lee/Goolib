@@ -33,6 +33,7 @@ const PackerU32 = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_
 const PackerU8 = RectPacker.RowPacker(.{ .SIZE_TYPE = u8, .IDX = u8, .RELEASE_MODE = .CLAIM_ONLY, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
 const PackerF32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
 const PackerU32Release = RectPacker.RowPacker(.{ .SIZE_TYPE = u32, .IDX = u8, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE });
+const PackerF32RwLock = RectPacker.RowPacker(.{ .SIZE_TYPE = f32, .IDX = u16, .RELEASE_MODE = .CLAIM_AND_RELEASE, .ALLOC_SOURCE = .CACHED_ALLOCATOR_INTERFACE, .LOCK_KIND = .RW_SPIN_LOCK });
 
 const VecF = Vec2.define_vec2_type(f32);
 const RectF = Rect2.define_rect2_type(f32);
@@ -95,6 +96,14 @@ const AtlasF32Manual = RectPacker.RowPackedAtlas(
     .{ .SIZE_TYPE = f32, .IDX = u16, .ALLOC_SOURCE = .PASSED_ALLOCATOR_INTERFACE },
 );
 
+const AtlasF32RwLock = RectPacker.RowPackedAtlas(
+    i32,
+    hashI32,
+    equalI32,
+    .{},
+    .{ .SIZE_TYPE = f32, .IDX = u16, .LOCK_KIND = .RW_SPIN_LOCK },
+);
+
 test "RowPacker -> shelf layout" {
     const alloc = std.testing.allocator;
     var packer: PackerF32 = undefined;
@@ -116,6 +125,23 @@ test "RowPacker -> shelf layout" {
     try std.testing.expectEqual(@as(u16, 5), packer.claim_count);
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
     try std.testing.expectEqual(@as(f32, 0), packer.total_wasted_area);
+}
+
+test "RowPacker -> rw spin lock variant claims and releases" {
+    const alloc = std.testing.allocator;
+    var packer: PackerF32RwLock = undefined;
+    packer.init(4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer packer.uninit({});
+
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
+    try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
+
+    packer.release_rect(b, {});
+    const c = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    try expectRectF(c.rect, RectF.new_xywh(40, 0, 40, 10));
+    try std.testing.expectEqual(@as(u16, 2), packer.claim_count);
 }
 
 test "RowPacker -> total_wasted_area accounts for exposed area" {
@@ -141,7 +167,7 @@ test "RowPacker -> forced rotation uses existing rows for square rects" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .IGNORE_WASTE, .ALWAYS_FORCE_90_DEGREE_ROTATION, {}, {}).?;
     try std.testing.expect(a.is_rotated);
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 40));
     try expectVecF(a.top_left(), VecF.new(20, 0));
@@ -668,6 +694,21 @@ test "RowPackedAtlas -> claim, lookup, and failed claims" {
     try std.testing.expectEqual(@as(u16, 3), atlas.packer.claim_count);
 }
 
+test "RowPackedAtlas -> rw spin lock variant claims, looks up, and releases" {
+    const alloc = std.testing.allocator;
+    var atlas: AtlasF32RwLock = undefined;
+    atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
+    defer atlas.uninit({});
+
+    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
+    try std.testing.expect(atlas.lookup_rect_if_exists(1).?.equals(a));
+
+    atlas.release_rect(1, {});
+    try std.testing.expect(atlas.lookup_rect_if_exists(1) == null);
+    try std.testing.expectEqual(@as(u16, 0), atlas.packer.claim_count);
+}
+
 test "RowPackedAtlas -> releasing a key reuses its hole" {
     const alloc = std.testing.allocator;
     var atlas: AtlasF32 = undefined;
@@ -693,33 +734,33 @@ test "RowPackedAtlas -> releasing a key reuses its hole" {
     try std.testing.expectEqual(@as(u16, 3), atlas.packer.claim_count);
 }
 
-test "RowPackedAtlas -> aabb claims are keyed and released" {
+test "RowPackedAtlas -> packed aabb conversion is keyed and released" {
     const alloc = std.testing.allocator;
     var atlas: AtlasF32 = undefined;
     atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit({});
 
-    const a = atlas.claim_aabb(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
-    const b = atlas.claim_aabb(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?.to_packed_aabb();
+    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?.to_packed_aabb();
     try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 40), a.aabb.x_max);
     try std.testing.expectEqual(@as(f32, 40), b.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 80), b.aabb.x_max);
 
-    try std.testing.expect(atlas.lookup_aabb_if_exists(1).?.equals(a));
-    try std.testing.expect(atlas.lookup_aabb_if_exists(2).?.equals(b));
-    try std.testing.expect(atlas.lookup_aabb_if_exists(3) == null);
+    try std.testing.expect(atlas.lookup_rect_if_exists(1).?.to_packed_aabb().equals(a));
+    try std.testing.expect(atlas.lookup_rect_if_exists(2).?.to_packed_aabb().equals(b));
+    try std.testing.expect(atlas.lookup_rect_if_exists(3) == null);
 
-    atlas.release_aabb(2, {});
-    try std.testing.expect(atlas.lookup_aabb_if_exists(2) == null);
+    atlas.release_rect(2, {});
+    try std.testing.expect(atlas.lookup_rect_if_exists(2) == null);
     try std.testing.expectEqual(@as(u16, 1), atlas.packer.claim_count);
 
-    const c = atlas.claim_aabb(3, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = atlas.claim_rect(3, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?.to_packed_aabb();
     try std.testing.expectEqual(@as(f32, 40), c.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 0), c.aabb.y_min);
     try std.testing.expectEqual(@as(f32, 80), c.aabb.x_max);
     try std.testing.expectEqual(@as(f32, 10), c.aabb.y_max);
-    try std.testing.expect(atlas.lookup_aabb_if_exists(3).?.equals(c));
+    try std.testing.expect(atlas.lookup_rect_if_exists(3).?.to_packed_aabb().equals(c));
 }
 
 test "RowPackedAtlas -> clear_entire_atlas drops keys and resets packing" {

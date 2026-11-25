@@ -122,15 +122,15 @@
 //     STORED_METRIC_MODE: StoredMetricMode = .UNSCALED_METRICS,
 //     /// Integer type to use for stable IDs for each unique
 //     /// glyph. If `null`, no stable IDs are included/stored
-//     /// 
+//     ///
 //     /// A stable ID is guaranteed not to change as long as a glyph
 //     /// exists in the atlas, even when the backing hash-map reallocates.
 //     /// Ids are recycled when glyphs are removed from the atlas, and
 //     /// new glyhps eagerly consume free IDs to save memory.
-//     /// 
+//     ///
 //     /// The use case for this is optimized rendering, where you use the
 //     /// glyph's stable ID as an index into a GPU storage buffer,
-//     /// and write the glyph's stable data (such as texture coords) 
+//     /// and write the glyph's stable data (such as texture coords)
 //     /// into that storage buffer, then instead of passing the entire glyph
 //     /// vertex data for every instance, you just pass the stable ID and
 //     /// lookup the data in the storage buffer.

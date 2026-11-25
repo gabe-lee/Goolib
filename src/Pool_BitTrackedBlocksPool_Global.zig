@@ -320,14 +320,14 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
 
                 pub fn is_valid(self: KeySelf) bool {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    defer POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    defer POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     if (self.block_idx >= POOL.pool.blocks_cap) return false;
                     const block = POOL.pool.blocks[self.block_idx];
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     if (block.gens[self.elem_idx] != self.gen) return false;
                     const elem_idx: usize = self.elem_idx;
                     const state_idx = elem_idx >> POOL.STATE_INT_BITS_SHIFT;
@@ -354,39 +354,39 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
 
                 pub fn get(self: KeySelf) T {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     return block.vals[self.elem_idx];
                 }
                 pub fn get_meta(self: KeySelf) META {
                     if (comptime !HAS_META) return {};
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     return block.meta[self.elem_idx];
                 }
                 pub fn get_val_and_meta(self: KeySelf) struct { T, META } {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     if (comptime HAS_META) {
                         return .{ block.vals[self.elem_idx], block.meta[self.elem_idx] };
@@ -395,50 +395,50 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     }
                 }
                 pub fn get_const_ptr_hold_locks(self: KeySelf) struct { *const T, LockPackage } {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     return .{ &block.vals[self.elem_idx], LockPackage{
                         .io = global.io,
-                        .e = if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {},
+                        .e = &block.val_locks[self.elem_idx],
                         .em = if (ELEM_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
+                        .b = &block.lock,
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
+                        .p = &POOL.pool.pool_lock,
                         .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
                 pub fn get_ptr_hold_locks(self: KeySelf) struct { *T, LockPackage } {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     return .{ &block.vals[self.elem_idx], LockPackage{
                         .io = global.io,
-                        .e = if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {},
+                        .e = &block.val_locks[self.elem_idx],
                         .em = if (ELEM_LOCK_MODE.has_lock()) .WRITE else .NONE,
-                        .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
+                        .b = &block.lock,
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
+                        .p = &POOL.pool.pool_lock,
                         .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
 
                 pub fn get_field(self: KeySelf, comptime field: POOL.FIELDS_ENUM) POOL.field_type(field) {
                     POOL.assert_field_access();
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
                         POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
@@ -447,11 +447,11 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
                 pub fn get_field_ptr_hold_lock(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *POOL.field_type(field), LockPackage } {
                     POOL.assert_field_access();
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
                         POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
@@ -459,21 +459,21 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     const ptr: *POOL.field_type(field) = &@field(&block.vals[self.elem_idx], @tagName(field));
                     return .{ ptr, LockPackage{
                         .io = global.io,
-                        .e = if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {},
+                        .e = &block.val_locks[self.elem_idx],
                         .em = if (ELEM_LOCK_MODE.has_lock()) .WRITE else .NONE,
-                        .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
+                        .b = &block.lock,
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
+                        .p = &POOL.pool.pool_lock,
                         .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
                 pub fn get_field_const_ptr_hold_locks(self: KeySelf, comptime field: POOL.FIELDS_ENUM) struct { *const POOL.field_type(field), LockPackage } {
                     POOL.assert_field_access();
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED) {
                         POOL.assert_tagged_field_active(std.meta.activeTag(block.vals[self.elem_idx]), field, @src());
@@ -481,49 +481,49 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                     const ptr: *const POOL.field_type(field) = &@field(&block.vals[self.elem_idx], @tagName(field));
                     return .{ ptr, LockPackage{
                         .io = global.io,
-                        .e = if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {},
+                        .e = &block.val_locks[self.elem_idx],
                         .em = if (ELEM_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .b = if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {},
+                        .b = &block.lock,
                         .bm = if (BLOCK_LOCK_MODE.has_lock()) .READ else .NONE,
-                        .p = if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {},
+                        .p = &POOL.pool.pool_lock,
                         .pm = if (POOL_LOCK_MODE.has_lock()) .READ else .NONE,
                     } };
                 }
 
                 pub fn set(self: KeySelf, val: T) void {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     block.vals[self.elem_idx] = val;
                 }
                 pub fn set_meta(self: KeySelf, meta: META) void {
                     if (comptime !HAS_META) return;
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     block.meta[self.elem_idx] = meta;
                 }
                 pub fn set_val_and_meta(self: KeySelf, val: T, meta: META) void {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     block.vals[self.elem_idx] = val;
                     if (comptime HAS_META) {
@@ -532,14 +532,14 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
                 pub fn set_field(self: KeySelf, comptime field: POOL.FIELDS_ENUM, val: POOL.field_type(field)) void {
                     POOL.assert_field_access();
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
-                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io);
-                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
-                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io);
+                    POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io);
+                    BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    defer BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                    ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
+                    defer ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io);
                     self.assert_valid(block);
                     if (comptime POOL.FA_MODE == .UNION_TAGGED or POOL.FA_MODE == .UNION_UNTAGGED) {
                         block.vals[self.elem_idx] = @unionInit(POOL.TYPE, @tagName(field), val);
@@ -550,29 +550,29 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
 
                 pub fn release_advanced(self: KeySelf, comptime pool_lock_mode: PoolLockMode, comptime block_lock_mode: BlockLockMode, comptime elem_lock_mode: ElemLockMode) void {
                     switch (comptime pool_lock_mode) {
-                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io),
+                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io),
                         .IGNORE_POOL_LOCKS => {},
                     }
                     defer switch (comptime pool_lock_mode) {
-                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &POOL.pool.pool_lock else {}, global.io),
+                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &POOL.pool.pool_lock, global.io),
                         .IGNORE_POOL_LOCKS => {},
                     };
                     assert_with_reason(self.block_idx < POOL.pool.blocks_cap, @src(), "key block index ({d}) is out of bounds for block count ({d})", .{ self.block_idx, POOL.pool.blocks_cap });
                     const block = POOL.pool.blocks[self.block_idx];
                     switch (comptime block_lock_mode) {
-                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io),
+                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io),
                         .IGNORE_BLOCK_LOCKS => {},
                     }
                     defer switch (comptime block_lock_mode) {
-                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io),
+                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io),
                         .IGNORE_BLOCK_LOCKS => {},
                     };
                     switch (comptime elem_lock_mode) {
-                        .CHECK_ELEM_LOCKS => ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io),
+                        .CHECK_ELEM_LOCKS => ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io),
                         .IGNORE_ELEM_LOCKS => {},
                     }
                     defer switch (comptime elem_lock_mode) {
-                        .CHECK_ELEM_LOCKS => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &block.val_locks[self.elem_idx] else {}, global.io),
+                        .CHECK_ELEM_LOCKS => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.val_locks[self.elem_idx], global.io),
                         .IGNORE_ELEM_LOCKS => {},
                     };
                     const state_info = self.assert_valid_get_info(block);
@@ -776,21 +776,21 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
 
                 pub fn claim_slot_advanced(comptime pool_lock_mode: PoolLockMode, comptime block_lock_mode: BlockLockMode) Key(TYPE) {
                     switch (comptime pool_lock_mode) {
-                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io),
                         .IGNORE_POOL_LOCKS => {},
                     }
                     defer switch (comptime pool_lock_mode) {
-                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                        .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io),
                         .IGNORE_POOL_LOCKS => {},
                     };
                     Sub.ensure_free_slots_ignore_pool_locks(1);
                     for (pool.blocks[0..pool.blocks_cap], 0..) |block, block_idx| {
                         switch (comptime block_lock_mode) {
-                            .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io),
+                            .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io),
                             .IGNORE_BLOCK_LOCKS => {},
                         }
                         defer switch (comptime block_lock_mode) {
-                            .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io),
+                            .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io),
                             .IGNORE_BLOCK_LOCKS => {},
                         };
                         if (block.num_free == 0) continue;
@@ -879,14 +879,14 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
 
                 pub inline fn get_num_free() ElemIdx {
-                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
-                    defer POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
+                    defer POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
                     return pool.pool_num_free;
                 }
 
                 pub inline fn ensure_free_slots(needed_free_slots: ElemIdx) void {
-                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
-                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
+                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
                     Sub.ensure_free_slots_ignore_pool_locks(needed_free_slots);
                 }
 
@@ -901,11 +901,11 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
 
                 pub fn clear_all_blocks() void {
-                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
-                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
+                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
                     for (pool.blocks[0..pool.blocks_cap]) |block| {
-                        BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                        defer BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                        BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                        defer BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io);
                         if (comptime ELEM_LOCK_MODE.has_lock()) {
                             for (block.val_locks[0..ELEMENTS_PER_BLOCK]) |*elem_lock| {
                                 ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, elem_lock, global.io);
@@ -926,12 +926,12 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                 }
 
                 pub fn uninit() void {
-                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
-                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io);
+                    POOL_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
+                    defer POOL_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io);
                     if (pool.blocks_cap > 0) {
                         for (pool.blocks[0..pool.blocks_cap]) |block| {
-                            BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
-                            BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &block.lock else {}, global.io);
+                            BLOCK_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io);
+                            BLOCK_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &block.lock, global.io);
                             global.alloc.destroy(block);
                         }
                         global.alloc.free(pool.blocks[0..pool.blocks_cap]);
@@ -970,13 +970,13 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                         pub fn init_and_lock() IterSelf {
                             var self = IterSelf{};
                             switch (comptime pool_lock) {
-                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io),
                                 .IGNORE_POOL_LOCKS => {},
                             }
                             if (pool.blocks_cap > 0) {
                                 self.block = pool.blocks[0];
                                 switch (comptime block_lock) {
-                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &self.block.lock, global.io),
                                     .IGNORE_BLOCK_LOCKS => {},
                                 }
                                 self.block_is_locked = true;
@@ -991,8 +991,8 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                             if (self.elem_is_locked) {
                                 switch (comptime elem_lock) {
                                     .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
-                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
-                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &self.block.val_locks[self.locked_elem_idx], global.io),
+                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &self.block.val_locks[self.locked_elem_idx], global.io),
                                     },
                                     .IGNORE_ELEM_LOCKS => {},
                                 }
@@ -1007,8 +1007,8 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                         const first_used_slot_within_block: ElemIdx = @intCast((self.state_idx * SLOT_STEP_PER_STATE_GROUP) + first_used_slot_bit_offset);
                                         switch (comptime elem_lock) {
                                             .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
-                                                .VAL, .CONST_PTR => ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[first_used_slot_within_block] else {}, global.io),
-                                                .PTR => ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[first_used_slot_within_block] else {}, global.io),
+                                                .VAL, .CONST_PTR => ELEM_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &self.block.val_locks[first_used_slot_within_block], global.io),
+                                                .PTR => ELEM_LOCK_MODE.lock_for_write_io(USE_LOCK_ASSERTS, &self.block.val_locks[first_used_slot_within_block], global.io),
                                             },
                                             .IGNORE_ELEM_LOCKS => {},
                                         }
@@ -1031,7 +1031,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                 }
                                 if (self.block_is_locked) {
                                     switch (comptime block_lock) {
-                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &self.block.lock, global.io),
                                         .IGNORE_BLOCK_LOCKS => {},
                                     }
                                     self.block_is_locked = false;
@@ -1040,7 +1040,7 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                                 if (self.block_idx < pool.blocks_cap) {
                                     self.block = pool.blocks[self.block_idx];
                                     switch (comptime block_lock) {
-                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                        .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.lock_for_read_io(USE_LOCK_ASSERTS, &self.block.lock, global.io),
                                         .IGNORE_BLOCK_LOCKS => {},
                                     }
                                     self.block_is_locked = true;
@@ -1058,20 +1058,20 @@ pub fn GlobalMultiTypeBitTrackedPool(comptime GDEF: GlobalDef) type {
                             if (self.elem_is_locked) {
                                 switch (comptime elem_lock) {
                                     .CHECK_ELEM_LOCKS => switch (comptime slot_mode) {
-                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
-                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, if (ELEM_LOCK_MODE.has_lock()) &self.block.val_locks[self.locked_elem_idx] else {}, global.io),
+                                        .VAL, .CONST_PTR => ELEM_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &self.block.val_locks[self.locked_elem_idx], global.io),
+                                        .PTR => ELEM_LOCK_MODE.unlock_for_write_io(USE_LOCK_ASSERTS, &self.block.val_locks[self.locked_elem_idx], global.io),
                                     },
                                     .IGNORE_ELEM_LOCKS => {},
                                 }
                             }
                             if (self.block_is_locked) {
                                 switch (comptime block_lock) {
-                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (BLOCK_LOCK_MODE.has_lock()) &self.block.lock else {}, global.io),
+                                    .CHECK_BLOCK_LOCKS => BLOCK_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &self.block.lock, global.io),
                                     .IGNORE_BLOCK_LOCKS => {},
                                 }
                             }
                             switch (comptime pool_lock) {
-                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, if (POOL_LOCK_MODE.has_lock()) &pool.pool_lock else {}, global.io),
+                                .CHECK_POOL_LOCKS => POOL_LOCK_MODE.unlock_for_read_io(USE_LOCK_ASSERTS, &pool.pool_lock, global.io),
                                 .IGNORE_POOL_LOCKS => {},
                             }
                             self.* = IterSelf{};

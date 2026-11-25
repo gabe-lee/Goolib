@@ -321,6 +321,10 @@ test "Threading -> LockKind helper types and initialization" {
                 _ = lock_ptr;
             } else {
                 try testing.expect(Lock == void);
+                try testing.expect(KIND.lock_ptr_type(USE_ASSERTS) == *void);
+                try testing.expect(KIND.opt_lock_ptr_type(USE_ASSERTS) == ?*void);
+                const lock_ptr: *void = KIND.get_lock_ptr(USE_ASSERTS, &lock, "lock");
+                _ = lock_ptr;
             }
         }
     }

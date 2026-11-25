@@ -69,7 +69,6 @@ pub const ReleaseMode = enum {
 pub const PackerDef = struct {
     SIZE_TYPE: type,
     IDX: type = u32,
-    LAYER_IDX: type = u8,
     RELEASE_MODE: ReleaseMode = .CLAIM_AND_RELEASE,
     ALLOC_SOURCE: AllocSource = .CACHED_ALLOCATOR_INTERFACE,
     LOCK_KIND: LockKind = .NONE,
@@ -89,7 +88,6 @@ pub const PackerDef = struct {
         return PackerDef{
             .SIZE_TYPE = self.SIZE_TYPE,
             .IDX = self.IDX,
-            .LAYER_IDX = self.LAYER_IDX,
             .RELEASE_MODE = self.RELEASE_MODE,
             .ALLOC_SOURCE = self.ALLOC_SOURCE,
             .LOCK_KIND = .NONE,
@@ -253,6 +251,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         }
 
         pub fn init(self: *Self, row_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: LockIo) void {
+            self.lock = LOCK_INIT;
             self.io = io;
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -269,6 +268,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         }
         pub fn init_empty(self: *Self, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: LockIo) void {
+            self.lock = LOCK_INIT;
             self.io = io;
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -287,6 +287,10 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
         pub fn reset(self: *Self) void {
             self.lock_for_write();
             defer self.unlock_for_write();
+            self.reset_no_lock();
+        }
+
+        fn reset_no_lock(self: *Self) void {
             self.constrained_rows.clear();
             self.unconstrained_row = UnconstrainedRow.init(self.full_region);
             self.total_wasted_area = 0;
@@ -298,11 +302,11 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
 
         pub fn uninit(self: *Self, alloc: PassedAlloc) void {
             self.lock_for_write();
-            defer self.unlock_for_write();
             self.constrained_rows.free_if_non_zero(alloc);
             if (comptime CAN_RELEASE) {
                 self.holes_pool.uninit(alloc);
             }
+            self.unlock_for_write();
             self.* = .{};
         }
 
@@ -1021,8 +1025,6 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             }
         };
 
-        /// Releases a previously claimed rect so its area can be reused. Only valid
-        /// when the packer was constructed with `.CLAIM_AND_RELEASE`.
         pub fn release_rect(self: *Self, rect: PackedRect, alloc: PassedAlloc) void {
             if (comptime CAN_RELEASE) {
                 self.lock_for_write();
@@ -1040,7 +1042,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             assert_with_reason(self.claim_count > 0, @src(), "no rectangles claimed in packer, nothing to release", .{});
             self.claim_count -= 1;
             if (self.claim_count == 0) {
-                self.reset();
+                self.reset_no_lock();
                 return;
             }
             const new_hole = self.holes_pool.claim_slot(alloc);
@@ -1070,7 +1072,7 @@ pub fn RowPacker(comptime DEF: PackerDef) type {
             assert_with_reason(self.claim_count > 0, @src(), "no rectangles claimed in packer, nothing to release", .{});
             self.claim_count -= 1;
             if (self.claim_count == 0) {
-                self.reset();
+                self.reset_no_lock();
                 return;
             }
             const new_hole = self.holes_pool.claim_slot(alloc);
@@ -1151,6 +1153,7 @@ pub fn RowPackedAtlas(
         }
 
         pub fn init(self: *Self, hash_map_cap: IDX, row_pack_cap: IDX, hole_cap: IDX, region: Rect, default_height_fit_threshold: ThresholdVal, alloc: InitAlloc, io: LockIo) void {
+            self.lock = LOCK_INIT;
             self.io = io;
             self.lock_for_write();
             defer self.unlock_for_write();
@@ -1186,9 +1189,13 @@ pub fn RowPackedAtlas(
             return null;
         }
         pub fn lookup_rect_if_exists(self: *Self, key: KEY) ?PackedRect {
+            self.lock_for_read();
+            defer self.unlock_for_read();
             return self.hash_map.get_if_exists(key);
         }
         pub fn lookup_rect(self: *Self, key: KEY) PackedRect {
+            self.lock_for_read();
+            defer self.unlock_for_read();
             return self.hash_map.get(key);
         }
         pub fn release_rect(self: *Self, key: KEY, alloc: PassedAlloc) void {
