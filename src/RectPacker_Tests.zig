@@ -101,11 +101,11 @@ test "RowPacker -> shelf layout" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const e = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const e = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
 
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
@@ -124,13 +124,13 @@ test "RowPacker -> total_wasted_area accounts for exposed area" {
     packer.init(2, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    _ = packer.claim_rect(VecF.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(50, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    _ = packer.claim_rect(VecF.new(50, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(50, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(50, 0, 50, 20));
     // The first 50x10 rect is exposed by 10 units of height.
     try std.testing.expectEqual(@as(f32, 500), packer.total_wasted_area);
 
-    const c = packer.claim_rect(VecF.new(30, 30), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecF.new(30, 30), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 20, 30, 30));
     try std.testing.expectEqual(@as(f32, 500), packer.total_wasted_area);
 }
@@ -141,7 +141,7 @@ test "RowPacker -> forced rotation uses existing rows for square rects" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .ignore_waste(), .always_force_90_degree_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}).?;
     try std.testing.expect(a.is_rotated);
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 40));
     try expectVecF(a.top_left(), VecF.new(20, 0));
@@ -151,7 +151,7 @@ test "RowPacker -> forced rotation uses existing rows for square rects" {
 
     // A square under forced rotation must be able to use the open row instead of
     // always falling through to the "new row" path.
-    const b = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .ignore_waste(), .always_force_90_degree_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .IGNORE_WASTE, .ALWAYS_FORCE_90_DEGREE_ROTATION, {}, {}).?;
     try std.testing.expect(b.is_rotated);
     try expectRectF(b.rect, RectF.new_xywh(20, 0, 10, 10));
     try std.testing.expectEqual(@as(u16, 0), packer.constrained_rows.get_len());
@@ -163,16 +163,16 @@ test "RowPacker -> rotated sizes cannot overflow the region on a new row" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(50, 60), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(50, 60), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 50, 60));
 
     // Only the rotated orientation (40x80) passes the broad bounds check, but it
     // does not fit the remaining height. The unrotated orientation (80x40) is
     // wider than the region, so this must not fit anywhere.
-    try std.testing.expect(packer.claim_rect(VecF.new(80, 40), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}, {}) == null);
+    try std.testing.expect(packer.claim_rect(VecF.new(80, 40), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}) == null);
     try std.testing.expectEqual(@as(u16, 1), packer.claim_count);
 
-    const c = packer.claim_rect(VecF.new(40, 40), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecF.new(40, 40), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 60, 40, 40));
 }
 
@@ -182,22 +182,22 @@ test "RowPacker -> threshold starts a new row, constrained rows are reused" {
     packer.init(8, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 10));
 
     // Much taller than the open row; because no row satisfies the default
     // threshold, a new row is opened and the first one is closed as a
     // constrained row.
-    const b = packer.claim_rect(VecF.new(20, 30), .default_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecF.new(20, 30), .default_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(0, 10, 20, 30));
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 
     // Fits the 10-tall constrained row, and is within the default threshold,
     // while the open 30-tall row is outside of it.
-    const c = packer.claim_rect(VecF.new(30, 10), .default_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecF.new(30, 10), .default_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(20, 0, 30, 10));
 
-    const d = packer.claim_rect(VecF.new(20, 10), .default_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(20, 10), .default_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(50, 0, 20, 10));
 
     try std.testing.expectEqual(@as(f32, 0), packer.total_wasted_area);
@@ -209,12 +209,12 @@ test "RowPacker -> final-pass heuristic opens a new row when ignoring thresholds
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 20, 10));
 
     // The rect fits the open row, but its height is far outside of the row's
     // height range, so the final-pass heuristic starts a new row instead.
-    const b = packer.claim_rect(VecF.new(20, 30), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecF.new(20, 30), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(0, 10, 20, 30));
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
     try std.testing.expectEqual(@as(f32, 0), packer.total_wasted_area);
@@ -226,13 +226,13 @@ test "RowPacker -> zero initial capacity grows on demand" {
     packer.init(0, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
-    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
-    const c = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 10, 40, 10));
-    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 10, 40, 10));
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 }
@@ -243,12 +243,12 @@ test "RowPacker -> unsigned integer coordinates" {
     packer.init(4, 0, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    _ = packer.claim_rect(VecU.new(50, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecU.new(50, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    _ = packer.claim_rect(VecU.new(50, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecU.new(50, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectU(b.rect, RectU.new_xywh(50, 0, 50, 20));
     try std.testing.expectEqual(@as(u32, 500), packer.total_wasted_area);
 
-    const c = packer.claim_rect(VecU.new(30, 30), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecU.new(30, 30), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectU(c.rect, RectU.new_xywh(0, 20, 30, 30));
     try std.testing.expectEqual(@as(u32, 500), packer.total_wasted_area);
 }
@@ -259,10 +259,10 @@ test "RowPacker -> respects the region position" {
     packer.init(2, 0, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(10, 20, 60, 10));
 
-    const b = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(10, 30, 60, 10));
 }
 
@@ -272,7 +272,7 @@ test "RowPacker -> claim_aabb rotates with the rect" {
     packer.init(2, 0, RectF.new_xywh(0, 0, 50, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_aabb(VecF.new(80, 40), .ignore_threshold(), .ignore_waste(), .allow_90_degree_rotation(), {}, {}).?;
+    const a = packer.claim_aabb(VecF.new(80, 40), .ignore_threshold(), .IGNORE_WASTE, .ALLOW_90_DEGREE_ROTATION, {}, {}).?;
     try std.testing.expect(a.is_rotated);
     try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 0), a.aabb.y_min);
@@ -286,8 +286,8 @@ test "RowPacker -> reset clears all state" {
     packer.init(2, 0, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
-    _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    _ = packer.claim_rect(VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(u16, 2), packer.claim_count);
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 
@@ -296,7 +296,7 @@ test "RowPacker -> reset clears all state" {
     try std.testing.expectEqual(@as(u16, 0), packer.constrained_rows.get_len());
     try std.testing.expectEqual(@as(f32, 0), packer.total_wasted_area);
 
-    const a = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(10, 20, 10, 10));
 }
 
@@ -307,21 +307,21 @@ test "RowPacker -> least waste picks between constrained rows and the open row" 
     defer packer.uninit({});
 
     // Build two constrained rows with different heights plus an open row.
-    _ = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(20, 30), .custom_threshold(1.0, 1), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    _ = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(20, 30), .custom_threshold(1.0, 1), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(b.rect, RectF.new_xywh(0, 10, 20, 30));
-    const d = packer.claim_rect(VecF.new(20, 20), .custom_threshold(1.0, 1), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(20, 20), .custom_threshold(1.0, 1), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(0, 40, 20, 20));
     try std.testing.expectEqual(@as(u16, 2), packer.constrained_rows.get_len());
 
     // Zero waste in the 10-tall constrained row beats the 30-tall constrained
     // row (400) and the 20-tall open row (200).
-    const e = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const e = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(e.rect, RectF.new_xywh(20, 0, 20, 10));
 
     // The 10-tall row is now too narrow. The open row has less waste (800)
     // than the 30-tall constrained row (1600).
-    const f = packer.claim_rect(VecF.new(80, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const f = packer.claim_rect(VecF.new(80, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(f.rect, RectF.new_xywh(20, 40, 80, 10));
     try std.testing.expectEqual(@as(f32, 800), packer.total_wasted_area);
 }
@@ -334,11 +334,11 @@ test "RowPacker -> final-pass threshold doubling saturates for small ints" {
     packer.init(2, 0, RectU8.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 200), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecU8.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecU8.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(u8, 0), a.rect.pos.x);
     try std.testing.expectEqual(@as(u8, 0), a.rect.pos.y);
 
-    const b = packer.claim_rect(VecU8.new(20, 12), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const b = packer.claim_rect(VecU8.new(20, 12), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(u8, 20), b.rect.pos.x);
     try std.testing.expectEqual(@as(u8, 0), b.rect.pos.y);
     try std.testing.expectEqual(@as(u8, 40), packer.total_wasted_area);
@@ -352,13 +352,13 @@ test "RowPacker -> randomized invariants across modes" {
     const random = prng.random();
 
     const rotations = [_]RectPacker.RowPackerModule.RotationMode{
-        .do_not_allow_rotation(),
-        .allow_90_degree_rotation(),
-        .always_force_90_degree_rotation(),
+        .DO_NOT_ALLOW_ROTATION,
+        .ALLOW_90_DEGREE_ROTATION,
+        .ALWAYS_FORCE_90_DEGREE_ROTATION,
     };
     const wastes = [_]RectPacker.RowPackerModule.WasteMode{
-        .ignore_waste(),
-        .least_waste(),
+        .IGNORE_WASTE,
+        .LEAST_WASTE,
     };
     const thresholds = [_]PackerF32.Threshold{
         .ignore_threshold(),
@@ -424,7 +424,7 @@ test "RowPacker -> claimed rects stay in bounds and do not overlap" {
     var claimed: [sizes.len]RectF = undefined;
     var count: usize = 0;
     for (sizes) |size| {
-        const result = packer.claim_rect(size, .default_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}) orelse return error.DidNotFit;
+        const result = packer.claim_rect(size, .default_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}) orelse return error.DidNotFit;
         const rect = result.rect;
         try std.testing.expect(rect.pos.x >= region.pos.x);
         try std.testing.expect(rect.pos.y >= region.pos.y);
@@ -445,9 +445,9 @@ test "RowPacker -> released rect is reused from its hole in the open row" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = packer.claim_rect(VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 10));
@@ -456,7 +456,7 @@ test "RowPacker -> released rect is reused from its hole in the open row" {
     try std.testing.expectEqual(@as(u16, 2), packer.claim_count);
 
     // The row tail is full, so the only fitting space is the released hole.
-    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 0, 40, 10));
     try std.testing.expectEqual(@as(u16, 3), packer.claim_count);
 }
@@ -467,27 +467,27 @@ test "RowPacker -> claiming a smaller rect splits a hole into reusable remainder
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = packer.claim_rect(VecF.new(20, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = packer.claim_rect(VecF.new(20, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 20));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 20));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 20));
 
     packer.release_rect(b, {});
 
-    const d = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 0, 10, 10));
 
     // The 40x20 hole was split into a 30x20 right strip and a 10x10 bottom strip.
-    const e = packer.claim_rect(VecF.new(30, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const e = packer.claim_rect(VecF.new(30, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(e.rect, RectF.new_xywh(50, 0, 30, 20));
 
-    const f = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const f = packer.claim_rect(VecF.new(10, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(f.rect, RectF.new_xywh(40, 10, 10, 10));
 
     // All space in the first shelf is occupied again; the next claim starts a new row.
-    const g = packer.claim_rect(VecF.new(1, 1), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const g = packer.claim_rect(VecF.new(1, 1), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(g.rect, RectF.new_xywh(0, 20, 1, 1));
 }
 
@@ -497,19 +497,19 @@ test "RowPacker -> holes survive when the open row becomes a constrained row" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     packer.release_rect(b, {});
 
     // Force the open row to close; its hole must move to the constrained row.
-    const c = packer.claim_rect(VecF.new(100, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecF.new(100, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 10, 100, 20));
     try std.testing.expectEqual(@as(u16, 1), c.row_idx);
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 
-    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 0, 40, 10));
 }
 
@@ -519,9 +519,9 @@ test "RowPacker -> releasing every rect in a constrained row makes the shelf reu
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = packer.claim_rect(VecF.new(40, 20), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 10, 40, 20));
     try std.testing.expectEqual(@as(u16, 1), packer.constrained_rows.get_len());
 
@@ -529,7 +529,7 @@ test "RowPacker -> releasing every rect in a constrained row makes the shelf reu
     packer.release_rect(b, {});
     try std.testing.expectEqual(@as(u16, 1), packer.claim_count);
 
-    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = packer.claim_rect(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(0, 0, 40, 10));
 }
 
@@ -539,13 +539,13 @@ test "RowPacker -> release_aabb fills its hole" {
     packer.init(4, 0, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 40), b.aabb.x_min);
 
     packer.release_aabb(b, {});
-    const c = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_aabb(VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(f32, 40), c.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 0), c.aabb.y_min);
     try std.testing.expectEqual(@as(f32, 80), c.aabb.x_max);
@@ -558,13 +558,13 @@ test "RowPacker -> release works with unsigned coordinates" {
     packer.init(2, 0, RectU.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer packer.uninit({});
 
-    const a = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectU(a.rect, RectU.new_xywh(0, 0, 40, 10));
     try expectRectU(b.rect, RectU.new_xywh(40, 0, 40, 10));
 
     packer.release_rect(b, {});
-    const c = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = packer.claim_rect(VecU.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectU(c.rect, RectU.new_xywh(40, 0, 40, 10));
 }
 
@@ -575,13 +575,13 @@ test "RowPacker -> randomized release and reclaim invariants" {
     const random = prng.random();
 
     const rotations = [_]RectPacker.RowPackerModule.RotationMode{
-        .do_not_allow_rotation(),
-        .allow_90_degree_rotation(),
-        .always_force_90_degree_rotation(),
+        .DO_NOT_ALLOW_ROTATION,
+        .ALLOW_90_DEGREE_ROTATION,
+        .ALLOW_90_DEGREE_ROTATION,
     };
     const wastes = [_]RectPacker.RowPackerModule.WasteMode{
-        .ignore_waste(),
-        .least_waste(),
+        .IGNORE_WASTE,
+        .LEAST_WASTE,
     };
     const thresholds = [_]PackerF32Release.Threshold{
         .ignore_threshold(),
@@ -649,9 +649,9 @@ test "RowPackedAtlas -> claim, lookup, and failed claims" {
     atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit({});
 
-    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = atlas.claim_rect(3, VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = atlas.claim_rect(3, VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 10));
@@ -663,7 +663,7 @@ test "RowPackedAtlas -> claim, lookup, and failed claims" {
     try std.testing.expect(atlas.lookup_rect_if_exists(4) == null);
 
     // A failed claim must not leave a key behind in the hash map.
-    try std.testing.expect(atlas.claim_rect(4, VecF.new(200, 200), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}) == null);
+    try std.testing.expect(atlas.claim_rect(4, VecF.new(200, 200), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}) == null);
     try std.testing.expect(atlas.lookup_rect_if_exists(4) == null);
     try std.testing.expectEqual(@as(u16, 3), atlas.packer.claim_count);
 }
@@ -674,9 +674,9 @@ test "RowPackedAtlas -> releasing a key reuses its hole" {
     atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit({});
 
-    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const c = atlas.claim_rect(3, VecF.new(20, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const c = atlas.claim_rect(3, VecF.new(20, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     try expectRectF(c.rect, RectF.new_xywh(80, 0, 20, 10));
@@ -686,7 +686,7 @@ test "RowPackedAtlas -> releasing a key reuses its hole" {
     try std.testing.expectEqual(@as(u16, 2), atlas.packer.claim_count);
 
     // The row tail is full, so the only fitting space is the released hole.
-    const d = atlas.claim_rect(4, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const d = atlas.claim_rect(4, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(d.rect, RectF.new_xywh(40, 0, 40, 10));
     try std.testing.expect(atlas.lookup_rect_if_exists(4).?.equals(d));
     try std.testing.expect(atlas.lookup_rect_if_exists(2) == null);
@@ -699,8 +699,8 @@ test "RowPackedAtlas -> aabb claims are keyed and released" {
     atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit({});
 
-    const a = atlas.claim_aabb(1, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
-    const b = atlas.claim_aabb(2, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = atlas.claim_aabb(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    const b = atlas.claim_aabb(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(f32, 0), a.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 40), a.aabb.x_max);
     try std.testing.expectEqual(@as(f32, 40), b.aabb.x_min);
@@ -714,7 +714,7 @@ test "RowPackedAtlas -> aabb claims are keyed and released" {
     try std.testing.expect(atlas.lookup_aabb_if_exists(2) == null);
     try std.testing.expectEqual(@as(u16, 1), atlas.packer.claim_count);
 
-    const c = atlas.claim_aabb(3, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const c = atlas.claim_aabb(3, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try std.testing.expectEqual(@as(f32, 40), c.aabb.x_min);
     try std.testing.expectEqual(@as(f32, 0), c.aabb.y_min);
     try std.testing.expectEqual(@as(f32, 80), c.aabb.x_max);
@@ -728,8 +728,8 @@ test "RowPackedAtlas -> clear_entire_atlas drops keys and resets packing" {
     atlas.init(8, 4, 4, RectF.new_xywh(10, 20, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit({});
 
-    _ = atlas.claim_rect(1, VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
-    _ = atlas.claim_rect(2, VecF.new(60, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    _ = atlas.claim_rect(1, VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
+    _ = atlas.claim_rect(2, VecF.new(60, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     const quick_lookup = atlas.hash_map.get_if_exists(1);
     try std.testing.expect(quick_lookup != null);
     try std.testing.expectEqual(@as(u16, 2), atlas.packer.claim_count);
@@ -739,7 +739,7 @@ test "RowPackedAtlas -> clear_entire_atlas drops keys and resets packing" {
     try std.testing.expect(atlas.lookup_rect_if_exists(2) == null);
     try std.testing.expectEqual(@as(u16, 0), atlas.packer.claim_count);
 
-    const a = atlas.claim_rect(3, VecF.new(10, 10), .ignore_threshold(), .ignore_waste(), .do_not_allow_rotation(), {}, {}).?;
+    const a = atlas.claim_rect(3, VecF.new(10, 10), .ignore_threshold(), .IGNORE_WASTE, .DO_NOT_ALLOW_ROTATION, {}, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(10, 20, 10, 10));
 }
 
@@ -749,13 +749,13 @@ test "RowPackedAtlas -> manual allocator variant receives the allocator" {
     atlas.init(8, 4, 4, RectF.new_xywh(0, 0, 100, 100), .threshold_val(1.0, 1000), alloc, {});
     defer atlas.uninit(alloc);
 
-    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), alloc, {}).?;
-    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), alloc, {}).?;
+    const a = atlas.claim_rect(1, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, alloc, {}).?;
+    const b = atlas.claim_rect(2, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, alloc, {}).?;
     try expectRectF(a.rect, RectF.new_xywh(0, 0, 40, 10));
     try expectRectF(b.rect, RectF.new_xywh(40, 0, 40, 10));
     try std.testing.expect(atlas.lookup_rect_if_exists(1).?.equals(a));
 
     atlas.release_rect(1, alloc);
-    const c = atlas.claim_rect(3, VecF.new(40, 10), .ignore_threshold(), .least_waste(), .do_not_allow_rotation(), alloc, {}).?;
+    const c = atlas.claim_rect(3, VecF.new(40, 10), .ignore_threshold(), .LEAST_WASTE, .DO_NOT_ALLOW_ROTATION, alloc, {}).?;
     try expectRectF(c.rect, RectF.new_xywh(0, 0, 40, 10));
 }

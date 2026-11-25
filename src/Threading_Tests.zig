@@ -78,7 +78,7 @@ fn expect_mutual_exclusion(comptime KIND: LockKind, comptime USE_ASSERTS: bool, 
     defer threaded.deinit();
 
     const io_value: KIND.io_type() = if (comptime KIND.io_type() == void) {} else threaded.io();
-    var lock = KIND.init(USE_ASSERTS);
+    var lock = KIND.init_lock(USE_ASSERTS);
     var counter: u64 = 0;
 
     var threads: [THREAD_COUNT]std.Thread = undefined;
@@ -292,7 +292,7 @@ test "Threading -> AnyLock supports every lock kind" {
             defer threaded.deinit();
             const io = threaded.io();
 
-            var any: AnyLock(USE_ASSERTS) = @unionInit(AnyLock(USE_ASSERTS), @tagName(KIND), KIND.init(USE_ASSERTS));
+            var any: AnyLock(USE_ASSERTS) = @unionInit(AnyLock(USE_ASSERTS), @tagName(KIND), KIND.init_lock(USE_ASSERTS));
             any.lock_for_read(io);
             any.unlock_for_read(io);
             any.lock_for_write(io);
@@ -305,7 +305,7 @@ test "Threading -> LockKind helper types and initialization" {
     inline for (ALL_KINDS) |KIND| {
         inline for (.{ true, false }) |USE_ASSERTS| {
             const Lock = KIND.lock_type(USE_ASSERTS);
-            var lock: Lock = KIND.init(USE_ASSERTS);
+            var lock: Lock = KIND.init_lock(USE_ASSERTS);
 
             const read_unlock_ptr: KIND.keyed_read_unlock_ptr_type(USE_ASSERTS) = undefined;
             const write_unlock_ptr: KIND.keyed_write_unlock_ptr_type(USE_ASSERTS) = undefined;

@@ -80,7 +80,7 @@ pub const LockKind = enum {
     }
     pub fn lock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => *void,
             .SPIN_LOCK => *SpinLock,
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
@@ -93,7 +93,7 @@ pub const LockKind = enum {
     }
     pub fn opt_lock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => ?*void,
             .SPIN_LOCK => ?*SpinLock,
             .RW_SPIN_LOCK => ?*RwSpinLock,
             .MUTEX => ?*Mutex,
@@ -106,7 +106,7 @@ pub const LockKind = enum {
     }
     pub fn keyed_read_unlock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => *void,
             .SPIN_LOCK => *SpinLock,
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
@@ -119,7 +119,7 @@ pub const LockKind = enum {
     }
     pub fn keyed_write_unlock_ptr_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => *void,
             .SPIN_LOCK => *SpinLock,
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
@@ -132,7 +132,7 @@ pub const LockKind = enum {
     }
     pub fn keyed_read_lock_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => *void,
             .SPIN_LOCK => *SpinLock,
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
@@ -145,7 +145,7 @@ pub const LockKind = enum {
     }
     pub fn keyed_write_lock_type(comptime self: LockKind, comptime USE_ASSERTS: bool) type {
         return switch (comptime self) {
-            .NONE => void,
+            .NONE => *void,
             .SPIN_LOCK => *SpinLock,
             .RW_SPIN_LOCK => *RwSpinLock,
             .MUTEX => *Mutex,
@@ -176,7 +176,7 @@ pub const LockKind = enum {
             },
         };
     }
-    pub fn init(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type(USE_ASSERTS) {
+    pub fn init_lock(comptime self: LockKind, comptime USE_ASSERTS: bool) self.lock_type(USE_ASSERTS) {
         return switch (comptime self) {
             .NONE => {},
             .SPIN_LOCK => SpinLock{},
@@ -191,7 +191,7 @@ pub const LockKind = enum {
     }
     pub fn null_opt_ptr(comptime self: LockKind, comptime USE_ASSERTS: bool) self.opt_lock_ptr_type(USE_ASSERTS) {
         return switch (comptime self) {
-            .NONE => {},
+            .NONE => null,
             .SPIN_LOCK => null,
             .RW_SPIN_LOCK => null,
             .MUTEX => null,

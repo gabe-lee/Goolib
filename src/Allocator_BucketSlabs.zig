@@ -968,7 +968,7 @@ pub fn GlobalBucketSlabsAlloc(comptime DEF: GlobalDef) type {
         const THREADSAFETY = DEF.THREAD_SAFETY;
         const LOCK_KIND = THREADSAFETY.get_lock_kind();
         const Lock = LOCK_KIND.lock_type(true);
-        const LockInit = LOCK_KIND.init(true);
+        const LockInit = LOCK_KIND.init_lock(true);
         const IoType = LOCK_KIND.io_type();
         const IoInit: IoType = if (NEED_IO) Root.DummyIo.io_undefined else {};
         const NEED_IO = IoType != void;
