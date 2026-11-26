@@ -58,33 +58,6 @@ pub const OptionalObjectSerialSettings = SerializeModule.OptionalObjectSerialSet
 const CacheMode = SerializeModule.DataCacheMode;
 const UseCachedLen = SerializeModule.UseCachedLen;
 
-/// Creates a struct type that can behave similar to tagged union, but has a well-defined memory layout
-/// for serialization or MMIO
-///
-/// Specifically, it is an `extern` struct with one of the following possible 2 layouts:
-///   - if the alignment of the tag type is greater than or equal to the align of the resulting bare union type:
-///     1. tag
-///     2. union
-///   - if the alignment of the tag type is less than the align of the resulting bare union type:
-///     1. union
-///     2. tag
-///
-/// `DECLS_` should be a struct type (possibly empty if no declarations are needed) that
-/// is attatched to the struct and holds only static declarations and has no fields
-///
-/// `PER_FIELD_SERIAL_SETTINGS`, if included, should be a struct type with a declaration for each tag you want to have custom settings:
-/// ```zig
-/// const MyUnion = union(enum) {
-///     tag_with_custom_serial_settings: u32,
-///     // other union fields
-/// };
-/// const PER_FIELD_SERIAL_SETTINGS = struct {
-///     pub const tag_with_custom_serial_settings = OptionalObjectSerialSettings{
-///         // Fill in your settings
-///     };
-/// };
-/// const MySerialUnion = SerialUnion(MyUnion, struct{}, PER_FIELD_SERIAL_SETTINGS);
-/// ```
 pub fn SerialSlice(comptime TYPE: type, comptime IDX: type) type {
     return extern struct {
         ptr: [*]TYPE = Utils.invalid_ptr_many(TYPE),

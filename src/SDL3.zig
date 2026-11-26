@@ -79,14 +79,6 @@ comptime {
 /// 3. This notice may not be removed or altered from any source distribution.
 ///
 /// ### SDL3 Zig Bindings license: https://github.com/castholm/SDL/blob/main/LICENSE.txt
-// pub const C = @cImport({
-//     @cDefine("SDL_DISABLE_OLD_NAMES", {});
-//     @cInclude("SDL3/SDL.h");
-//     @cInclude("SDL3/SDL_revision.h");
-//     if (CONFIG.SDL_USER_HANDLES_MAIN) @cDefine("SDL_MAIN_HANDLED", {});
-//     if (CONFIG.SDL_USER_PROVIDES_CALLBACKS) @cDefine("SDL_MAIN_USE_CALLBACKS", {});
-//     @cInclude("SDL3/SDL_main.h");
-// });
 pub const C = @import("sdl3_c");
 
 fn c_non_opaque_conversions(comptime ZIG_TYPE: type, comptime C_TYPE: type) type {
